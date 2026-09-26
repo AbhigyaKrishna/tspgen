@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ExtensionRegistry, loadModuleDefault } from "../../src/index.js";
 
@@ -25,6 +27,39 @@ describe("loadModuleDefault", () => {
 
   it("rejects modules without a default export", async () => {
     await expect(loadModuleDefault("./nodefault.mjs", dir)).rejects.toThrow(/no default export/);
+  });
+});
+
+// Vitest compiles TypeScript itself, so these run the built loader under plain Node, as `tsp compile` does.
+describe("loadModuleDefault with TypeScript under Node", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tspgen-load-ts-"));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "module" }));
+  writeFileSync(join(dir, "names.ts"), `export const NAME: string = "typed";\n`);
+  writeFileSync(
+    join(dir, "plugin.ts"),
+    `import type { TspGenPlugin } from "@abhigyakrishna/tspgen-core";\n` +
+      `import { NAME } from "./names.ts";\n` +
+      `interface Extra { note?: string }\n` +
+      `const plugin: TspGenPlugin & Extra = { name: NAME };\n` +
+      `export default plugin;\n`,
+  );
+  writeFileSync(join(dir, "enum.mts"), `enum Kind { A }\nexport default { name: String(Kind.A) };\n`);
+  const loader = pathToFileURL(fileURLToPath(new URL("../../dist/loader.js", import.meta.url))).href;
+
+  function load(specifier: string): string {
+    const script =
+      `const { loadModuleDefault } = await import(${JSON.stringify(loader)});` +
+      `try { console.log((await loadModuleDefault(${JSON.stringify(specifier)}, ${JSON.stringify(dir)})).name); }` +
+      `catch (e) { console.log("error: " + e.message); }`;
+    return execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" }).trim();
+  }
+
+  it("loads type-annotated modules, including relative .ts imports", () => {
+    expect(load("./plugin.ts")).toBe("typed");
+  });
+
+  it("explains syntax Node cannot strip", () => {
+    expect(load("./enum.mts")).toMatch(/^error: '\.\/enum\.mts' uses TypeScript syntax that Node cannot strip.*erasableSyntaxOnly/);
   });
 });
 

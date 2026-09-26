@@ -10,7 +10,7 @@ options:
         package: "com.example.graph"
     errors: thrown
     validation: true
-    plugins: ["./tspgen/permissions.js"]
+    plugins: ["./tspgen/permissions.ts"]
     targets:
       - "@abhigyakrishna/tspgen-kotlin-ktor-server":
           grouping: per-namespace

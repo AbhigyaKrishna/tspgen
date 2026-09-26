@@ -178,18 +178,21 @@ importers:
 
   e2e/house-style:
     dependencies:
+      '@abhigyakrishna/tspgen-core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@abhigyakrishna/tspgen-kotlin':
         specifier: workspace:*
         version: link:../../packages/kotlin
-      '@abhigyakrishna/tspgen-typescript':
-        specifier: workspace:*
-        version: link:../../packages/typescript
       '@abhigyakrishna/tspgen-kotlin-ktor-server':
         specifier: workspace:*
         version: link:../../packages/kotlin-ktor-server
       '@abhigyakrishna/tspgen-ts-nextjs-client':
         specifier: workspace:*
         version: link:../../packages/ts-nextjs-client
+      '@abhigyakrishna/tspgen-typescript':
+        specifier: workspace:*
+        version: link:../../packages/typescript
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.6
@@ -220,12 +223,12 @@ importers:
 
   e2e/typescript:
     dependencies:
-      '@abhigyakrishna/tspgen-typescript':
-        specifier: workspace:*
-        version: link:../../packages/typescript
       '@abhigyakrishna/tspgen-ts-nextjs-client':
         specifier: workspace:*
         version: link:../../packages/ts-nextjs-client
+      '@abhigyakrishna/tspgen-typescript':
+        specifier: workspace:*
+        version: link:../../packages/typescript
       '@tanstack/react-query':
         specifier: ^5.100.0
         version: 5.103.2(react@19.3.0)

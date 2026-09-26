@@ -4,9 +4,10 @@
   "type": "module",
   "scripts": {
     "generate": "tsp compile main.tsp",
-    "test": "pnpm generate && ./gradlew test --console=plain && tsc -p ts/tsconfig.json && vitest run --root ts"
+    "test": "pnpm generate && tsc -p tspgen/tsconfig.json && ./gradlew test --console=plain && tsc -p ts/tsconfig.json && vitest run --root ts"
   },
   "dependencies": {
+    "@abhigyakrishna/tspgen-core": "workspace:*",
     "@abhigyakrishna/tspgen-kotlin": "workspace:*",
     "@abhigyakrishna/tspgen-typescript": "workspace:*",
     "@abhigyakrishna/tspgen-kotlin-ktor-server": "workspace:*",

@@ -320,9 +320,35 @@ export default {
 
 Use it with `routing-style: company`.
 
+**TypeScript plugins.** Plugins (and custom targets) may be `.ts`, `.mts` or `.cts` files, loaded through Node's
+built-in type stripping (Node >= 22.18 or 23.6), so there is no build step. That limits them to erasable syntax: no
+`enum`, `namespace` or parameter properties, and relative imports spell out `.ts`; set `"erasableSyntaxOnly": true`
+in the plugin's tsconfig to have `tsc` enforce it. Import tspgen's types with `import type`, which is erased:
+
+```ts
+// tspgen/audit.ts
+import type { TspGenPlugin } from "@abhigyakrishna/tspgen-core";
+import type { KotlinIR } from "@abhigyakrishna/tspgen-kotlin";
+import type { KtorServerMeta } from "@abhigyakrishna/tspgen-kotlin-ktor-server";
+
+export default {
+  name: "audit",
+  languages: ["kotlin"],
+  transformIR(ir) {
+    for (const op of ir.services.flatMap((s) => s.groups).flatMap((g) => g.operations)) {
+      const server: KtorServerMeta = op.meta["kotlin:ktor-server"] ?? {};
+      op.meta = { ...op.meta, "kotlin:ktor-server": { ...server, wrap: [...(server.wrap ?? []), "audited()"] } };
+    }
+  },
+} satisfies TspGenPlugin<KotlinIR>;
+```
+
+`KtorServerMeta` types the `kotlin:ktor-server` metadata keys (`wrap`, `imports`, `context`, `authenticate`,
+`routeSet`, `annotations`).
+
 **Fitting an existing codebase.** `e2e/house-style` shows the full combination: namespace→package mapping,
 `errors: thrown`, validation, `<Feature>Api` interfaces without a generated module, and a small plugin
-(`tspgen/permissions.js`) that adds `authenticate`/`requirePermission` wrappers and an `actorId` context
+(`tspgen/permissions.ts`, type-checked with its own tsconfig) that adds `authenticate`/`requirePermission` wrappers and an `actorId` context
 parameter to every operation. Plugins that edit operation metadata in `transformIR` must replace scope objects
 rather than mutate them, because operations of one group can share them. It also has a TypeScript half (`ts/`):
 single-file layout, `errors: thrown`, and a flat client with an `error-model`, checked with `tsc` (strict flags)

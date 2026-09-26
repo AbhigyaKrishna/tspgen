@@ -59,6 +59,21 @@ function typeImports(ops: ServerOperation[]): string[] {
   ]);
 }
 
+/** The `@meta("kotlin:ktor-server", …)` keys this target reads, for plugins that write or read them. */
+export interface KtorServerMeta {
+  annotations?: string[];
+  /** Auth provider names: renders `authenticate(...)` as the outermost wrapper. */
+  authenticate?: string[];
+  /** Wrapper calls around the route, outermost first (dsl routing only). */
+  wrap?: string[];
+  /** Extra imports for the routes file. */
+  imports?: string[];
+  /** Route-set function the operation is mounted in (dsl routing only). */
+  routeSet?: string;
+  /** Service parameters supplied by a route-handler expression; `replaces` drops those request parameters. */
+  context?: { name: string; type: string; expr: string; replaces?: string[] }[];
+}
+
 export interface ServerOpExtras {
   annotations: string[];
   authenticate: string[];
