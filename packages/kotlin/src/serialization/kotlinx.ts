@@ -1,4 +1,9 @@
-import type { KtDecl } from "../transform/model.js";
+import type { KtDecl, KtEnumMember } from "../transform/model.js";
+
+/** An enum member needs `@SerialName` only when its wire value differs from its Kotlin name. */
+export function needsSerialName(member: KtEnumMember): boolean {
+  return member.serialName !== member.name.replace(/`/g, "");
+}
 
 /** Imports needed by the kotlinx.serialization annotations used in the model templates. */
 export function kotlinxImports(decl: KtDecl): string[] {
@@ -17,7 +22,10 @@ export function kotlinxImports(decl: KtDecl): string[] {
         "kotlinx.serialization.json.JsonClassDiscriminator",
       ];
     case "enum":
-      return ["kotlinx.serialization.SerialName", "kotlinx.serialization.Serializable"];
+      return [
+        ...(decl.members.some(needsSerialName) ? ["kotlinx.serialization.SerialName"] : []),
+        "kotlinx.serialization.Serializable",
+      ];
     case "typealias":
       return [];
   }

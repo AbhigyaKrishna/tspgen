@@ -1,4 +1,5 @@
 import { kotlinString } from "./kotlin-string.js";
+import { needsSerialName } from "./serialization/kotlinx.js";
 import type { KtResultVariant } from "./transform/model.js";
 
 /** Helpers exposed to templates as `it.h`. */
@@ -38,5 +39,6 @@ export const kotlinHelpers = {
     if (checks.length === 0) return "";
     return ` {\n    init {\n${checks.map((c) => `        ${c}\n`).join("")}    }\n}`;
   },
+  needsSerialName,
   str: kotlinString,
 };

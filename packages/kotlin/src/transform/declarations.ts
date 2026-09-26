@@ -8,7 +8,7 @@ import type {
   TypeRef,
   UnionIR,
 } from "@abhigyakrishna/tspgen-core";
-import { metaScopes, metaStrings, resolveMeta, type MetaScopes } from "@abhigyakrishna/tspgen-core";
+import { metaBoolean, metaScopes, metaStrings, resolveMeta, type MetaScopes } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
@@ -280,12 +280,10 @@ export class DeclarationBuilder {
       const decl = this.decls.get(id);
       if (decl?.kind !== "data-class") continue;
       decl.checks = [
-        ...(this.options.validation
-          ? decl.properties.flatMap((prop) => {
-              const p = byWireName.get(prop.wireName);
-              return p ? this.checks(p, prop) : [];
-            })
-          : []),
+        ...decl.properties.flatMap((prop) => {
+          const p = byWireName.get(prop.wireName);
+          return p ? this.checks(p, prop, `${id}.${p.name}`) : [];
+        }),
         ...metaStrings(this.program, resolveMeta(decl.meta, "kotlin"), "checks", id),
       ];
     }
@@ -331,9 +329,14 @@ export class DeclarationBuilder {
     return prop;
   }
 
-  private checks(p: PropertyIR, prop: KtProperty): string[] {
-    const c = p.constraints;
-    if (!c) return [];
+  /**
+   * `require` lines for a property: its constraint decorators when `validation` is on, and the
+   * `notBlank` meta flag (an explicit request, so emitted regardless of `validation`).
+   */
+  private checks(p: PropertyIR, prop: KtProperty, where: string): string[] {
+    const notBlank = metaBoolean(this.program, resolveMeta(prop.meta, "kotlin"), "notBlank", where) === true;
+    const c = this.options.validation ? p.constraints : undefined;
+    if (!c && !notBlank) return [];
     const name = prop.name;
     const label = p.name;
     const base = prop.type.text.replace(/\?$/, "");
@@ -342,9 +345,15 @@ export class DeclarationBuilder {
       const guarded = prop.type.nullable ? `${name} == null || ${condition}` : condition;
       out.push(`require(${guarded}) { ${kotlinString(message)} }`);
     };
+    if (notBlank && base === "String") add(`${name}.isNotBlank()`, `${label} must not be blank`);
+    if (!c) return out;
     if (base === "String") {
-      if (c.minLength === 1) add(`${name}.isNotBlank()`, `${label} must not be blank`);
-      else if (c.minLength !== undefined) add(`${name}.length >= ${c.minLength}`, `${label} must be at least ${c.minLength} characters`);
+      // isNotBlank() already rules out the empty string.
+      if (c.minLength === 1) {
+        if (!notBlank) add(`${name}.isNotEmpty()`, `${label} must not be empty`);
+      } else if (c.minLength !== undefined) {
+        add(`${name}.length >= ${c.minLength}`, `${label} must be at least ${c.minLength} characters`);
+      }
       if (c.maxLength !== undefined) add(`${name}.length <= ${c.maxLength}`, `${label} must be at most ${c.maxLength} characters`);
       if (c.pattern !== undefined) add(`Regex(${kotlinString(c.pattern)}).containsMatchIn(${name})`, `${label} must match ${c.pattern}`);
     }

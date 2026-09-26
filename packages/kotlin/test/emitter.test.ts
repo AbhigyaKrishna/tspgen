@@ -76,6 +76,25 @@ enum class Color {
 `);
   });
 
+  it("omits @SerialName on enum members whose value is their Kotlin name", async () => {
+    const { outputs } = await emitter().compile(`
+      @service namespace S;
+      enum Mode { READ, WRITE: "write" }
+      enum Plain { A, B }
+    `);
+    expect(outputs["models/com/acme/models/Mode.kt"]).toContain(`enum class Mode {
+    READ,
+    @SerialName("write")
+    WRITE,
+}`);
+    const plain = outputs["models/com/acme/models/Plain.kt"];
+    expect(plain).not.toContain("SerialName");
+    expect(plain).toContain(`enum class Plain {
+    A,
+    B,
+}`);
+  });
+
   it("emits sealed hierarchies and empty classes", async () => {
     const { outputs } = await emitter().compile(petSpec);
     expect(outputs["models/com/acme/models/Animal.kt"]).toBe(`${HEADER}

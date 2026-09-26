@@ -1,6 +1,6 @@
 <% const d = it.decl; %>
 <%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable
 enum class <%= d.name %> {
-<% for (const m of d.members) { %><%~ it.h.kdoc(m.docs, "    ") %><%~ it.h.annotations(m.annotations, "    ") %>    @SerialName(<%~ it.h.str(m.serialName) %>)
-    <%= m.name %>,
+<% for (const m of d.members) { %><%~ it.h.kdoc(m.docs, "    ") %><%~ it.h.annotations(m.annotations, "    ") %><% if (it.h.needsSerialName(m)) { %>    @SerialName(<%~ it.h.str(m.serialName) %>)
+<% } %>    <%= m.name %>,
 <% } %>}

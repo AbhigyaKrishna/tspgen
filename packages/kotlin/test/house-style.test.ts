@@ -200,7 +200,7 @@ data class Req(
     val b: String? = null,
 ) {
     init {
-        require(name.isNotBlank()) { "name must not be blank" }
+        require(name.isNotEmpty()) { "name must not be empty" }
         require(name.length <= 200) { "name must be at most 200 characters" }
         require(code == null || code.length >= 3) { "code must be at least 3 characters" }
         require(Regex("^[a-z]+\\$").containsMatchIn(slug)) { "slug must match ^[a-z]+\\$" }
@@ -212,6 +212,26 @@ data class Req(
     }
 }
 `);
+  });
+
+  it("notBlank meta renders isNotBlank(), with or without validation, and subsumes @minLength(1)", async () => {
+    const spec = `
+      using TspGen;
+      @service namespace S;
+      model Req {
+        @meta("*", #{ notBlank: true }) @minLength(1) name: string;
+        @meta("kotlin", #{ notBlank: true }) note?: string;
+      }
+    `;
+    const checks = [
+      `require(name.isNotBlank()) { "name must not be blank" }`,
+      `require(note == null || note.isNotBlank()) { "note must not be blank" }`,
+    ];
+    for (const validation of [true, false]) {
+      const req = (await emitter({ validation }).compile(spec)).outputs["models/com/acme/models/Req.kt"];
+      for (const check of checks) expect(req).toContain(check);
+      expect(req).not.toContain("isNotEmpty()");
+    }
   });
 
   it("renders @pattern as an unanchored containsMatchIn check", async () => {
