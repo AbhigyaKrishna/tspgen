@@ -18,6 +18,7 @@ export const nextClientTarget: Target<TsIR> = {
 export default nextClientTarget;
 
 export { nextjsHelpers, type Field } from "./helpers.js";
+export { planFlatFiles, type FlatErrorClass, type FlatMethod } from "./flat.js";
 export { names } from "./names.js";
 export { nextClientOptionsSchema, type NextClientOptions } from "./options.js";
 export { planNextFiles, type NextOpExtras } from "./plan.js";

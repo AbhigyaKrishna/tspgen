@@ -10,6 +10,7 @@ import {
   type TsOperation,
   type TsService,
 } from "@specgen/emitter-typescript";
+import { planFlatFiles } from "./flat.js";
 import { nextjsHelpers as h } from "./helpers.js";
 import { names } from "./names.js";
 import type { NextClientOptions } from "./options.js";
@@ -80,6 +81,7 @@ function nextExtras(ctx: TargetContext, groups: TsGroup[]): Record<string, NextO
 }
 
 export function planNextFiles(ir: TsIR, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
+  if (options["client-style"] === "flat") return planFlatFiles(ir, options, ctx);
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const groups = services.flatMap((s) => s.groups);
@@ -108,8 +110,8 @@ export function planNextFiles(ir: TsIR, options: NextClientOptions, ctx: TargetC
       { services, exports: [CORE, ...groups.map(names.groupFile)].map((f) => relativeSpecifier("client/index", f, ir.importExtension)) },
     ),
   );
-  if (options["react-query"]) files.push(...reactQueryFiles(ir, services, extras));
-  if (options["server-actions"]) files.push(...actionFiles(ir, services, options));
+  if (options["react-query"] ?? true) files.push(...reactQueryFiles(ir, services, extras));
+  if (options["server-actions"] ?? true) files.push(...actionFiles(ir, services, options));
   return files;
 }
 

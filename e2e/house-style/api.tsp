@@ -25,6 +25,13 @@ model NotFound {
   message: string;
 }
 
+model ErrorResponse {
+  status: int32;
+  code: string;
+  message: string;
+  correlationId?: string;
+}
+
 namespace Graph {
   enum NodeKind { DATABASE, QUEUE }
 

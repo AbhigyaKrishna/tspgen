@@ -181,9 +181,18 @@ importers:
       '@specgen/emitter-kotlin':
         specifier: workspace:*
         version: link:../../packages/kotlin
+      '@specgen/emitter-typescript':
+        specifier: workspace:*
+        version: link:../../packages/typescript
       '@specgen/kotlin-ktor-server':
         specifier: workspace:*
         version: link:../../packages/kotlin-ktor-server
+      '@specgen/ts-nextjs-client':
+        specifier: workspace:*
+        version: link:../../packages/ts-nextjs-client
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.6
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)

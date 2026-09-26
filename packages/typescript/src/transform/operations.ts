@@ -39,7 +39,10 @@ export class ApiBuilder {
   private readonly errorClasses = new Map<string, TsErrorClass>();
   active = false;
 
-  constructor(private readonly types: DeclarationBuilder) {}
+  constructor(
+    private readonly types: DeclarationBuilder,
+    private readonly options: { errors?: "typed" | "thrown" } = {},
+  ) {}
 
   services(api: ApiIR): TsService[] {
     this.active = api.services.some((s) => s.groups.length > 0);
@@ -97,7 +100,7 @@ export class ApiBuilder {
       meta: mergeScopes(groupScopes, metaScopes(op.decorators)),
       params,
       result: this.result(name, groupName, responses.filter((r) => !r.isError)),
-      errors: responses.filter((r) => r.isError).map((r) => this.error(r)),
+      errors: this.options.errors === "thrown" ? [] : responses.filter((r) => r.isError).map((r) => this.error(r)),
     };
     if (op.body) {
       const preferred = camel(op.body.name ?? "body");

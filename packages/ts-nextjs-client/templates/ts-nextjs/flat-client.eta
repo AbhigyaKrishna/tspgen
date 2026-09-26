@@ -1,0 +1,141 @@
+<% const e = it.error; -%>
+export interface ClientOptions {
+  baseUrl: string;
+  /** Custom fetch implementation (defaults to the global fetch). */
+  fetch?: typeof fetch;
+  /** Headers sent with every request. */
+  headers?: Record<string, string>;
+}
+
+/** Thrown for every non-2xx response. */
+export class <%= e.name %> extends Error {
+  readonly status: number;
+<% if (e.model) { -%>
+  /** The decoded error body (<%= e.model %>), when the response carried one. */
+  readonly body: <%= e.model %> | undefined;
+<% for (const f of e.fields) { -%>
+  readonly <%= f.key %>: <%= f.type %> | undefined;
+<% } -%>
+<% } else { -%>
+  /** The decoded response body, if any. */
+  readonly body: unknown;
+<% } -%>
+
+  constructor(status: number, body: <%= e.model ? e.model + " | undefined" : "unknown" %>) {
+    super(<%~ e.message %>);
+    this.name = <%~ it.h.str(e.name) %>;
+    this.status = status;
+    this.body = body;
+<% for (const f of e.fields) { -%>
+    this.<%= f.key %> = body?.<%= f.key %>;
+<% } -%>
+  }
+
+  get isUnauthorized(): boolean {
+    return this.status === 401;
+  }
+
+  get isForbidden(): boolean {
+    return this.status === 403;
+  }
+
+  get isNotFound(): boolean {
+    return this.status === 404;
+  }
+
+  get isConflict(): boolean {
+    return this.status === 409;
+  }
+}
+<% for (const c of it.clients) { -%>
+
+export class <%= c.name %> {
+  private readonly baseUrl: string;
+  private readonly doFetch: typeof fetch;
+  private readonly headers: Record<string, string>;
+
+  constructor(options: ClientOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.headers = options.headers ?? {};
+  }
+<% for (const g of c.groups) { -%>
+
+<%~ it.h.banner(g.title, "  ") %>
+<% for (const m of g.methods) { -%>
+
+<%~ it.h.jsdoc(m.docs, "  ", m.deprecated) %>  <% if (m.void) { %>async <% } %><%= m.name %>(<%~ m.params %>): Promise<<%~ m.returnType %>> {
+<% if (m.void) { -%>
+    await this.request(<%~ m.args %>);
+<% } else { -%>
+    return this.send(<%~ m.args %>);
+<% } -%>
+  }
+<% } -%>
+<% } -%>
+<% if (c.usesSend) { -%>
+
+  private async send<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const response = await this.request(method, path, body);
+    const text = await response.text();
+    // An empty body (204 and the like) decodes to undefined.
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+<% } -%>
+
+  private async request(method: string, path: string, body?: unknown): Promise<Response> {
+    const response = await this.doFetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: {
+        ...this.headers,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    if (!response.ok) throw await toError(response);
+    return response;
+  }
+}
+<% } -%>
+
+async function toError(response: Response): Promise<<%= e.name %>> {
+  const body: unknown = await response.json().catch(() => undefined);
+<% if (e.model) { -%>
+  return new <%= e.name %>(response.status, isErrorBody(body) ? body : undefined);
+}
+
+function isErrorBody(value: unknown): value is <%= e.model %> {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return [<%~ e.required.map((k) => it.h.str(k)).join(", ") %>].every((key) => record[key] !== undefined);
+}
+<% } else { -%>
+  return new <%= e.name %>(response.status, body);
+}
+<% } -%>
+<% if (it.usesQuery && it.usesArrays) { -%>
+
+/** Arrays are comma-joined into one value unless their key is listed in `explode` (then the key repeats). */
+function toQuery(params: Record<string, unknown>, explode: readonly string[] = []): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    if (!Array.isArray(value)) search.append(key, String(value));
+    else if (explode.includes(key)) for (const item of value) search.append(key, String(item));
+    else search.append(key, value.map(String).join(","));
+  }
+  const rendered = search.toString();
+  return rendered ? `?${rendered}` : "";
+}
+<% } else if (it.usesQuery) { -%>
+
+function toQuery(params: Record<string, unknown>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    for (const item of Array.isArray(value) ? value : [value]) search.append(key, String(item));
+  }
+  const rendered = search.toString();
+  return rendered ? `?${rendered}` : "";
+}
+<% } -%>

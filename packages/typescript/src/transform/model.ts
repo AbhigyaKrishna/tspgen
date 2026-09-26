@@ -12,8 +12,10 @@ export interface TsTypeUse {
 interface TsDeclBase {
   id: string;
   name: string;
-  /** Output-relative path without extension, e.g. "models/Pet". */
+  /** Output-relative path without extension: "models/Pet" (per-type layout) or "types" (single-file layout). */
   file: string;
+  /** TypeSpec namespace of the source type ([] for anonymous types). */
+  namespace: string[];
   docs?: string;
   deprecated?: string;
   meta: MetaScopes;
@@ -56,6 +58,8 @@ export interface TsEnumMember {
 export interface TsEnum extends TsDeclBase {
   kind: "enum";
   members: TsEnumMember[];
+  /** Name of an exported const tuple of the values (`@meta("typescript", #{ values })`). */
+  values?: string;
 }
 
 export type TsDecl = TsInterface | TsAlias | TsEnum;
@@ -156,5 +160,7 @@ export interface TsIR {
   zod: boolean;
   /** "" or ".js" — suffix for relative imports. */
   importExtension: string;
+  /** "per-type": models/<Name>.ts; "single-file": every model in types.ts. */
+  layout: "per-type" | "single-file";
   api: ApiIR;
 }

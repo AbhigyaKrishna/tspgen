@@ -1,0 +1,15 @@
+<% it.sections.forEach((s, i) => { -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+<% if (s.title) { -%>
+<%~ it.h.banner(s.title) %>
+
+<% } -%>
+<% s.decls.forEach((d, j) => { -%>
+<% if (j > 0) { -%>
+
+<% } -%>
+<%~ include(`ts/model/${d.kind}`, { decl: d, zod: it.zod, h: it.h }).trimEnd() %>
+<% }) -%>
+<% }) -%>

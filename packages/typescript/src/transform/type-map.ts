@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import type { TsTypeUse } from "./model.js";
 
 const INT = "z.number().int()";
@@ -48,10 +49,18 @@ export function literalUse(value: string | number | boolean): TsTypeUse {
   return simple(literal, `z.literal(${literal})`);
 }
 
-export function externalUse(name: string, module?: string): TsTypeUse {
+/**
+ * `fromRoot`: a module starting with "." is relative to the output root (rebased per generated file), not
+ * copied verbatim — used for `@TS.type`'s module argument. Other callers (e.g. `@meta` `supertypes.from`) keep
+ * the module as an opaque, unrebased specifier.
+ */
+export function externalUse(name: string, module?: string, fromRoot = false): TsTypeUse {
+  const relative = fromRoot && (module?.startsWith(".") ?? false);
   return {
     text: name,
-    imports: module ? [{ name, from: module, typeOnly: true, external: true }] : [],
+    imports: module
+      ? [{ name, from: relative ? posix.normalize(module) : module, typeOnly: true, external: !relative }]
+      : [],
     schema: `z.custom<${name}>()`,
     schemaImports: [],
   };
@@ -95,6 +104,17 @@ export interface ObjectField {
   key: string;
   type: TsTypeUse;
   optional: boolean;
+}
+
+/** `Page` + [`Pet`] → `Page<Pet>` with the imports of both; validated as an opaque custom type. */
+export function genericOf(base: TsTypeUse, args: readonly TsTypeUse[]): TsTypeUse {
+  const text = `${base.text}<${args.map((a) => a.text).join(", ")}>`;
+  return {
+    text,
+    imports: [...base.imports, ...args.flatMap((a) => a.imports)],
+    schema: `z.custom<${text}>()`,
+    schemaImports: [],
+  };
 }
 
 export function objectUse(fields: ObjectField[]): TsTypeUse {

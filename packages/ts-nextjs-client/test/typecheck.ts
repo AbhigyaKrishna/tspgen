@@ -8,7 +8,7 @@ const TSC = resolve(import.meta.dirname, "../../../node_modules/.bin/tsc");
  * Writes generated .ts files into a temp dir inside this package (so zod/react/@tanstack resolve
  * from its node_modules), runs `tsc --strict`, removes the dir and returns tsc's output ("" = ok).
  */
-export function typecheck(outputs: Record<string, string>): string {
+export function typecheck(outputs: Record<string, string>, extra: Record<string, unknown> = {}): string {
   const dir = mkdtempSync(join(resolve(import.meta.dirname, ".."), ".tmp-tsc-"));
   try {
     for (const [path, content] of Object.entries(outputs)) {
@@ -29,6 +29,7 @@ export function typecheck(outputs: Record<string, string>): string {
           verbatimModuleSyntax: true,
           skipLibCheck: true,
           types: [],
+          ...extra,
         },
         include: ["**/*.ts"],
       }),

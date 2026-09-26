@@ -1,4 +1,5 @@
 import "@specgen/emitter-kotlin";
+import "@specgen/emitter-typescript";
 import "./api.tsp";
 
 using Specgen;
@@ -12,3 +13,6 @@ using Specgen;
 });
 
 @@meta(Shop.Graph.Probe, "kotlin:ktor-server", #{ routeSet: "unmanaged" });
+
+@@TS.type(Shop.Page, "Page", "../page");
+@@meta(Shop.Graph.NodeKind, "typescript", #{ values: "NODE_KINDS" });

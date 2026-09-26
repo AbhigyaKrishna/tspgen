@@ -27,25 +27,56 @@ function barrel(file: string, members: string[], ext: string): FileSpec {
   };
 }
 
-/** Built-in target: models/ (one file per declaration + barrel) and api/ (errors, results, barrel). */
+/** Declarations grouped by namespace, in first-appearance order. */
+function sections(decls: TsDecl[]): { title: string; decls: TsDecl[] }[] {
+  const byNamespace = new Map<string, TsDecl[]>();
+  for (const decl of decls) {
+    const key = decl.namespace.join(".");
+    byNamespace.set(key, [...(byNamespace.get(key) ?? []), decl]);
+  }
+  return [...byNamespace].map(([title, members]) => ({ title, decls: members }));
+}
+
+/**
+ * Built-in target: models/ (one file per declaration + barrel) or types.ts (single-file layout), and api/
+ * (errors, results, barrel).
+ */
 export const tsModelsTarget: Target<TsIR> = {
   name: "typescript-models",
   kind: "models",
   language: "typescript",
   files: (ir) => {
     const ext = ir.importExtension;
-    const files: FileSpec[] = ir.declarations.map((decl) => ({
-      path: `${decl.file}.ts`,
-      template: "ts/file",
-      data: {
-        imports: renderImports(decl.file, declImports(decl, ir.zod), ext),
-        body: `ts/model/${decl.kind}`,
-        decl,
-        zod: ir.zod,
-      },
-    }));
-    if (ir.declarations.length > 0) {
-      files.push(barrel("models/index", ir.declarations.map((d) => d.file), ext));
+    const files: FileSpec[] = [];
+    if (ir.layout === "single-file") {
+      if (ir.declarations.length > 0) {
+        files.push({
+          path: "types.ts",
+          template: "ts/file",
+          data: {
+            imports: renderImports("types", ir.declarations.flatMap((d) => declImports(d, ir.zod)), ext),
+            body: "ts/types",
+            sections: sections(ir.declarations),
+            zod: ir.zod,
+          },
+        });
+      }
+    } else {
+      for (const decl of ir.declarations) {
+        files.push({
+          path: `${decl.file}.ts`,
+          template: "ts/file",
+          data: {
+            imports: renderImports(decl.file, declImports(decl, ir.zod), ext),
+            body: `ts/model/${decl.kind}`,
+            decl,
+            zod: ir.zod,
+          },
+        });
+      }
+      if (ir.declarations.length > 0) {
+        files.push(barrel("models/index", ir.declarations.map((d) => d.file), ext));
+      }
     }
     if (!ir.apiActive) return files;
     files.push({

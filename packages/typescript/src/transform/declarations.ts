@@ -4,6 +4,7 @@ import {
   metaObjects,
   metaScopes,
   metaStrings,
+  reportDiagnostic as reportCoreDiagnostic,
   resolveMeta,
   type MetaData,
   type ApiIR,
@@ -23,6 +24,7 @@ import {
   arrayOf,
   declUse,
   externalUse,
+  genericOf,
   literalUse,
   nullable,
   objectUse,
@@ -33,22 +35,80 @@ import {
   UNKNOWN,
 } from "./type-map.js";
 
+const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+/** JS/TS reserved words: invalid as a `values` meta identifier even though they match IDENTIFIER. */
+const RESERVED_WORDS = new Set([
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "import",
+  "in",
+  "instanceof",
+  "new",
+  "null",
+  "return",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "yield",
+  "let",
+  "static",
+  "implements",
+  "interface",
+  "package",
+  "private",
+  "protected",
+  "public",
+  "await",
+]);
+
 /** `@TS.type(name, module?)` override, if applied. */
 export function typeOverride(decorators: DecoratorData | undefined): TsTypeUse | undefined {
   const args = decorators?.["TS.type"]?.at(-1);
   if (!args || typeof args[0] !== "string") return undefined;
-  return externalUse(args[0], typeof args[1] === "string" ? args[1] : undefined);
+  return externalUse(args[0], typeof args[1] === "string" ? args[1] : undefined, true);
+}
+
+export interface DeclarationOptions {
+  layout?: "per-type" | "single-file";
 }
 
 /** Builds TS declarations for every IR type and resolves TypeRefs to TS type uses. */
 export class DeclarationBuilder {
   private readonly decls = new Map<string, TsDecl>();
   private readonly mapped = new Map<string, TsTypeUse>();
+  /** Template instances mapped with @TS.type: rendered as `<name><args>`. */
+  private readonly generic = new Map<string, { base: TsTypeUse; args: TypeRef[] }>();
   private readonly types: Map<string, TypeIR>;
 
   constructor(
     private readonly program: Program,
     private readonly api: ApiIR,
+    private readonly options: DeclarationOptions = {},
   ) {
     this.types = new Map(api.types.map((t) => [t.id, t]));
   }
@@ -56,9 +116,11 @@ export class DeclarationBuilder {
   build(): TsDecl[] {
     for (const t of this.api.types) {
       const override = typeOverride(t.decorators);
-      if (override) this.mapped.set(t.id, override);
+      if (!override) continue;
+      if (t.kind === "model" && t.templateArgs?.length) this.generic.set(t.id, { base: override, args: t.templateArgs });
+      else this.mapped.set(t.id, override);
     }
-    const own = this.api.types.filter((t) => !this.mapped.has(t.id));
+    const own = this.api.types.filter((t) => !this.mapped.has(t.id) && !this.generic.has(t.id));
     for (const t of own) this.decls.set(t.id, this.shell(t));
     for (const t of own) if (t.kind === "enum") this.fillEnum(t);
     for (const t of own) if (t.kind === "model") this.fillModel(t);
@@ -76,6 +138,8 @@ export class DeclarationBuilder {
       case "named": {
         const mapped = this.mapped.get(ref.id);
         if (mapped) return mapped;
+        const generic = this.generic.get(ref.id);
+        if (generic) return genericOf(generic.base, generic.args.map((arg) => this.typeUse(arg)));
         const decl = this.decls.get(ref.id);
         return decl ? declUse(decl.name, decl.file) : UNKNOWN;
       }
@@ -101,14 +165,25 @@ export class DeclarationBuilder {
     const base = {
       id: t.id,
       name,
-      file: `models/${name}`,
+      file: this.options.layout === "single-file" ? "types" : `models/${name}`,
+      namespace: t.namespace,
       ...(t.docs ? { docs: t.docs } : {}),
       ...(t.deprecated ? { deprecated: t.deprecated } : {}),
       meta: scopes,
       jsdoc: metaStrings(this.program, meta, "jsdoc", t.id),
     };
     if (t.kind === "enum" || (t.kind === "union" && this.isStringLiteralUnion(t))) {
-      return { ...base, kind: "enum", members: [] };
+      const [values] = metaStrings(this.program, meta, "values", t.id);
+      const validValues =
+        values && IDENTIFIER.test(values) && values !== name && !RESERVED_WORDS.has(values) ? values : undefined;
+      if (values && !validValues) {
+        reportCoreDiagnostic(this.program, {
+          code: "invalid-meta",
+          format: { key: "values", where: t.id, expected: "an identifier different from the enum name or a reserved word" },
+          target: NoTarget,
+        });
+      }
+      return { ...base, kind: "enum", members: [], ...(validValues ? { values: validValues } : {}) };
     }
     if (t.kind === "model" && !(t.discriminator && Object.keys(t.discriminator.mapping).length > 0)) {
       return { ...base, kind: "interface", properties: [], extends: this.extendsOf(meta, t.id) };

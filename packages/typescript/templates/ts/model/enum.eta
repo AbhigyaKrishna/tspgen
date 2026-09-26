@@ -1,5 +1,5 @@
 <% const d = it.decl; const strings = d.members.every((m) => typeof m.value === "string"); -%>
-<%~ it.h.jsdoc(d.docs, "", d.deprecated, undefined, d.jsdoc) %>export type <%= d.name %> = <%= d.members.map((m) => it.h.literal(m.value)).join(" | ") %>;
+<%~ it.h.jsdoc(d.docs, "", d.deprecated, undefined, d.jsdoc) %><%~ it.h.enumType(d) %>
 
 export const <%= d.name %> = {
 <% for (const m of d.members) { -%>

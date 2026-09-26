@@ -94,15 +94,21 @@ options:
   "@specgen/emitter-typescript":
     zod: true                         # emit PetSchema: z.ZodType<Pet> next to each type (default false)
     import-extension: none            # none (Next.js/bundlers) | .js (Node ESM)
+    layout: per-type                  # per-type (models/<Name>.ts + barrel) | single-file (types.ts, namespace banners)
+    errors: typed                     # typed | thrown (no <Body>Error classes; success unions unchanged; api/errors.ts keeps HttpError)
     targets:
       - "@specgen/ts-nextjs-client":
-          react-query: true           # keys, queryOptions and hooks (default true)
-          server-actions: true        # "use server" actions for non-GET operations (default true)
+          client-style: grouped       # grouped (client/…, hooks, actions) | flat (client.ts: one <Service>Client class)
+          react-query: true           # grouped only; no schema default — unset behaves as true (flat: error if set true)
+          server-actions: true        # grouped only; no schema default — unset behaves as true (flat: error if set true)
           base-url-env: API_BASE_URL  # env var read by the actions' server-side client
+          error-class: ApiError       # flat: error class name
+          error-model: ErrorResponse  # flat: model whose fields the error class exposes (optional)
 ```
 
 Output: `models/` (one file per type + `index.ts`), `api/` (`HttpError` + typed `<Body>Error` classes,
-multi-status result unions), and `client/`:
+multi-status result unions), and `client/`. With `layout: single-file`, models go to a single `types.ts`
+instead of `models/`.
 
 ```
 client/core.ts                   ClientConfig, RequestOptions, request/parse/toError runtime
@@ -137,6 +143,44 @@ responses are validated (`validate: false` in `ClientConfig` turns it off) and S
 checked first (`{ ok: false, status: 400, error: { issues } }`). Property names match the JSON wire
 names; dates are ISO strings.
 
+**Flat client** (`client-style: flat`) — one class per service, for projects that want a thin typed `fetch`
+wrapper instead of the grouped client/hooks/actions tree:
+
+```
+types.ts / models/…   models (per layout)
+client.ts             ClientOptions, <error-class>, <Service>Client (one method per operation)
+index.ts              export * from ./types (or ./models/index) and ./client
+```
+
+```ts
+const api = new ShopClient({ baseUrl: "/api", headers: { authorization: token } });
+const page = await api.listNodes({ kind: "DATABASE", limit: 10 });   // path params, then body, then a query object
+try { await api.readNode(id); } catch (e) { if (e instanceof ApiError && e.isNotFound) … }
+```
+
+Methods are named after operations (names must be unique across the service) and take path parameters
+positionally, then the body, then a query object (named `query`, or `queryParams`/`params` if that name is
+already taken); array query values are comma-joined into one value unless the param has `explode: true`, in
+which case the key repeats. Void operations don't read the response body; others decode an empty body as
+`undefined`. `<error-class>` exposes `status`, `body` (the `error-model`, decoded only when the JSON error body
+has all of that model's required fields, else `undefined`; without `error-model` it's the raw decoded body),
+the model's other identifier-named fields (nullable types kept as-is), and
+`isUnauthorized`/`isForbidden`/`isNotFound`/`isConflict`.
+
+The flat client does not validate responses with zod, even with `zod: true` on the `@specgen/emitter-typescript`
+options — that option only adds `<Type>Schema` exports alongside the models. It also ignores `errors: typed`
+for its own error handling: `<error-class>` is always the flat client's single thrown error type, so the
+`api/` `<Body>Error` classes are still generated but go unused; set `errors: thrown` to skip generating them.
+
+React Query hooks and Server Actions have no schema default: unset, the grouped client treats them as on; under
+`client-style: flat` setting either to `true` is an error (`unsupported-in-flat-style`). The flat style also
+rejects, per operation, several success responses or response headers, header/cookie parameters, non-JSON
+bodies or responses, optional path parameters, and operation names that clash with client members
+(`flat-client-unsupported`); rejects duplicate operation names (`duplicate-operation-name`); rejects an
+`error-model` that isn't a generated model (`unknown-error-model`); and rejects a generated type named like
+the error class, `ClientOptions`, or `<Service>Client` (`flat-client-name-clash`, since `index.ts` re-exports
+both) — rename it with `@TS.name`.
+
 ## Decorators
 
 ```tsp
@@ -157,7 +201,15 @@ model Money { amount: string }
 (`@@Kotlin.type(Shop.isoInstant, "com.acme.core.IsoInstant")`). Mapped types are never generated.
 
 TypeScript: `@TS.name("Customer")` renames a generated type; `@TS.type("Decimal", "decimal.js")` maps a
-model, scalar, enum, union or property to an external type (module optional, e.g. `@TS.type("Date")`).
+model, scalar, enum, union or property to an external type (module optional, e.g. `@TS.type("Date")`). A
+module starting with `.` is resolved from the emitter's output root and rebased into a relative import for
+each generated file; any other module (a package name) is used verbatim. `@TS.type` on a templated model maps
+every instance with its arguments (`@@TS.type(Shop.Page, "Page", "../page")` → `Page<Node>`, imported from
+`../page` relative to the output root); mapped types are never generated.
+
+> **Behaviour change**: relative `@TS.type` modules (starting with `.`) are now resolved from the emitter's
+> output root and rebased per file. Previously they were used verbatim, i.e. relative to each importing file,
+> which broke for any file not at the output root (e.g. `models/<Name>.ts` or `api/*.ts`).
 
 ## Language-specific metadata
 
@@ -205,6 +257,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `typescript` | `readonly: boolean` | models, properties | `readonly` properties |
 | `typescript` | `supertypes: { name, from? }[]` | models | `interface X extends A` (zod schema cast; inherited members not validated) |
 | `typescript` | `jsdoc: string[]` | declarations, properties | extra JSDoc lines |
+| `typescript` | `values: string` | enums, string-literal unions | an identifier different from the type's own name → `export const <values> = [...] as const; export type X = (typeof <values>)[number]`; otherwise ignored with an `invalid-meta` warning |
 | `typescript:ts-nextjs-client` | `next: { revalidate?, tags? }` | operations, groups | default Next.js fetch options |
 | `typescript:ts-nextjs-client` | `staleTime: number` | GET operations, groups | default `staleTime` in `queryOptions` |
 
@@ -271,7 +324,9 @@ Use it with `routing-style: company`.
 `errors: thrown`, validation, `<Feature>Api` interfaces without a generated module, and a small plugin
 (`specgen/permissions.js`) that adds `authenticate`/`requirePermission` wrappers and an `actorId` context
 parameter to every operation. Plugins that edit operation metadata in `transformIR` must replace scope objects
-rather than mutate them, because operations of one group can share them.
+rather than mutate them, because operations of one group can share them. It also has a TypeScript half (`ts/`):
+single-file layout, `errors: thrown`, and a flat client with an `error-model`, checked with `tsc` (strict flags)
+and vitest.
 
 ## Adding a language or library
 

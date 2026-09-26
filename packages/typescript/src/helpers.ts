@@ -1,4 +1,4 @@
-import type { TsResultVariant } from "./transform/model.js";
+import type { TsEnum, TsResultVariant } from "./transform/model.js";
 
 /** Helpers exposed to templates as `it.h`. */
 export const tsHelpers = {
@@ -18,6 +18,18 @@ export const tsHelpers = {
   },
   str(value: string): string {
     return JSON.stringify(value);
+  },
+  /** `// ── Title ───…` padded to 80 columns (including `indent`). */
+  banner(title: string, indent = ""): string {
+    const head = `${indent}// ── ${title} `;
+    return head + "─".repeat(Math.max(3, 80 - head.length));
+  },
+  /** The enum's type declaration: a literal union, or a const tuple plus derived type when `values` is set. */
+  enumType(d: TsEnum): string {
+    const literals = d.members.map((m) => (typeof m.value === "string" ? JSON.stringify(m.value) : String(m.value)));
+    return d.values
+      ? `export const ${d.values} = [${literals.join(", ")}] as const;\n\nexport type ${d.name} = (typeof ${d.values})[number];`
+      : `export type ${d.name} = ${literals.join(" | ")};`;
   },
   /** `{ status: 201; body: Pet; headers: { location: string } }` */
   resultVariant(v: TsResultVariant): string {
