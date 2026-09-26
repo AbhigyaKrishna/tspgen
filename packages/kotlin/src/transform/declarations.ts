@@ -16,12 +16,22 @@ import { camel, identifier, typeName, upperSnake } from "../naming.js";
 import { decoratorArg, decoratorArgs } from "./decorators.js";
 import type { KtDataClass, KtDecl, KtEnumMember, KtProperty, KtTypeUse } from "./model.js";
 import { mappedPackage } from "./packages.js";
-import { fqnTypeUse, genericOf, JSON_ELEMENT, listOf, mapOf, nullable, scalarTypeUse } from "./type-map.js";
+import {
+  fqnTypeUse,
+  genericOf,
+  JSON_ELEMENT,
+  listOf,
+  mapOf,
+  nullable,
+  scalarTypeUse,
+  type DateTimeMapping,
+} from "./type-map.js";
 
 type UnionShape = "enum" | "string-alias" | "sealed-interface" | "json";
 
 export interface DeclarationOptions {
   modelsPackage: string;
+  dateTime?: DateTimeMapping;
   enumMemberNaming: EnumMemberNaming;
   packages?: Record<string, string>;
   validation?: boolean;
@@ -95,7 +105,7 @@ export class DeclarationBuilder {
         return mapOf(this.typeUse(ref.of));
       case "scalar": {
         const fqn = decoratorArg(ref.custom?.decorators, "Kotlin.type");
-        return fqn ? fqnTypeUse(fqn) : scalarTypeUse(ref.name);
+        return fqn ? fqnTypeUse(fqn) : scalarTypeUse(ref.name, this.options.dateTime);
       }
       case "literal":
         return scalarTypeUse(

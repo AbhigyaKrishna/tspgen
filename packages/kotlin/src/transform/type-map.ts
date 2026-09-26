@@ -29,14 +29,37 @@ const SCALARS: Record<string, [string, string?]> = {
   duration: ["Duration", "kotlin.time.Duration"],
 };
 
+/** `date-time: java.time` overrides of SCALARS. */
+const JAVA_TIME: Record<string, [string, string]> = {
+  utcDateTime: ["Instant", "java.time.Instant"],
+  offsetDateTime: ["OffsetDateTime", "java.time.OffsetDateTime"],
+  plainDate: ["LocalDate", "java.time.LocalDate"],
+  plainTime: ["LocalTime", "java.time.LocalTime"],
+  duration: ["Duration", "java.time.Duration"],
+};
+
+export type DateTimeMapping = "java.time" | "kotlin.time";
+
+/** java.time classes the models serialize as ISO-8601 strings, each with a generated `<Name>Serializer`. */
+export const JAVA_TIME_CLASSES: readonly string[] = Object.values(JAVA_TIME).map(([, fqn]) => fqn);
+
+/**
+ * `java.time` types have no kotlinx serializer, so request parameters and headers of those types are
+ * parsed with `X.parse(...)` and written with `toString()` (both ISO-8601). Undefined for other types.
+ */
+export function javaTimeCodec(typeText: string, imports: readonly string[]): { parse: string; encode: string } | undefined {
+  if (!imports.includes(`java.time.${typeText}`) || !JAVA_TIME_CLASSES.includes(`java.time.${typeText}`)) return undefined;
+  return { parse: `${typeText}.parse(it)`, encode: "toString()" };
+}
+
 export const JSON_ELEMENT: KtTypeUse = {
   text: "JsonElement",
   imports: ["kotlinx.serialization.json.JsonElement"],
   nullable: false,
 };
 
-export function scalarTypeUse(name: string): KtTypeUse {
-  const [text, fqn] = SCALARS[name] ?? ["String"];
+export function scalarTypeUse(name: string, dateTime: DateTimeMapping = "kotlin.time"): KtTypeUse {
+  const [text, fqn] = (dateTime === "java.time" ? JAVA_TIME[name] : undefined) ?? SCALARS[name] ?? ["String"];
   return { text, imports: fqn ? [fqn] : [], nullable: false };
 }
 

@@ -1,0 +1,10 @@
+<% it.classes.forEach((c, i) => { %><% if (i > 0) { %>
+
+<% } %>/** Writes `<%= c.name %>` as its ISO-8601 string (`toString()` / `<%= c.name %>.parse`). */
+object <%= c.name %>Serializer : KSerializer<<%= c.name %>> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(<%~ it.h.str(c.fqn) %>, PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: <%= c.name %>) = encoder.encodeString(value.toString())
+
+    override fun deserialize(decoder: Decoder): <%= c.name %> = <%= c.name %>.parse(decoder.decodeString())
+}<% }) %>

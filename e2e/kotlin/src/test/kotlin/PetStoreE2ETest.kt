@@ -28,16 +28,17 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import kotlin.time.Instant
+import java.time.Instant
 
 class InMemoryPets : PetsService {
     private val pets = linkedMapOf<Long, Pet>()
 
-    override suspend fun list(limit: Int?, tags: List<String>?, species: Species?): List<Pet> {
+    override suspend fun list(limit: Int?, tags: List<String>?, species: Species?, bornAfter: Instant?): List<Pet> {
         if (limit != null && limit < 0) throw ApiErrorException(ApiError("bad_limit", "limit must be >= 0"), 400)
         return pets.values
             .filter { pet -> tags == null || pet.tags.orEmpty().any(tags::contains) }
             .filter { pet -> species == null || pet.species == species }
+            .filter { pet -> bornAfter == null || pet.bornAt?.isAfter(bornAfter) == true }
             .take(limit ?: Int.MAX_VALUE)
     }
 
@@ -99,6 +100,8 @@ class PetStoreE2ETest {
         assertEquals(rex, api.pets.get(1, trace = "abc"))
         assertEquals(listOf(rex), api.pets.list(limit = 10, tags = listOf("good"), species = Species.DOG))
         assertEquals(emptyList(), api.pets.list(species = Species.BIRD))
+        assertEquals(listOf(rex), api.pets.list(bornAfter = Instant.parse("2019-06-01T12:30:00Z")))
+        assertEquals(emptyList(), api.pets.list(bornAfter = Instant.parse("2021-01-01T00:00:00Z")))
 
         val missing = assertFailsWith<NotFoundException> { api.pets.get(99) }
         assertEquals(404, missing.status)

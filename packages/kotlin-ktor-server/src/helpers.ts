@@ -1,5 +1,6 @@
 import {
   camel,
+  javaTimeCodec,
   kotlinString as str,
   typeName,
   type KtBody,
@@ -43,19 +44,23 @@ const CONVERTERS: Record<string, string> = {
 
 const SOURCES = { path: "pathParam", query: "queryParam", header: "headerParam", cookie: "cookieParam" } as const;
 
-function converter(typeText: string): string | undefined {
+/** `imports` of the parameter's type pick java.time codecs (see `javaTimeCodec`). */
+function converter(typeText: string, imports: readonly string[]): string | undefined {
   if (typeText === "String") return undefined;
+  const time = javaTimeCodec(typeText, imports);
+  if (time) return `{ ${time.parse} }`;
   return CONVERTERS[typeText] ?? `{ decodeParam<${typeText}>(it) }`;
 }
 
-function convert(expr: string, wire: string, typeText: string, safe: boolean): string {
-  const conv = converter(typeText);
+function convert(expr: string, wire: string, typeText: string, imports: readonly string[], safe: boolean): string {
+  const conv = converter(typeText, imports);
   return conv ? `${expr}${safe ? "?" : ""}.convertParam(${wire}) ${conv}` : expr;
 }
 
 /** Kotlin expression turning a value into its wire string (kotlinx encoding for non-primitives). */
-function encode(expr: string, typeText: string): string {
+function encode(expr: string, typeText: string, imports: readonly string[]): string {
   if (typeText === "String") return expr;
+  if (javaTimeCodec(typeText, imports)) return `${expr}.toString()`;
   return CONVERTERS[typeText] ? `${expr}.toString()` : `encodeParam(${expr})`;
 }
 
@@ -99,9 +104,10 @@ export const ktorServerHelpers = {
     const wire = str(p.wireName);
     const typeText = p.type.text.replace(/\?$/, "");
     const source = `call.${SOURCES[p.location]}(${wire})`;
+    const imports = p.type.imports;
     const item = /^List<(.+)>$/.exec(typeText)?.[1];
     if (item) {
-      const mapped = converter(item) ? `.map { ${convert("it", wire, item, false)} }` : "";
+      const mapped = converter(item, imports) ? `.map { ${convert("it", wire, item, imports, false)} }` : "";
       if (p.location === "query" && p.explode) {
         const values = `call.queryParams(${wire})`;
         return p.optional ? `${values}.takeIf { it.isNotEmpty() }${mapped ? `?${mapped}` : ""}` : `${values}${mapped}`;
@@ -109,10 +115,10 @@ export const ktorServerHelpers = {
       const values = `${source}?.split(",")${mapped ? `?${mapped}` : ""}`;
       return p.optional ? values : `(${values}).required(${wire})`;
     }
-    if (p.location === "path") return convert(source, wire, typeText, false);
+    if (p.location === "path") return convert(source, wire, typeText, imports, false);
     return p.optional
-      ? convert(source, wire, typeText, true)
-      : convert(`${source}.required(${wire})`, wire, typeText, false);
+      ? convert(source, wire, typeText, imports, true)
+      : convert(`${source}.required(${wire})`, wire, typeText, imports, false);
   },
 
   bodyExpr(body: KtBody): string {
@@ -152,8 +158,8 @@ export const ktorServerHelpers = {
     const wire = str(h.wireName);
     const typeText = h.type.text.replace(/\?$/, "");
     return h.optional
-      ? `result.${h.name}?.let { call.response.header(${wire}, ${encode("it", typeText)}) }`
-      : `call.response.header(${wire}, ${encode(`result.${h.name}`, typeText)})`;
+      ? `result.${h.name}?.let { call.response.header(${wire}, ${encode("it", typeText, h.type.imports)}) }`
+      : `call.response.header(${wire}, ${encode(`result.${h.name}`, typeText, h.type.imports)})`;
   },
 
   resourceName(op: KtOperation): string {

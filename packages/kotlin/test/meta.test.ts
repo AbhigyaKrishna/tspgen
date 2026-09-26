@@ -39,7 +39,7 @@ data class Pet(
   });
 
   it("qualifies property types whose simple name clashes with another import", async () => {
-    const { outputs } = await emitter().compile(`
+    const { outputs } = await emitter({ "date-time": "kotlin.time" }).compile(`
       @service namespace S;
       model Event { at: utcDateTime; @Kotlin.type("java.time.Instant") legacyAt: string; }
     `);

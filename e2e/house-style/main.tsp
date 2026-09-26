@@ -16,3 +16,6 @@ using TspGen;
 
 @@TS.type(Shop.Page, "Page", "../page");
 @@meta(Shop.Graph.NodeKind, "typescript", #{ values: "NODE_KINDS" });
+
+// @minLength(1) only rules out ""; the server also rejects whitespace-only names.
+@@meta(Shop.Graph.CreateNodeRequest.name, "kotlin", #{ notBlank: true });

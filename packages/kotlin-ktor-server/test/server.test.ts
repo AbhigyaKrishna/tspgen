@@ -143,7 +143,24 @@ fun StatusPagesConfig.petStoreErrors() {
     `);
     const routes = outputs[`${DIR}/SRoutes.kt`];
     expect(routes).toContain(`val kind = call.queryParam("kind").required("kind").convertParam("kind") { decodeParam<Kind>(it) }`);
-    expect(routes).toContain(`val since = call.queryParam("since")?.convertParam("since") { decodeParam<Instant>(it) }`);
+    expect(routes).toContain(`val since = call.queryParam("since")?.convertParam("since") { Instant.parse(it) }`);
     expect(routes).toContain(`val ids = (call.queryParam("ids")?.split(",")?.map { it.convertParam("ids") { it.toInt() } }).required("ids")`);
+  });
+
+  it("parses and writes java.time parameters and headers as ISO-8601; kotlin.time goes through kotlinx", async () => {
+    const spec = `
+      @service namespace S;
+      @route("/slots") op list(@path day: plainDate, @query at: utcDateTime[], @header("x-length") length?: duration): {
+        @header("x-next") next: utcDateTime;
+      };
+    `;
+    const java = (await server().compile(spec)).outputs[`${DIR}/SRoutes.kt`];
+    expect(java).toContain(`val day = call.pathParam("day").convertParam("day") { LocalDate.parse(it) }`);
+    expect(java).toContain(`?.map { it.convertParam("at") { Instant.parse(it) } }`);
+    expect(java).toContain(`val length = call.headerParam("x-length")?.convertParam("x-length") { Duration.parse(it) }`);
+    expect(java).toContain(`call.response.header("x-next", result.next.toString())`);
+    const kotlin = (await server({}, { "date-time": "kotlin.time" }).compile(spec)).outputs[`${DIR}/SRoutes.kt`];
+    expect(kotlin).toContain(`{ decodeParam<LocalDate>(it) }`);
+    expect(kotlin).toContain(`call.response.header("x-next", encodeParam(result.next))`);
   });
 });

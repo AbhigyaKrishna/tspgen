@@ -36,11 +36,13 @@ describe("@abhigyakrishna/tspgen-kotlin models", () => {
   it("emits data classes", async () => {
     const { outputs } = await emitter().compile(petSpec);
     expect(outputs["models/com/acme/models/Pet.kt"]).toBe(`${HEADER}
+@file:UseSerializers(InstantSerializer::class)
 package com.acme.models
 
-import kotlin.time.Instant
+import java.time.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.UseSerializers
 
 /**
  * A pet
@@ -56,6 +58,61 @@ data class Pet(
     val weight: Double = 1.5,
 )
 `);
+  });
+
+  it("maps date/time scalars to java.time with generated ISO-8601 serializers", async () => {
+    const { outputs } = await emitter().compile(`
+      @service namespace S;
+      model Slot { at: utcDateTime; day: plainDate; times: plainTime[]; length?: duration; zoned: offsetDateTime }
+      model Plain { name: string }
+    `);
+    expect(outputs["models/com/acme/models/Slot.kt"]).toBe(`${HEADER}
+@file:UseSerializers(InstantSerializer::class, OffsetDateTimeSerializer::class, LocalDateSerializer::class, LocalTimeSerializer::class, DurationSerializer::class)
+package com.acme.models
+
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.OffsetDateTime
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.UseSerializers
+
+@Serializable
+data class Slot(
+    val at: Instant,
+    val day: LocalDate,
+    val times: List<LocalTime>,
+    val length: Duration? = null,
+    val zoned: OffsetDateTime,
+)
+`);
+    expect(outputs["models/com/acme/models/Plain.kt"]).not.toContain("UseSerializers");
+    const serializers = outputs["models/com/acme/models/JavaTimeSerializers.kt"];
+    expect(serializers).toContain(`object InstantSerializer : KSerializer<Instant> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("java.time.Instant", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: Instant) = encoder.encodeString(value.toString())
+
+    override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
+}`);
+    expect(serializers).toContain("object DurationSerializer : KSerializer<Duration> {");
+  });
+
+  it("keeps kotlin.time and kotlinx.datetime with date-time: kotlin.time", async () => {
+    const { outputs } = await emitter({ "date-time": "kotlin.time" }).compile(`
+      @service namespace S;
+      model Slot { at: utcDateTime; day: plainDate; length: duration }
+    `);
+    const slot = outputs["models/com/acme/models/Slot.kt"];
+    expect(slot).toContain("import kotlin.time.Duration\nimport kotlin.time.Instant\nimport kotlinx.datetime.LocalDate\n");
+    expect(slot).not.toContain("UseSerializers");
+    expect(outputs["models/com/acme/models/JavaTimeSerializers.kt"]).toBeUndefined();
+  });
+
+  it("emits no serializers when no model uses java.time", async () => {
+    const { outputs } = await emitter().compile(`@service namespace S; model Plain { name: string }`);
+    expect(outputs["models/com/acme/models/JavaTimeSerializers.kt"]).toBeUndefined();
   });
 
   it("emits enums", async () => {
@@ -153,7 +210,7 @@ typealias Loose = String
   it("uses template overrides from template-dir", async () => {
     const templateDir = dirWith({ "kotlin/common/header.eta": "// custom header" });
     const { outputs } = await emitter({ "template-dir": templateDir }).compile(petSpec);
-    expect(outputs["models/com/acme/models/Pet.kt"].startsWith("// custom header\npackage com.acme.models")).toBe(true);
+    expect(outputs["models/com/acme/models/Pet.kt"].startsWith("// custom header\n@file:UseSerializers(InstantSerializer::class)\npackage com.acme.models")).toBe(true);
   });
 
   it("applies plugins", async () => {

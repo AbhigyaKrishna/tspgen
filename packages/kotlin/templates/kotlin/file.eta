@@ -1,5 +1,6 @@
 <%~ include("kotlin/common/header", it) %>
-package <%= it.package %>
+<% for (const a of it.fileAnnotations ?? []) { %>@file:<%~ a %>
+<% } %>package <%= it.package %>
 
 <% for (const i of it.imports) { %>import <%= i %>
 <% } %>

@@ -103,6 +103,20 @@ class PetsClient(
         }`);
   });
 
+  it("writes and parses java.time parameters and headers as ISO-8601", async () => {
+    const { outputs } = await client().compile(`
+      @service namespace S;
+      @route("/slots") op list(@path day: plainDate, @query at: utcDateTime[], @header("x-length") length?: duration): {
+        @header("x-next") next: utcDateTime;
+      };
+    `);
+    const code = outputs[`${DIR}/SClient.kt`];
+    expect(code).toContain(`day.toString()`);
+    expect(code).toContain(`parameters.append("at", at.joinToString(",") { it.toString() })`);
+    expect(code).toContain(`length?.let { header("x-length", it.toString()) }`);
+    expect(code).toContain(`Instant.parse((response.headers["x-next"] ?: throw`);
+  });
+
   it("emits the aggregate client and support helpers", async () => {
     const { outputs } = await client().compile(spec);
     expect(outputs[`${DIR}/PetStoreApiClient.kt`]).toBe(`${HEADER}

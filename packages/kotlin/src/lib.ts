@@ -10,6 +10,7 @@ export interface KotlinEmitterOptions extends CoreEmitterOptions {
   packages?: { namespace: string; package: string }[];
   errors?: "typed" | "thrown";
   validation?: boolean;
+  "date-time"?: "java.time" | "kotlin.time";
 }
 
 const optionsSchema = {
@@ -59,6 +60,14 @@ const optionsSchema = {
       type: "boolean",
       nullable: true,
       description: "Render constraint decorators as init { require(...) } checks (default false).",
+    },
+    "date-time": {
+      type: "string",
+      enum: ["java.time", "kotlin.time"],
+      nullable: true,
+      description:
+        "java.time (default): Instant, OffsetDateTime, LocalDate, LocalTime, Duration from java.time with generated " +
+        "ISO-8601 serializers; kotlin.time: kotlin.time.Instant/Duration and kotlinx.datetime dates.",
     },
   },
   required: [],

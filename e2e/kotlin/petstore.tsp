@@ -55,6 +55,7 @@ interface Pets {
     @query limit?: int32,
     @query(#{ explode: true }) tags?: string[],
     @query species?: Species,
+    @query bornAfter?: utcDateTime,
   ): Pet[] | ApiError;
 
   @get get(@path petId: int64, @header("x-trace") trace?: string): Pet | NotFound | ApiError;

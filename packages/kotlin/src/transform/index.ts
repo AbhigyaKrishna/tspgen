@@ -3,6 +3,7 @@ import type { Program } from "@typespec/compiler";
 import type { EnumMemberNaming } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
 import type { KotlinIR } from "./model.js";
+import type { DateTimeMapping } from "./type-map.js";
 import { ApiBuilder } from "./operations.js";
 
 export * from "./model.js";
@@ -15,6 +16,7 @@ export interface KotlinTransformOptions {
   packages?: Record<string, string>;
   errors?: "typed" | "thrown";
   validation?: boolean;
+  dateTime?: DateTimeMapping;
 }
 
 export function resolveKotlinOptions(options: Record<string, unknown>): KotlinTransformOptions {
@@ -27,6 +29,7 @@ export function resolveKotlinOptions(options: Record<string, unknown>): KotlinTr
     ),
     errors: options.errors === "thrown" ? "thrown" : "typed",
     validation: options.validation === true,
+    dateTime: options["date-time"] === "kotlin.time" ? "kotlin.time" : "java.time",
   };
 }
 
@@ -38,6 +41,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     enumMemberNaming: options.enumMemberNaming,
     packages: options.packages,
     validation: options.validation,
+    dateTime: options.dateTime,
   });
   const declarations = builder.build();
   const apiBuilder = new ApiBuilder(builder, apiPackage, { errors: options.errors, packages: options.packages });
