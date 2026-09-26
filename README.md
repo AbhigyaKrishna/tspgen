@@ -349,3 +349,7 @@ The e2e build needs JDK 17+. If Gradle cannot download over IPv6 on your network
 `JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true pnpm e2e`.
 
 Design and plans live in `docs/superpowers/`.
+
+## License
+
+[MIT](LICENSE)

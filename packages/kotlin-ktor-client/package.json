@@ -1,6 +1,7 @@
 {
   "name": "@abhigyakrishna/tspgen-kotlin-ktor-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AbhigyaKrishna/tspgen.git",
@@ -24,7 +25,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "prepack": "cp ../../LICENSE ."
   },
   "dependencies": {
     "@abhigyakrishna/tspgen-core": "workspace:*",

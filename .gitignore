@@ -11,3 +11,6 @@ generated/
 e2e/typescript/petstore.tsp
 
 docs/superpowers/
+
+# copied in by prepack
+packages/*/LICENSE
