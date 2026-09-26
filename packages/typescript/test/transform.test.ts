@@ -41,8 +41,8 @@ describe("transformToTs", () => {
       [`"x-meta"`, true, "Record<string, unknown>", "z.record(z.string(), z.unknown())", undefined],
       ["weight", true, "number", "z.number()", "1.5"],
     ]);
-    expect(pet.properties[4].type.imports).toEqual([{ name: "Owner", from: "models/Owner", typeOnly: true }]);
-    expect(pet.properties[4].type.schemaImports).toEqual([{ name: "OwnerSchema", from: "models/Owner", typeOnly: false }]);
+    expect(pet.properties[4].type.imports).toEqual([{ name: "Owner", from: "models/Owner", typeOnly: true, root: "models" }]);
+    expect(pet.properties[4].type.schemaImports).toEqual([{ name: "OwnerSchema", from: "models/Owner", typeOnly: false, root: "models" }]);
   });
 
   it("maps enums and string-literal unions to enum declarations", async () => {

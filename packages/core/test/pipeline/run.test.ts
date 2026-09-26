@@ -99,6 +99,47 @@ describe("runPipeline", () => {
     expectDiagnostics(program.diagnostics, { code: "@abhigyakrishna/tspgen-core/duplicate-file" });
   });
 
+  it("writes each target to its own output dir, with a manifest per dir", async () => {
+    const { program } = await Tester.compile(spec);
+    const out = resolveVirtualPath("out");
+    const serverDir = resolveVirtualPath("server-out");
+    let seen: { outputDir: string; modelsOutputDir: string } | undefined;
+    const server: Target<FakeIR> = {
+      name: "fake-server",
+      kind: "server",
+      language: "fake",
+      files: (_ir, ctx) => {
+        seen = { outputDir: ctx.outputDir, modelsOutputDir: ctx.modelsOutputDir };
+        return [{ path: "server/Routes.txt", template: "fake/model", data: { model: { name: "Routes" } } }];
+      },
+    };
+    await runPipeline({
+      program,
+      outputDir: out,
+      language,
+      targets: [{ target, options: {} }, { target: server, options: {}, outputDir: serverDir }],
+    });
+    expect(seen).toEqual({ outputDir: serverDir, modelsOutputDir: out });
+    expect((await program.host.readFile(resolvePath(serverDir, "server/Routes.txt"))).text).toBe("model Routes");
+    await expect(program.host.readFile(resolvePath(out, "server/Routes.txt"))).rejects.toThrow();
+    const manifest = async (dir: string) =>
+      JSON.parse((await program.host.readFile(resolvePath(dir, ".generated-manifest.json"))).text).files;
+    expect(await manifest(out)).toEqual(["models/Owner.txt", "models/Pet.txt"]);
+    expect(await manifest(serverDir)).toEqual(["server/Routes.txt"]);
+  });
+
+  it("allows the same relative path in different output dirs", async () => {
+    const { program } = await Tester.compile(spec);
+    const other = { ...target, name: "other" };
+    await runPipeline({
+      program,
+      outputDir: resolveVirtualPath("out"),
+      language,
+      targets: [{ target, options: {} }, { target: other, options: {}, outputDir: resolveVirtualPath("elsewhere") }],
+    });
+    expect(program.diagnostics).toEqual([]);
+  });
+
   it("reports plugin failures with the plugin name", async () => {
     const { program } = await Tester.compile(spec);
     const bad = definePlugin<FakeIR>({ name: "bad", transformIR() { throw new Error("boom"); } });

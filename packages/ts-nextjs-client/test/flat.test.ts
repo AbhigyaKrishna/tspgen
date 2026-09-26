@@ -37,6 +37,16 @@ const SHIPYARD_FLAGS = {
 };
 
 describe("flat client", () => {
+  it("imports and re-exports the models from their own output dir", async () => {
+    const { outputs } = await nextjs(
+      { ...flat, "output-dir": "{emitter-output-dir}/web" },
+      { ...house, "models-output-dir": "{emitter-output-dir}/shared" },
+    ).compile(shopSpec);
+    expect(outputs["web/client.ts"]).toContain(`from "../shared/types";`);
+    expect(outputs["web/index.ts"]).toContain(`export * from "../shared/types";`);
+    expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
+  });
+
   it("emits one class with a method per operation and an ApiError from the error model", async () => {
     const { outputs } = await nextjs(flat, house).compile(shopSpec);
     expect(outputs["client.ts"]).toBe(`${HEADER}

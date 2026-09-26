@@ -17,6 +17,17 @@ function dirWith(files: Record<string, string>): string {
 }
 
 describe("ktor server options", () => {
+  it("writes models and server code to their own output dirs", async () => {
+    const { outputs } = await server(
+      { "output-dir": "{emitter-output-dir}/features" },
+      { "models-output-dir": "{emitter-output-dir}/contract" },
+    ).compile(petSpec);
+    const paths = Object.keys(outputs).filter((p) => p.endsWith(".kt"));
+    expect(paths).toContain(`features/${DIR}/PetsRoutes.kt`);
+    expect(paths).toContain("contract/models/com/acme/models/Pet.kt");
+    expect(paths.every((p) => p.startsWith("features/server/") || p.startsWith("contract/models/"))).toBe(true);
+  });
+
   it("emits type-safe Resources routing", async () => {
     const { outputs } = await server({ "routing-style": "resources" }).compile(petSpec);
     expect(outputs[`${DIR}/PetsRoutes.kt`]).toBe(`${HEADER}

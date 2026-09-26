@@ -1,4 +1,4 @@
-import { NoTarget, type Program } from "@typespec/compiler";
+import { NoTarget, resolvePath, type Program } from "@typespec/compiler";
 import { fileURLToPath } from "node:url";
 import { buildApiIR } from "../ir/build.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
@@ -12,6 +12,8 @@ import { TemplateEngine, type TemplateLayer } from "../templates/engine.js";
 export interface PipelineTarget<L> {
   target: Target<L>;
   options: Record<string, unknown>;
+  /** Absolute directory for this target's files; the pipeline's `outputDir` when absent. */
+  outputDir?: string;
 }
 
 export interface PipelineOptions<L> {
@@ -55,13 +57,14 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
     if (result !== undefined) ir = result;
   }
 
+  const modelsOutputDir = opts.targets.find((t) => t.target.kind === "models")?.outputDir ?? opts.outputDir;
   let files: FileSpec[] = [];
-  for (const { target, options } of opts.targets) {
+  for (const { target, options, outputDir = opts.outputDir } of opts.targets) {
     const result = guard("target-failed", target.name, "files", () =>
-      target.files(ir, { program, language: language.name, emitterOptions, options, registry }),
+      target.files(ir, { program, language: language.name, emitterOptions, options, registry, outputDir, modelsOutputDir }),
     );
     if (result === FAILED) return;
-    files.push(...result);
+    files.push(...result.map((file) => (file.outputDir ? file : { ...file, outputDir })));
   }
   for (const plugin of plugins) {
     if (!plugin.files) continue;
@@ -72,11 +75,12 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
 
   const seen = new Set<string>();
   for (const file of files) {
-    if (seen.has(file.path)) {
-      reportDiagnostic(program, { code: "duplicate-file", format: { file: file.path }, target: NoTarget });
+    const absolute = resolvePath(file.outputDir ?? opts.outputDir, file.path);
+    if (seen.has(absolute)) {
+      reportDiagnostic(program, { code: "duplicate-file", format: { file: absolute }, target: NoTarget });
       return;
     }
-    seen.add(file.path);
+    seen.add(absolute);
   }
 
   const engine = new TemplateEngine(templateLayers(opts, plugins), {
@@ -85,7 +89,7 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
     ...Object.assign({}, ...opts.targets.map((t) => t.target.helpers ?? {})),
     ...Object.assign({}, ...plugins.map((p) => p.helpers ?? {})),
   });
-  const outputs: OutputFile[] = [];
+  const outputs = new Map<string, OutputFile[]>([[opts.outputDir, []]]);
   let failed = false;
   for (const file of files) {
     try {
@@ -94,7 +98,8 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
         ctx: { language: language.name, options: emitterOptions },
       });
       if (language.format) content = await language.format(file.path, content);
-      outputs.push({ path: file.path, content });
+      const dir = file.outputDir ?? opts.outputDir;
+      outputs.set(dir, [...(outputs.get(dir) ?? []), { path: file.path, content }]);
     } catch (error) {
       failed = true;
       reportDiagnostic(program, {
@@ -105,7 +110,9 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
     }
   }
   if (failed) return;
-  await writeOutputs(program, opts.outputDir, outputs);
+  // Every target directory gets its own manifest. The emitter output dir is always written, so files it
+  // held before a target moved elsewhere are cleaned up.
+  for (const [dir, dirOutputs] of outputs) await writeOutputs(program, dir, dirOutputs);
 }
 
 function templateLayers<L>(opts: PipelineOptions<L>, plugins: TspGenPlugin<L>[]): TemplateLayer[] {

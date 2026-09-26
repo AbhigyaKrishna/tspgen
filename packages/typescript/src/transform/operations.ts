@@ -20,7 +20,7 @@ const ERRORS_FILE = "api/errors";
 const RESULTS_FILE = "api/results";
 
 function classUse(name: string): TsTypeUse {
-  return { text: name, imports: [{ name, from: ERRORS_FILE, typeOnly: false }], schema: "", schemaImports: [] };
+  return { text: name, imports: [{ name, from: ERRORS_FILE, typeOnly: false, root: "models" }], schema: "", schemaImports: [] };
 }
 
 export const HTTP_ERROR = classUse("HttpError");
@@ -136,7 +136,7 @@ export class ApiBuilder {
     this.results.push(decl);
     return {
       kind: "union",
-      type: { text: name, imports: [{ name, from: RESULTS_FILE, typeOnly: true }], schema: "", schemaImports: [] },
+      type: { text: name, imports: [{ name, from: RESULTS_FILE, typeOnly: true, root: "models" }], schema: "", schemaImports: [] },
       decl,
     };
   }

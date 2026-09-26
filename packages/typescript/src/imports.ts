@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { posix, relative, sep } from "node:path";
 
 /** An imported name; `from` is an output-relative path without extension, or a module when `external`. */
 export interface TsImport {
@@ -6,6 +6,8 @@ export interface TsImport {
   from: string;
   typeOnly: boolean;
   external?: boolean;
+  /** `"models"`: `from` is relative to the models output dir, which a target may write elsewhere (see `rebase`). */
+  root?: "models";
 }
 
 export function relativeSpecifier(fromFile: string, toFile: string, extension: string): string {
@@ -13,12 +15,29 @@ export function relativeSpecifier(fromFile: string, toFile: string, extension: s
   return `${rel.startsWith(".") ? rel : `./${rel}`}${extension}`;
 }
 
-/** Render import statements for `file`: external modules first, then relative; values before types. */
-export function renderImports(file: string, imports: readonly TsImport[], extension: string): string[] {
+/**
+ * Path from a target's output dir to the models output dir ("" when they are the same), for `rebase`.
+ * Both are absolute; the result uses posix separators.
+ */
+export function modelsPrefix(outputDir: string, modelsOutputDir: string): string {
+  return relative(outputDir, modelsOutputDir).split(sep).join("/");
+}
+
+/** `from` of a models-rooted path as seen from a target whose models live at `prefix` (see `modelsPrefix`). */
+export function rebase(from: string, prefix: string): string {
+  return prefix ? posix.join(prefix, from) : from;
+}
+
+/**
+ * Render import statements for `file`: external modules first, then relative; values before types.
+ * `prefix` rebases models-rooted imports (`root: "models"`) for targets writing outside the models dir.
+ */
+export function renderImports(file: string, imports: readonly TsImport[], extension: string, prefix = ""): string[] {
   const groups = new Map<string, { external: boolean; values: Set<string>; types: Set<string> }>();
   for (const i of imports) {
-    if (!i.external && i.from === file) continue;
-    const spec = i.external ? i.from : relativeSpecifier(file, i.from, extension);
+    const from = i.root === "models" ? rebase(i.from, prefix) : i.from;
+    if (!i.external && from === file) continue;
+    const spec = i.external ? from : relativeSpecifier(file, from, extension);
     let group = groups.get(spec);
     if (!group) {
       group = { external: Boolean(i.external), values: new Set(), types: new Set() };

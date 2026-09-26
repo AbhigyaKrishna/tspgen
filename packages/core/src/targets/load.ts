@@ -35,6 +35,17 @@ export async function loadTargets<L>(
       return undefined;
     }
     const options = structuredClone(raw ?? {});
+    // `output-dir` belongs to the pipeline, not the target: take it out before the target's schema sees it.
+    const outputDir = options["output-dir"];
+    delete options["output-dir"];
+    if (outputDir !== undefined && typeof outputDir !== "string") {
+      reportDiagnostic(program, {
+        code: "invalid-target-options",
+        format: { name: target.name, errors: "/output-dir must be string" },
+        target: NoTarget,
+      });
+      return undefined;
+    }
     if (target.optionsSchema) {
       const errors = validateOptions(target.optionsSchema, options);
       if (errors.length > 0) {
@@ -46,7 +57,7 @@ export async function loadTargets<L>(
         return undefined;
       }
     }
-    loaded.push({ target, options });
+    loaded.push({ target, options, ...(outputDir ? { outputDir } : {}) });
   }
   return loaded;
 }

@@ -7,6 +7,11 @@ export interface FileSpec {
   path: string;
   template: string;
   data: Record<string, unknown>;
+  /**
+   * Absolute directory `path` is relative to. Filled by the pipeline with the producing target's
+   * output dir (the emitter output dir for files added by plugins) when absent.
+   */
+  outputDir?: string;
 }
 
 export interface LanguageContext {
@@ -30,6 +35,10 @@ export interface TargetContext {
   emitterOptions: Record<string, unknown>;
   options: Record<string, unknown>;
   registry: ExtensionRegistry;
+  /** Absolute directory this target's files are written to (its `output-dir`, else the emitter output dir). */
+  outputDir: string;
+  /** Absolute directory of the built-in models target's files. */
+  modelsOutputDir: string;
 }
 
 /** A server or client library (or the language's shared models) producing files from language IR. */

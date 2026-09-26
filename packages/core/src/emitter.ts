@@ -23,13 +23,24 @@ export async function emitLanguage<L>(
   const targets = await loadTargets<L>(program, options.targets ?? [], baseDir, language.name);
   if (!targets) return;
   const templateDir = options["template-dir"];
+  const dir = (spec: string | undefined) => (spec ? resolveOutputDir(spec, baseDir, context.emitterOutputDir) : undefined);
+  const modelsDir = dir(options["models-output-dir"]);
   await runPipeline<L>({
     program,
     outputDir: context.emitterOutputDir,
     language,
-    targets: [...builtinTargets.map((target) => ({ target, options: {} })), ...targets],
+    targets: [
+      ...builtinTargets.map((target) => ({ target, options: {}, ...(modelsDir ? { outputDir: modelsDir } : {}) })),
+      ...targets.map((t) => ({ ...t, ...(t.outputDir ? { outputDir: dir(t.outputDir) } : {}) })),
+    ],
     plugins: plugins as TspGenPlugin<L>[],
     templateDir: templateDir ? resolvePath(baseDir, templateDir) : undefined,
     emitterOptions: { ...options },
   });
+}
+
+/** `{project-root}` / `{emitter-output-dir}` interpolated; relative paths resolve against the project root. */
+export function resolveOutputDir(spec: string, projectRoot: string, emitterOutputDir: string): string {
+  const interpolated = spec.replaceAll("{project-root}", projectRoot).replaceAll("{emitter-output-dir}", emitterOutputDir);
+  return resolvePath(projectRoot, interpolated);
 }

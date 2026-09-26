@@ -83,6 +83,17 @@ export function createPetStoreClient(config: ClientConfig): PetStoreApiClient {
     expect(outputs["client/petStore.ts"]).toContain("async health(options?: RequestOptions): Promise<HealthResponse> {");
   });
 
+  it("imports the models from their own output dir when the client writes elsewhere", async () => {
+    const { outputs } = await nextjs(
+      { ...fetchOnly, "output-dir": "{emitter-output-dir}/web/src" },
+      { zod: true, "models-output-dir": "{emitter-output-dir}/shared" },
+    ).compile(petSpec);
+    expect(outputs["web/src/client/pets.ts"]).toContain(`import type { Pet } from "../../../shared/models/Pet";`);
+    expect(outputs["web/src/client/core.ts"]).toContain(`import { HttpError } from "../../../shared/api/errors";`);
+    expect(outputs["shared/models/Pet.ts"]).toContain("export interface Pet {");
+    expect(typecheck(outputs)).toBe("");
+  });
+
   it("type-checks without and with zod", async () => {
     for (const zod of [false, true]) {
       const { outputs } = await nextjs(fetchOnly, { zod }).compile(petSpec);

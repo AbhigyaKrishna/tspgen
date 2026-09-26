@@ -59,7 +59,11 @@ export function externalUse(name: string, module?: string, fromRoot = false): Ts
   return {
     text: name,
     imports: module
-      ? [{ name, from: relative ? posix.normalize(module) : module, typeOnly: true, external: !relative }]
+      ? [
+          relative
+            ? { name, from: posix.normalize(module), typeOnly: true, root: "models" as const }
+            : { name, from: module, typeOnly: true, external: true },
+        ]
       : [],
     schema: `z.custom<${name}>()`,
     schemaImports: [],
@@ -69,9 +73,9 @@ export function externalUse(name: string, module?: string, fromRoot = false): Ts
 export function declUse(name: string, file: string): TsTypeUse {
   return {
     text: name,
-    imports: [{ name, from: file, typeOnly: true }],
+    imports: [{ name, from: file, typeOnly: true, root: "models" }],
     schema: `z.lazy(() => ${name}Schema)`,
-    schemaImports: [{ name: `${name}Schema`, from: file, typeOnly: false }],
+    schemaImports: [{ name: `${name}Schema`, from: file, typeOnly: false, root: "models" }],
   };
 }
 

@@ -1,6 +1,7 @@
 import type { FileSpec, TargetContext } from "@abhigyakrishna/tspgen-core";
 import {
   propertyKey,
+  rebase,
   relativeSpecifier,
   renderImports,
   reportDiagnostic,
@@ -132,7 +133,7 @@ function errorClass(name: string, model: TsInterface | undefined): FlatErrorClas
 }
 
 /** client.ts (one class per service + error class) and index.ts; nothing when a limitation is hit. */
-export function planFlatFiles(ir: TsIR, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
+export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
   const fail = (code: Parameters<typeof reportDiagnostic>[1]["code"], format: Record<string, string>): FileSpec[] => {
     reportDiagnostic(ctx.program, { code, format, target: NoTarget } as Parameters<typeof reportDiagnostic>[1]);
     return [];
@@ -182,18 +183,19 @@ export function planFlatFiles(ir: TsIR, options: NextClientOptions, ctx: TargetC
     clients.push({ name: `${service.name}Client`, groups, usesSend });
   }
   if (model) {
-    imports.push({ name: model.name, from: model.file, typeOnly: true }, ...model.properties.flatMap((p) => p.type.imports));
+    imports.push({ name: model.name, from: model.file, typeOnly: true, root: "models" }, ...model.properties.flatMap((p) => p.type.imports));
   }
   const ops = services.flatMap((s) => s.groups.flatMap((g) => g.operations));
   const queryParams = ops.flatMap((op) => op.params.filter((p) => p.location === "query"));
   const ext = ir.importExtension;
-  const typesFile = ir.layout === "single-file" ? "types" : "models/index";
+  const prefix = ir.modelsPrefix ?? "";
+  const typesFile = rebase(ir.layout === "single-file" ? "types" : "models/index", prefix);
   return [
     {
       path: "client.ts",
       template: "ts/file",
       data: {
-        imports: renderImports("client", imports, ext),
+        imports: renderImports("client", imports, ext, prefix),
         body: "ts-nextjs/flat-client",
         clients,
         error: errorClass(options["error-class"], model),

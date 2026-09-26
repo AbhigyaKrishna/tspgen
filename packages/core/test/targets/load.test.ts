@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadTargets } from "../../src/index.js";
+import { loadTargets, resolveOutputDir } from "../../src/index.js";
 import { Tester } from "../tester.js";
 
 const dir = mkdtempSync(join(tmpdir(), "tspgen-targets-"));
@@ -29,6 +29,12 @@ describe("loadTargets", () => {
     ]);
   });
 
+  it("takes output-dir out of the target's options", async () => {
+    const { program } = await Tester.compile(`model M {}`);
+    const targets = await loadTargets(program, [{ "./target.mjs": { style: "b", "output-dir": "gen/server" } }], dir, "kotlin");
+    expect(targets?.map((t) => [t.options, t.outputDir])).toEqual([[{ style: "b" }, "gen/server"]]);
+  });
+
   it("reports invalid target options", async () => {
     const { program } = await Tester.compile(`model M {}`);
     const targets = await loadTargets(program, [{ "./target.mjs": { style: "c" } }], dir, "kotlin");
@@ -44,5 +50,14 @@ describe("loadTargets", () => {
       code: "@abhigyakrishna/tspgen-core/module-load-failed",
       message: /not 'python'/,
     });
+  });
+});
+
+describe("resolveOutputDir", () => {
+  it("interpolates and resolves against the project root", () => {
+    expect(resolveOutputDir("gen", "/p", "/p/tsp-output/x")).toBe("/p/gen");
+    expect(resolveOutputDir("{project-root}/../core/build", "/p/spec", "/o")).toBe("/p/core/build");
+    expect(resolveOutputDir("{emitter-output-dir}/server", "/p", "/p/out")).toBe("/p/out/server");
+    expect(resolveOutputDir("/abs/dir", "/p", "/o")).toBe("/abs/dir");
   });
 });

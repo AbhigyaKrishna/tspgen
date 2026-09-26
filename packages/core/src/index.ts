@@ -14,7 +14,7 @@ export { runPipeline, type PipelineOptions, type PipelineTarget } from "./pipeli
 export { coreEmitterOptionsSchemaProperties, type CoreEmitterOptions } from "./options.js";
 export { validateOptions } from "./options-validate.js";
 export { loadTargets, type TargetSpec } from "./targets/load.js";
-export { emitLanguage, type LanguageEmitterOptions } from "./emitter.js";
+export { emitLanguage, resolveOutputDir, type LanguageEmitterOptions } from "./emitter.js";
 export {
   META_DECORATOR,
   mergeMeta,

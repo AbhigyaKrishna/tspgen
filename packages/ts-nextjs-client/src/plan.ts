@@ -2,6 +2,7 @@ import { metaNumber, metaObject, type FileSpec, type TargetContext } from "@abhi
 import { reportDiagnostic } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
 import {
+  modelsPrefix,
   relativeSpecifier,
   renderImports,
   type TsGroup,
@@ -19,14 +20,18 @@ const CORE = "client/core";
 const Z: TsImport = { name: "z", from: "zod", typeOnly: false, external: true };
 
 const value = (name: string, from: string): TsImport => ({ name, from, typeOnly: false });
+const HTTP_ERROR_IMPORT: TsImport = { name: "HttpError", from: "api/errors", typeOnly: false, root: "models" };
 const type = (name: string, from: string): TsImport => ({ name, from, typeOnly: true });
 
-function file(path: string, ir: TsIR, imports: TsImport[], body: string, data: Record<string, unknown> = {}, directive?: string): FileSpec {
+/** TsIR plus the path from this target's output dir to the models output dir (see `modelsPrefix`). */
+type PlanIR = TsIR & { modelsPrefix?: string };
+
+function file(path: string, ir: PlanIR, imports: TsImport[], body: string, data: Record<string, unknown> = {}, directive?: string): FileSpec {
   return {
     path: `${path}.ts`,
     template: "ts/file",
     data: {
-      imports: renderImports(path, imports, ir.importExtension),
+      imports: renderImports(path, imports, ir.importExtension, ir.modelsPrefix),
       body,
       zod: ir.zod,
       ...(directive ? { directive } : {}),
@@ -80,7 +85,8 @@ function nextExtras(ctx: TargetContext, groups: TsGroup[]): Record<string, NextO
   return extras;
 }
 
-export function planNextFiles(ir: TsIR, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
+export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
+  const ir: PlanIR = { ...tsIR, modelsPrefix: modelsPrefix(ctx.outputDir, ctx.modelsOutputDir) };
   if (options["client-style"] === "flat") return planFlatFiles(ir, options, ctx);
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
@@ -97,7 +103,7 @@ export function planNextFiles(ir: TsIR, options: NextClientOptions, ctx: TargetC
       }
     }
   }
-  const files: FileSpec[] = [file(CORE, ir, [value("HttpError", "api/errors")], "ts-nextjs/core")];
+  const files: FileSpec[] = [file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core")];
   for (const g of groups) {
     files.push(file(names.groupFile(g), ir, groupImports(ir, g), "ts-nextjs/group", { group: g, extras }));
   }
@@ -167,7 +173,7 @@ const SERVER_CLIENT = "client/actions/server-client";
 function actionFiles(ir: TsIR, services: TsService[], options: NextClientOptions): FileSpec[] {
   const actionOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isJson(op));
   const files: FileSpec[] = [
-    file(RESULT, ir, [value("HttpError", "api/errors")], "ts-nextjs/action-result"),
+    file(RESULT, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/action-result"),
     file(
       SERVER_CLIENT,
       ir,

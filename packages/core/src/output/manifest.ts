@@ -12,6 +12,7 @@ export interface OutputFile {
 export async function writeOutputs(program: Program, outputDir: string, files: readonly OutputFile[]): Promise<void> {
   if (program.compilerOptions.noEmit) return;
   const previous = await readManifest(program, outputDir);
+  if (files.length === 0 && previous.length === 0) return;
   const current = files.map((f) => f.path).sort();
   for (const file of files) {
     await emitFile(program, { path: resolvePath(outputDir, file.path), content: file.content });
