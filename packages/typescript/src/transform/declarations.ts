@@ -1,5 +1,11 @@
 import {
   decoratorArg,
+  metaBoolean,
+  metaObjects,
+  metaScopes,
+  metaStrings,
+  resolveMeta,
+  type MetaData,
   type ApiIR,
   type DecoratorData,
   type EnumIR,
@@ -90,20 +96,32 @@ export class DeclarationBuilder {
 
   private shell(t: TypeIR): TsDecl {
     const name = decoratorArg(t.decorators, "TS.name") ?? typeName(t.name);
+    const scopes = metaScopes(t.decorators);
+    const meta = resolveMeta(scopes, "typescript");
     const base = {
       id: t.id,
       name,
       file: `models/${name}`,
       ...(t.docs ? { docs: t.docs } : {}),
       ...(t.deprecated ? { deprecated: t.deprecated } : {}),
+      meta: scopes,
+      jsdoc: metaStrings(this.program, meta, "jsdoc", t.id),
     };
     if (t.kind === "enum" || (t.kind === "union" && this.isStringLiteralUnion(t))) {
       return { ...base, kind: "enum", members: [] };
     }
     if (t.kind === "model" && !(t.discriminator && Object.keys(t.discriminator.mapping).length > 0)) {
-      return { ...base, kind: "interface", properties: [] };
+      return { ...base, kind: "interface", properties: [], extends: this.extendsOf(meta, t.id) };
     }
     return { ...base, kind: "alias", type: UNKNOWN };
+  }
+
+  private extendsOf(meta: MetaData, where: string): TsTypeUse[] {
+    return metaObjects(this.program, meta, "supertypes", where).flatMap((entry) =>
+      typeof entry.name === "string"
+        ? [externalUse(entry.name, typeof entry.from === "string" ? entry.from : undefined)]
+        : [],
+    );
   }
 
   private isStringLiteralUnion(u: UnionIR): boolean {
@@ -118,6 +136,7 @@ export class DeclarationBuilder {
         name: decoratorArg(m.decorators, "TS.name") ?? memberName(m.name),
         value: m.value,
         ...(m.docs ? { docs: m.docs } : {}),
+        meta: metaScopes(m.decorators),
       }),
     );
   }
@@ -132,7 +151,8 @@ export class DeclarationBuilder {
     if (decl.kind !== "interface") return;
     const byName = new Map<string, PropertyIR>();
     for (const m of this.chain(model)) for (const p of m.properties) byName.set(p.name, p);
-    decl.properties = [...byName.values()].map((p) => this.property(p));
+    const readonly = metaBoolean(this.program, resolveMeta(decl.meta, "typescript"), "readonly", model.id) ?? false;
+    decl.properties = [...byName.values()].map((p) => this.property(p, readonly, model.id));
     for (const base of this.chain(model).slice(0, -1)) {
       if (!base.discriminator) continue;
       const value = Object.entries(base.discriminator.mapping).find(([, id]) => id === model.id)?.[0];
@@ -145,7 +165,7 @@ export class DeclarationBuilder {
     if (decl.kind === "enum") {
       decl.members = u.variants.map((v) => {
         const value = v.type.kind === "literal" ? String(v.type.value) : "";
-        return { name: memberName(v.name ?? value), value, ...(v.docs ? { docs: v.docs } : {}) };
+        return { name: memberName(v.name ?? value), value, ...(v.docs ? { docs: v.docs } : {}), meta: {} };
       });
       return;
     }
@@ -184,7 +204,15 @@ export class DeclarationBuilder {
       existing.type = literalUse(value);
       return;
     }
-    decl.properties.unshift({ key: propertyKey(property), wireName: property, type: literalUse(value), optional: false });
+    decl.properties.unshift({
+      key: propertyKey(property),
+      wireName: property,
+      type: literalUse(value),
+      optional: false,
+      meta: {},
+      readonly: false,
+      jsdoc: [],
+    });
   }
 
   private chain(model: ModelIR): ModelIR[] {
@@ -198,12 +226,18 @@ export class DeclarationBuilder {
     return chain;
   }
 
-  private property(p: PropertyIR): TsProperty {
+  private property(p: PropertyIR, modelReadonly: boolean, owner: string): TsProperty {
+    const scopes = metaScopes(p.decorators);
+    const meta = resolveMeta(scopes, "typescript");
+    const where = `${owner}.${p.name}`;
     return {
       key: propertyKey(p.wireName),
       wireName: p.wireName,
       type: typeOverride(p.decorators) ?? this.typeUse(p.type),
       optional: p.optional,
+      readonly: metaBoolean(this.program, meta, "readonly", where) ?? modelReadonly,
+      jsdoc: metaStrings(this.program, meta, "jsdoc", where),
+      meta: scopes,
       ...(p.docs ? { docs: p.docs } : {}),
       ...(p.deprecated ? { deprecated: p.deprecated } : {}),
       ...(p.default !== undefined ? { defaultDoc: JSON.stringify(p.default) } : {}),

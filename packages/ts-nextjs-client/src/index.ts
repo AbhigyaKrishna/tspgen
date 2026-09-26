@@ -20,4 +20,4 @@ export default nextClientTarget;
 export { nextjsHelpers, type Field } from "./helpers.js";
 export { names } from "./names.js";
 export { nextClientOptionsSchema, type NextClientOptions } from "./options.js";
-export { planNextFiles } from "./plan.js";
+export { planNextFiles, type NextOpExtras } from "./plan.js";

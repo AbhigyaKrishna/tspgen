@@ -7,8 +7,10 @@ const Z: TsImport = { name: "z", from: "zod", typeOnly: false, external: true };
 function declImports(decl: TsDecl, zod: boolean): TsImport[] {
   const uses =
     decl.kind === "interface" ? decl.properties.map((p) => p.type) : decl.kind === "alias" ? [decl.type] : [];
+  const extendsImports = decl.kind === "interface" ? decl.extends.flatMap((e) => e.imports) : [];
   return [
     ...uses.flatMap((u) => u.imports),
+    ...extendsImports,
     ...(zod ? [Z, ...uses.flatMap((u) => u.schemaImports)] : []),
   ];
 }

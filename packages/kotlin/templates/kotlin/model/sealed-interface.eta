@@ -2,6 +2,6 @@
 <%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @JsonClassDiscriminator(<%~ it.h.str(d.discriminator) %>)
-sealed interface <%= d.name %><% if (d.properties.length) { %> {
+sealed interface <%= d.name %><%= d.implements.length ? " : " + d.implements.map((f) => it.h.ref(f, it.qualified)).join(", ") : "" %><% if (d.properties.length) { %> {
 <% for (const p of d.properties) { %><%~ it.h.kdoc(p.docs, "    ") %>    val <%= p.name %>: <%= p.type.text %>
 <% } %>}<% } %>

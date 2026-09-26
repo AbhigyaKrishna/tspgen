@@ -2,7 +2,7 @@ import { resolvePath } from "@typespec/compiler";
 import { createTester } from "@typespec/compiler/testing";
 
 export const Tester = createTester(resolvePath(import.meta.dirname, ".."), {
-  libraries: ["@typespec/http", "@specgen/emitter-typescript"],
+  libraries: ["@typespec/http", "@specgen/emitter-core", "@specgen/emitter-typescript"],
 })
   .importLibraries()
   .using("Http");

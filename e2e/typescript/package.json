@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "cp ../kotlin/petstore.tsp petstore.tsp && tsp compile petstore.tsp",
+    "generate": "cp ../kotlin/petstore.tsp petstore.tsp && tsp compile typescript.tsp",
     "test": "pnpm generate && tsc -p tsconfig.json && vitest run"
   },
   "dependencies": {

@@ -11,15 +11,13 @@ object <%= u.resourcesObject %> {
 }
 
 fun Route.<%= u.routesFn %>(service: <%= u.serviceName %>) {
-<% for (const op of u.operations) { -%>
-    <%= op.verb %><<%= u.resourcesObject %>.<%= s.resourceName(op) %>> { resource ->
-<% for (const p of op.params) { -%>
-        val <%= p.name %> = <%~ p.location === "path" || p.location === "query" ? "resource." + p.name : s.paramExpr(p) %>
-<% } -%>
-<% if (op.body) { -%>
-        val <%= op.body.name %> = <%~ s.bodyExpr(op.body) %>
-<% } -%>
-<%~ include("ktor-server/routes/respond", { op, call: s.callExpr(op, u, it.options), h: it.h }) -%>
+<% for (const op of u.operations) { const auth = it.extras[op.id].authenticate; const route = include("ktor-server/routes/resources-route", { op, unit: u, options: it.options, h: it.h }); -%>
+<% if (auth.length) { -%>
+    authenticate(<%~ auth.map((a) => it.h.str(a)).join(", ") %>) {
+<%~ it.h.indent(route, "    ") %>
     }
+<% } else { -%>
+<%~ route %>
+<% } -%>
 <% } -%>
 }

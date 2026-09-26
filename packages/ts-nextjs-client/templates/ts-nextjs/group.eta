@@ -33,7 +33,7 @@ export const <%= name %>Schema: z.ZodType<<%= name %>> = z.object({
         <%~ line %>
 <% } -%>
       },
-      options,
+      <%~ n.optionsExpr(it.extras[op.id]) %>,
     );
 <% for (const line of n.successLines(op, it.zod)) { -%>
     <%~ line %>

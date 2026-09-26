@@ -1,7 +1,7 @@
 <% const u = it.unit; const s = it.h.ktorServer; -%>
 interface <%= u.serviceName %> {
 <% for (const op of u.operations) { -%>
-<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations(op.annotations, "    ") %>    suspend fun <%= op.name %>(<%= s.handlerParams(op, it.options) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %>
+<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations([...op.annotations, ...it.extras[op.id].annotations], "    ") %>    suspend fun <%= op.name %>(<%= s.handlerParams(op, it.options) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %>
 <% } -%>
 <% if (it.options["handler-shape"] === "request-object") { for (const op of u.operations) { const fields = s.requestFields(op); if (fields.length === 0) continue; -%>
 

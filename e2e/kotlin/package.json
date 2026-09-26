@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "tsp compile petstore.tsp",
+    "generate": "tsp compile kotlin.tsp",
     "test": "pnpm generate && ./gradlew test --console=plain"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import { buildApiIR } from "../ir/build.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
 import { writeOutputs, type OutputFile } from "../output/manifest.js";
 import type { PluginContext, SpecgenPlugin } from "../plugins/plugin.js";
+import { resolveMeta, type MetaScopes } from "../meta.js";
 import { ExtensionRegistry } from "../plugins/registry.js";
 import type { FileSpec, LanguageModule, Target } from "../targets/target.js";
 import { TemplateEngine, type TemplateLayer } from "../templates/engine.js";
@@ -79,6 +80,7 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
   }
 
   const engine = new TemplateEngine(templateLayers(opts, plugins), {
+    meta: (item: { meta?: MetaScopes } | undefined, target?: string) => resolveMeta(item?.meta, language.name, target),
     ...language.helpers,
     ...Object.assign({}, ...opts.targets.map((t) => t.target.helpers ?? {})),
     ...Object.assign({}, ...plugins.map((p) => p.helpers ?? {})),

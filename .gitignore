@@ -9,3 +9,5 @@ tsp-output/
 .tmp-*/
 generated/
 e2e/typescript/petstore.tsp
+
+docs/superpowers/

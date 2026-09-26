@@ -1,4 +1,4 @@
-import type { ApiIR, AuthIR, HttpVerb, ServerIR, StatusCodes } from "@specgen/emitter-core";
+import type { ApiIR, AuthIR, HttpVerb, MetaScopes, ServerIR, StatusCodes } from "@specgen/emitter-core";
 
 /** A Kotlin type as written at a use site, with the imports it needs. */
 export interface KtTypeUse {
@@ -16,6 +16,9 @@ interface KtDeclBase {
   docs?: string;
   /** Annotation source lines (e.g. `@Deprecated("x")`, user @Kotlin.annotate values). */
   annotations: string[];
+  meta: MetaScopes;
+  /** Extra imports from @meta. */
+  imports: string[];
 }
 
 export interface KtProperty {
@@ -29,6 +32,7 @@ export interface KtProperty {
   override: boolean;
   docs?: string;
   annotations: string[];
+  meta: MetaScopes;
 }
 
 export interface KtDataClass extends KtDeclBase {
@@ -44,6 +48,7 @@ export interface KtSealedInterface extends KtDeclBase {
   kind: "sealed-interface";
   discriminator: string;
   properties: KtProperty[];
+  implements: string[];
 }
 
 export interface KtEnumMember {
@@ -51,6 +56,7 @@ export interface KtEnumMember {
   serialName: string;
   docs?: string;
   annotations: string[];
+  meta: MetaScopes;
 }
 
 export interface KtEnum extends KtDeclBase {
@@ -98,6 +104,7 @@ export interface KtOperation {
   path: string;
   docs?: string;
   annotations: string[];
+  meta: MetaScopes;
   params: KtParam[];
   body?: KtBody;
   responses: KtResponse[];
@@ -113,6 +120,7 @@ export interface KtGroup {
   namespace: string[];
   docs?: string;
   annotations: string[];
+  meta: MetaScopes;
   operations: KtOperation[];
 }
 

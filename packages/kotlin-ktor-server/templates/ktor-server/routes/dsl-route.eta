@@ -1,0 +1,10 @@
+<% const op = it.op; const s = it.h.ktorServer; -%>
+    <%= op.verb %>(<%~ it.h.str(op.path) %>) {
+<% for (const p of op.params) { -%>
+        val <%= p.name %> = <%~ s.paramExpr(p) %>
+<% } -%>
+<% if (op.body) { -%>
+        val <%= op.body.name %> = <%~ s.bodyExpr(op.body) %>
+<% } -%>
+<%~ include("ktor-server/routes/respond", { op, call: s.callExpr(op, it.unit, it.options), h: it.h }) -%>
+    }

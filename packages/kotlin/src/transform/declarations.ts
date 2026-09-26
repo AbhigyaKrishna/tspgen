@@ -8,6 +8,7 @@ import type {
   TypeRef,
   UnionIR,
 } from "@specgen/emitter-core";
+import { metaScopes, metaStrings, resolveMeta, type MetaScopes } from "@specgen/emitter-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
@@ -92,29 +93,40 @@ export class DeclarationBuilder {
     return [...this.decls.values()].some((d) => d.name === name);
   }
 
-  annotations(item: { decorators: DecoratorData; deprecated?: string }): string[] {
+  /** Annotation lines: @Deprecated, @Kotlin.annotate and `annotations` from kotlin-scoped @meta. */
+  annotations(
+    item: { decorators: DecoratorData; deprecated?: string },
+    where: string,
+    scopes: MetaScopes = metaScopes(item.decorators),
+  ): string[] {
     const list: string[] = [];
     if (item.deprecated) list.push(`@Deprecated(${kotlinString(item.deprecated)})`);
     list.push(...decoratorArgs(item.decorators, "Kotlin.annotate"));
+    list.push(...metaStrings(this.program, resolveMeta(scopes, "kotlin"), "annotations", where));
     return list;
   }
 
   private shell(t: TypeIR): KtDecl {
     const name = decoratorArg(t.decorators, "Kotlin.name") ?? typeName(t.name);
     const pkg = decoratorArg(t.decorators, "Kotlin.packageName") ?? this.options.modelsPackage;
+    const scopes = metaScopes(t.decorators);
+    const meta = resolveMeta(scopes, "kotlin");
+    const implementsMeta = metaStrings(this.program, meta, "implements", t.id);
     const base = {
       id: t.id,
       name,
       package: pkg,
       fqn: `${pkg}.${name}`,
       ...(t.docs ? { docs: t.docs } : {}),
-      annotations: this.annotations(t),
+      annotations: this.annotations(t, t.id, scopes),
+      meta: scopes,
+      imports: metaStrings(this.program, meta, "imports", t.id),
     };
     switch (t.kind) {
       case "model":
         return t.discriminator
-          ? { ...base, kind: "sealed-interface", discriminator: t.discriminator.property, properties: [] }
-          : { ...base, kind: "data-class", properties: [], implements: [] };
+          ? { ...base, kind: "sealed-interface", discriminator: t.discriminator.property, properties: [], implements: [...implementsMeta] }
+          : { ...base, kind: "data-class", properties: [], implements: [...implementsMeta] };
       case "enum":
         return t.members.every((m) => typeof m.value === "string")
           ? { ...base, kind: "enum", members: [] }
@@ -124,7 +136,7 @@ export class DeclarationBuilder {
           case "enum":
             return { ...base, kind: "enum", members: [] };
           case "sealed-interface":
-            return { ...base, kind: "sealed-interface", discriminator: t.discriminator!.property, properties: [] };
+            return { ...base, kind: "sealed-interface", discriminator: t.discriminator!.property, properties: [], implements: [...implementsMeta] };
           default:
             return { ...base, kind: "typealias", target: JSON_ELEMENT };
         }
@@ -158,7 +170,8 @@ export class DeclarationBuilder {
           name: identifier(decoratorArg(m.decorators, "Kotlin.name") ?? this.memberName(m.name)),
           serialName: String(m.value),
           ...(m.docs ? { docs: m.docs } : {}),
-          annotations: this.annotations(m),
+          annotations: this.annotations(m, `${e.id}.${m.name}`),
+          meta: metaScopes(m.decorators),
         }),
       );
       return;
@@ -181,6 +194,7 @@ export class DeclarationBuilder {
           serialName: value,
           ...(v.docs ? { docs: v.docs } : {}),
           annotations: [],
+          meta: {},
         };
       });
     } else if (decl.kind === "sealed-interface") {
@@ -207,7 +221,7 @@ export class DeclarationBuilder {
     if (decl.kind === "sealed-interface") {
       decl.properties = model.properties
         .filter((p) => p.name !== model.discriminator?.property)
-        .map((p) => this.property(p, false));
+        .map((p) => this.property(p, false, model.id));
       return;
     }
     if (decl.kind !== "data-class") return;
@@ -217,7 +231,7 @@ export class DeclarationBuilder {
     const abstractNames = new Set(sealedBases.flatMap((m) => m.properties.map((p) => p.name)));
     const byName = new Map<string, PropertyIR>();
     for (const m of chain) for (const p of m.properties) if (!discriminators.has(p.name)) byName.set(p.name, p);
-    decl.properties = [...byName.values()].map((p) => this.property(p, abstractNames.has(p.name)));
+    decl.properties = [...byName.values()].map((p) => this.property(p, abstractNames.has(p.name), model.id));
     this.fillSealedParents(model, decl, sealedBases);
     if (chain.some((m) => m.additionalProperties)) {
       reportDiagnostic(this.program, { code: "additional-properties", format: { id: model.id }, target: NoTarget });
@@ -243,7 +257,7 @@ export class DeclarationBuilder {
     return chain;
   }
 
-  private property(p: PropertyIR, override: boolean): KtProperty {
+  private property(p: PropertyIR, override: boolean, owner: string): KtProperty {
     const name = identifier(decoratorArg(p.decorators, "Kotlin.name") ?? camel(p.name));
     const fqn = decoratorArg(p.decorators, "Kotlin.type");
     let type = fqn ? fqnTypeUse(fqn) : this.typeUse(p.type);
@@ -255,7 +269,8 @@ export class DeclarationBuilder {
       type,
       override,
       ...(p.docs ? { docs: p.docs } : {}),
-      annotations: this.annotations(p),
+      annotations: this.annotations(p, `${owner}.${p.name}`),
+      meta: metaScopes(p.decorators),
     };
     if (name.replace(/`/g, "") !== p.wireName) prop.serialName = p.wireName;
     if (defaultValue !== undefined) prop.default = defaultValue;

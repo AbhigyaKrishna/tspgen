@@ -4,14 +4,17 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "tspMain": "lib/main.tsp",
   "exports": {
     ".": {
+      "typespec": "./lib/main.tsp",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "lib"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

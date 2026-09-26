@@ -1,14 +1,14 @@
-<% const d = it.decl; -%>
-<%~ it.h.jsdoc(d.docs, "", d.deprecated) %>export interface <%= d.name %> {
+<% const d = it.decl; const ext = d.extends.length > 0; -%>
+<%~ it.h.jsdoc(d.docs, "", d.deprecated, undefined, d.jsdoc) %>export interface <%= d.name %><%= ext ? " extends " + d.extends.map((e) => e.text).join(", ") : "" %> {
 <% for (const p of d.properties) { -%>
-<%~ it.h.jsdoc(p.docs, "  ", p.deprecated, p.defaultDoc) %>  <%= p.key %><%= p.optional ? "?" : "" %>: <%= p.type.text %>;
+<%~ it.h.jsdoc(p.docs, "  ", p.deprecated, p.defaultDoc, p.jsdoc) %>  <%= p.readonly ? "readonly " : "" %><%= p.key %><%= p.optional ? "?" : "" %>: <%= p.type.text %>;
 <% } -%>
 }
 <% if (it.zod) { -%>
 
-export const <%= d.name %>Schema: z.ZodType<<%= d.name %>> = z.object({
+export const <%= d.name %>Schema<%= ext ? "" : ": z.ZodType<" + d.name + ">" %> = z.object({
 <% for (const p of d.properties) { -%>
   <%= p.key %>: <%= p.type.schema %><%= p.optional ? ".optional()" : "" %>,
 <% } -%>
-});
+})<%= ext ? ".loose() as unknown as z.ZodType<" + d.name + ">" : "" %>;
 <% } -%>

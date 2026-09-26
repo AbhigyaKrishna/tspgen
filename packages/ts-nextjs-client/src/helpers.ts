@@ -118,6 +118,11 @@ export const nextjsHelpers = {
     return r.decl.variants.map((v) => `if (${statusCondition(v.statusCodes)}) return ${variantExpr(v, zod)};`);
   },
 
+  /** Third argument of request(): per-call options over @meta defaults. */
+  optionsExpr(extras: { next?: Record<string, unknown> } | undefined): string {
+    return extras?.next ? `{ next: ${JSON.stringify(extras.next)}, ...options }` : "options";
+  },
+
   errorFactories(op: TsOperation): string[] {
     const rank = (c: StatusCodes) => (c === "default" ? 2 : typeof c === "number" ? 0 : 1);
     return [...op.errors]

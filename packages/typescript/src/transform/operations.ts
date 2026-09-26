@@ -1,5 +1,5 @@
 import type { ApiIR, OperationIR, StatusCodes } from "@specgen/emitter-core";
-import { decoratorArg } from "@specgen/emitter-core";
+import { decoratorArg, mergeScopes, metaScopes, type MetaScopes } from "@specgen/emitter-core";
 import { camel, typeName } from "../naming.js";
 import type { DeclarationBuilder } from "./declarations.js";
 import type {
@@ -49,11 +49,13 @@ export class ApiBuilder {
       ...(s.docs ? { docs: s.docs } : {}),
       groups: s.groups.map((g) => {
         const name = decoratorArg(g.decorators, "TS.name") ?? typeName(g.name);
+        const groupScopes = metaScopes(g.decorators);
         return {
           id: g.id,
           name,
           ...(g.docs ? { docs: g.docs } : {}),
-          operations: g.operations.map((op) => this.operation(op, name)),
+          meta: groupScopes,
+          operations: g.operations.map((op) => this.operation(op, name, groupScopes)),
         };
       }),
     }));
@@ -63,7 +65,7 @@ export class ApiBuilder {
     return [...this.errorClasses.values()];
   }
 
-  private operation(op: OperationIR, groupName: string): TsOperation {
+  private operation(op: OperationIR, groupName: string, groupScopes: MetaScopes): TsOperation {
     const params: TsParam[] = op.params.map((p) => ({
       name: camel(p.name),
       wireName: p.wireName,
@@ -92,6 +94,7 @@ export class ApiBuilder {
       path: op.path,
       ...(op.docs ? { docs: op.docs } : {}),
       ...(op.deprecated ? { deprecated: op.deprecated } : {}),
+      meta: mergeScopes(groupScopes, metaScopes(op.decorators)),
       params,
       result: this.result(name, groupName, responses.filter((r) => !r.isError)),
       errors: responses.filter((r) => r.isError).map((r) => this.error(r)),

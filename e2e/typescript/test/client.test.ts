@@ -76,6 +76,9 @@ describe("generated Next.js client against a stub server", () => {
     expect(init.next).toEqual({ revalidate: 60, tags: ["pets"] });
     expect(init.cache).toBe("force-cache");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer t");
+    await spy.pets.list();
+    const defaults = seen[1] as RequestInit & { next?: unknown };
+    expect(defaults.next).toEqual({ revalidate: 60, tags: ["pets"] });
   });
 
   it("runs server actions with validation and serializable errors", async () => {

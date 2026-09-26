@@ -1,4 +1,4 @@
-import type { ApiIR, OperationIR, StatusCodes } from "@specgen/emitter-core";
+import { mergeScopes, metaScopes, type ApiIR, type MetaScopes, type OperationIR, type StatusCodes } from "@specgen/emitter-core";
 import { camel, identifier, typeName } from "../naming.js";
 import type { DeclarationBuilder } from "./declarations.js";
 import { decoratorArg } from "./decorators.js";
@@ -81,13 +81,15 @@ export class ApiBuilder {
       auth: s.auth,
       groups: s.groups.map((g) => {
         const name = decoratorArg(g.decorators, "Kotlin.name") ?? typeName(g.name);
+        const groupScopes = metaScopes(g.decorators);
         return {
           id: g.id,
           name,
           namespace: g.namespace,
           ...(g.docs ? { docs: g.docs } : {}),
-          annotations: this.types.annotations(g),
-          operations: g.operations.map((op) => this.operation(op, name)),
+          annotations: this.types.annotations(g, g.id, groupScopes),
+          meta: groupScopes,
+          operations: g.operations.map((op) => this.operation(op, name, groupScopes)),
         };
       }),
     }));
@@ -103,7 +105,8 @@ export class ApiBuilder {
     return [this.apiException, ...exceptions, ...this.results];
   }
 
-  private operation(op: OperationIR, groupName: string): KtOperation {
+  private operation(op: OperationIR, groupName: string, groupScopes: MetaScopes): KtOperation {
+    const scopes = mergeScopes(groupScopes, metaScopes(op.decorators));
     const params: KtParam[] = op.params.map((p) => {
       const type = this.types.typeUse(p.type);
       return {
@@ -140,7 +143,8 @@ export class ApiBuilder {
       verb: op.verb,
       path: op.path,
       ...(op.docs ? { docs: op.docs } : {}),
-      annotations: this.types.annotations(op),
+      annotations: this.types.annotations(op, op.id, scopes),
+      meta: scopes,
       params,
       responses,
       result: this.result(plain(name), groupName, responses.filter((r) => !r.isError)),

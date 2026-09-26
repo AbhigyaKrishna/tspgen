@@ -142,6 +142,52 @@ model Money { amount: string }
 TypeScript: `@TS.name("Customer")` renames a generated type; `@TS.type("Decimal", "decimal.js")` maps a
 model, scalar, enum, union or property to an external type (module optional, e.g. `@TS.type("Date")`).
 
+## Language-specific metadata
+
+Attach metadata for one language or target with `@meta(scope, data)` (namespace `Specgen`, available once
+any specgen emitter library is imported). Scopes: `"*"`, a language (`"kotlin"`, `"typescript"`) or a
+target (`"kotlin:ktor-server"`, `"kotlin:ktor-client"`, `"typescript:ts-nextjs-client"`).
+
+```tsp
+using Specgen;
+
+@meta("kotlin", #{ annotations: #["@Entity"], imports: #["jakarta.persistence.Entity"], table: "pets" })
+@meta("typescript", #{ readonly: true })
+model Pet { id: int64 }
+```
+
+Keep it out of the API definition with augment decorators in a separate file:
+
+```tsp
+// kotlin.tsp — compile this file instead of main.tsp
+import "@specgen/emitter-kotlin";
+import "./main.tsp";
+using Specgen;
+
+@@meta(PetStore.Pets.remove, "kotlin:ktor-server", #{ authenticate: "api" });
+@@meta(PetStore.Toy, "kotlin", #{ implements: #["java.io.Serializable"] });
+```
+
+Resolution: `"*"` → language → `language:target`, key by key (later wins; arrays concatenate).
+Operations inherit their interface/namespace metadata. Built-in keys (wrong types produce an
+`invalid-meta` warning; unknown keys pass through untouched):
+
+| Scope | Key | On | Effect |
+|---|---|---|---|
+| `kotlin` | `annotations: string[]` | types, properties, enum members, operations | annotation lines |
+| `kotlin` | `imports: string[]` | types | extra imports |
+| `kotlin` | `implements: string[]` | models, sealed hierarchies | extra supertypes (FQN; qualified automatically on name clashes) |
+| `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`) |
+| `kotlin:ktor-server` / `kotlin:ktor-client` | `annotations: string[]` | operations, groups | annotations on service / client methods |
+| `typescript` | `readonly: boolean` | models, properties | `readonly` properties |
+| `typescript` | `supertypes: { name, from? }[]` | models | `interface X extends A` (zod schema cast; inherited members not validated) |
+| `typescript` | `jsdoc: string[]` | declarations, properties | extra JSDoc lines |
+| `typescript:ts-nextjs-client` | `next: { revalidate?, tags? }` | operations, groups | default Next.js fetch options |
+| `typescript:ts-nextjs-client` | `staleTime: number` | GET operations, groups | default `staleTime` in `queryOptions` |
+
+Templates read any metadata with `it.h.meta(item)` / `it.h.meta(item, "ktor-server")`; plugins use
+`resolveMeta(item.meta, language, target)` from `@specgen/emitter-core`.
+
 ## Customizing output
 
 **Template overrides.** Every file is rendered from [Eta](https://eta.js.org) templates addressed by

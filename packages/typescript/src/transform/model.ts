@@ -1,4 +1,4 @@
-import type { ApiIR, HttpVerb, StatusCodes } from "@specgen/emitter-core";
+import type { ApiIR, HttpVerb, MetaScopes, StatusCodes } from "@specgen/emitter-core";
 import type { TsImport } from "../imports.js";
 
 /** A TypeScript type at a use site, with its zod schema expression and the imports each needs. */
@@ -16,6 +16,9 @@ interface TsDeclBase {
   file: string;
   docs?: string;
   deprecated?: string;
+  meta: MetaScopes;
+  /** Extra JSDoc lines from @meta. */
+  jsdoc: string[];
 }
 
 export interface TsProperty {
@@ -27,11 +30,15 @@ export interface TsProperty {
   deprecated?: string;
   /** JSON of the TypeSpec default, rendered as a JSDoc @default tag. */
   defaultDoc?: string;
+  meta: MetaScopes;
+  readonly: boolean;
+  jsdoc: string[];
 }
 
 export interface TsInterface extends TsDeclBase {
   kind: "interface";
   properties: TsProperty[];
+  extends: TsTypeUse[];
 }
 
 export interface TsAlias extends TsDeclBase {
@@ -43,6 +50,7 @@ export interface TsEnumMember {
   name: string;
   value: string | number;
   docs?: string;
+  meta: MetaScopes;
 }
 
 export interface TsEnum extends TsDeclBase {
@@ -116,6 +124,7 @@ export interface TsOperation {
   path: string;
   docs?: string;
   deprecated?: string;
+  meta: MetaScopes;
   params: TsParam[];
   body?: TsBody;
   result: TsResult;
@@ -126,6 +135,7 @@ export interface TsGroup {
   id: string;
   name: string;
   docs?: string;
+  meta: MetaScopes;
   operations: TsOperation[];
 }
 

@@ -15,3 +15,17 @@ export { coreEmitterOptionsSchemaProperties, type CoreEmitterOptions } from "./o
 export { validateOptions } from "./options-validate.js";
 export { loadTargets, type TargetSpec } from "./targets/load.js";
 export { emitLanguage, type LanguageEmitterOptions } from "./emitter.js";
+export {
+  META_DECORATOR,
+  mergeMeta,
+  mergeScopes,
+  metaBoolean,
+  metaNumber,
+  metaObject,
+  metaObjects,
+  metaScopes,
+  metaStrings,
+  resolveMeta,
+  type MetaData,
+  type MetaScopes,
+} from "./meta.js";

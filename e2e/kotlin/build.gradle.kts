@@ -13,6 +13,7 @@ dependencies {
     implementation("io.ktor:ktor-server-core:$ktor")
     implementation("io.ktor:ktor-server-content-negotiation:$ktor")
     implementation("io.ktor:ktor-server-status-pages:$ktor")
+    implementation("io.ktor:ktor-server-auth:$ktor")
     implementation("io.ktor:ktor-server-resources:$ktor")
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktor")
     implementation("io.ktor:ktor-client-core:$ktor")

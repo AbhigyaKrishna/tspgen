@@ -3,11 +3,12 @@ import type { TsResultVariant } from "./transform/model.js";
 /** Helpers exposed to templates as `it.h`. */
 export const tsHelpers = {
   /** JSDoc block (with trailing newline) or "" when there is nothing to document. */
-  jsdoc(docs?: string, indent = "", deprecated?: string, defaultDoc?: string): string {
+  jsdoc(docs?: string, indent = "", deprecated?: string, defaultDoc?: string, extra: readonly string[] = []): string {
     const lines = [
       ...(docs ? docs.replace(/\*\//g, "* /").split("\n") : []),
       ...(deprecated ? [`@deprecated ${deprecated}`] : []),
       ...(defaultDoc !== undefined ? [`@default ${defaultDoc}`] : []),
+      ...extra,
     ];
     if (lines.length === 0) return "";
     return `${indent}/**\n${lines.map((l) => `${indent} *${l ? ` ${l}` : ""}`).join("\n")}\n${indent} */\n`;

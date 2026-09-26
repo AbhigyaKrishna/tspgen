@@ -23,6 +23,9 @@ export const <%= n.names.queries(s) %> = {
       queryOptions({
         queryKey: <%= n.names.keys(s) %>.<%= prop %>.<%= op.name %>(<%= has ? "params" : "" %>),
         queryFn: ({ signal }) => client.<%= prop %>.<%= op.name %>(<%= has ? "params, " : "" %>{ signal }),
+<% if (it.extras[op.id].staleTime !== undefined) { -%>
+        staleTime: <%= it.extras[op.id].staleTime %>,
+<% } -%>
       }),
 <% } -%>
   },

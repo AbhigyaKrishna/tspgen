@@ -27,6 +27,12 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Invalid options for target '${"name"}': ${"errors"}`,
       },
     },
+    "invalid-meta": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Metadata key '${"key"}' on '${"where"}' must be ${"expected"}; it is ignored.`,
+      },
+    },
     "module-load-failed": {
       severity: "error",
       messages: {

@@ -3,7 +3,7 @@ import { createTester } from "@typespec/compiler/testing";
 import { resolve } from "node:path";
 
 export const Tester = createTester(resolvePath(import.meta.dirname, ".."), {
-  libraries: ["@typespec/http", "@specgen/emitter-kotlin"],
+  libraries: ["@typespec/http", "@specgen/emitter-core", "@specgen/emitter-kotlin"],
 })
   .importLibraries()
   .using("Http");

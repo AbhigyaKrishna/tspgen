@@ -1,4 +1,4 @@
-<% const d = it.decl; const sup = d.implements.length ? " : " + d.implements.map(it.h.simpleName).join(", ") : ""; %>
+<% const d = it.decl; const sup = d.implements.length ? " : " + d.implements.map((f) => it.h.ref(f, it.qualified)).join(", ") : ""; %>
 <%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable
 <% if (d.serialName !== undefined) { %>@SerialName(<%~ it.h.str(d.serialName) %>)
 <% } %><% if (d.properties.length === 0) { %>class <%= d.name %><%= sup %>

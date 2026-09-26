@@ -12,7 +12,7 @@ export const ktorServerTarget: Target<KotlinIR> = {
   templates: resolve(import.meta.dirname, "../templates"),
   helpers: { ktorServer: ktorServerHelpers },
   optionsSchema: ktorServerOptionsSchema,
-  files: (ir, ctx) => planServerFiles(ir, ctx.options as unknown as KtorServerOptions, ctx.registry),
+  files: (ir, ctx) => planServerFiles(ir, ctx.options as unknown as KtorServerOptions, ctx.registry, ctx.program),
 };
 
 export default ktorServerTarget;
@@ -21,3 +21,4 @@ export { ktorServerHelpers, type HandlerField, type ResourceParam } from "./help
 export { ktorServerOptionsSchema, type KtorServerOptions } from "./options.js";
 export { builtinStyles, resolveStyle, ROUTING_STYLE_KIND, type RoutingStyle } from "./styles.js";
 export { buildUnits, type ServerUnit } from "./units.js";
+export type { ServerOpExtras } from "./plan.js";

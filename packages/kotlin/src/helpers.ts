@@ -14,6 +14,10 @@ export const kotlinHelpers = {
   simpleName(fqn: string): string {
     return fqn.slice(fqn.lastIndexOf(".") + 1);
   },
+  /** How to reference `fqn` in a file: simple name unless it had to be qualified. */
+  ref(fqn: string, qualified: readonly string[] = []): string {
+    return qualified.includes(fqn) ? fqn : fqn.slice(fqn.lastIndexOf(".") + 1);
+  },
   /** Constructor fields of a result variant: status (when not fixed), body, headers. */
   resultFields(v: KtResultVariant): string[] {
     return [
@@ -21,6 +25,13 @@ export const kotlinHelpers = {
       ...(v.body ? [`val body: ${v.body.text}`] : []),
       ...v.headers.map((h) => `val ${h.name}: ${h.type.text}`),
     ];
+  },
+  /** Prefix every non-empty line with `pad`. */
+  indent(text: string, pad: string): string {
+    return text
+      .split("\n")
+      .map((line) => (line ? pad + line : line))
+      .join("\n");
   },
   str: kotlinString,
 };

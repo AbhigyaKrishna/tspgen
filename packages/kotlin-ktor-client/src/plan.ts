@@ -1,4 +1,5 @@
-import type { FileSpec } from "@specgen/emitter-core";
+import { metaStrings, type FileSpec } from "@specgen/emitter-core";
+import type { Program } from "@typespec/compiler";
 import { camel, organizeImports, type KotlinIR, type KtGroup } from "@specgen/emitter-kotlin";
 import type { KtorClientOptions } from "./options.js";
 
@@ -43,7 +44,7 @@ function groupImports(ir: KotlinIR, group: KtGroup): string[] {
   ];
 }
 
-export function planClientFiles(ir: KotlinIR, options: KtorClientOptions): FileSpec[] {
+export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, program: Program): FileSpec[] {
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const pkg = options.package ?? `${ir.basePackage}.client`;
@@ -57,10 +58,16 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions): FileS
   ];
   for (const service of services) {
     for (const group of service.groups) {
+      const extras = Object.fromEntries(
+        group.operations.map((op) => [
+          op.id,
+          { annotations: metaStrings(program, op.meta["kotlin:ktor-client"] ?? {}, "annotations", op.id) },
+        ]),
+      );
       files.push({
         path: `${dir}/${group.name}Client.kt`,
         template: "kotlin/file",
-        data: { package: pkg, imports: organizeImports(groupImports(ir, group), pkg), body: "ktor-client/client", group },
+        data: { package: pkg, imports: organizeImports(groupImports(ir, group), pkg), body: "ktor-client/client", group, extras },
       });
     }
     files.push({

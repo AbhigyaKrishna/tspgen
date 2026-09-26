@@ -12,7 +12,7 @@ export const ktorClientTarget: Target<KotlinIR> = {
   templates: resolve(import.meta.dirname, "../templates"),
   helpers: { ktorClient: ktorClientHelpers },
   optionsSchema: ktorClientOptionsSchema,
-  files: (ir, ctx) => planClientFiles(ir, ctx.options as KtorClientOptions),
+  files: (ir, ctx) => planClientFiles(ir, ctx.options as KtorClientOptions, ctx.program),
 };
 
 export default ktorClientTarget;

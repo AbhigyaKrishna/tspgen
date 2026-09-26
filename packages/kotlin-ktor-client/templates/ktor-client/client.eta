@@ -7,7 +7,7 @@
 <% if (i > 0) { -%>
 
 <% } -%>
-<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations(op.annotations, "    ") %>    suspend fun <%= op.name %>(<%= c.signature(op) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %> {
+<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations([...op.annotations, ...it.extras[op.id].annotations], "    ") %>    suspend fun <%= op.name %>(<%= c.signature(op) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %> {
         val response = http.request {
             method = HttpMethod.<%= c.method(op.verb) %>
             url {

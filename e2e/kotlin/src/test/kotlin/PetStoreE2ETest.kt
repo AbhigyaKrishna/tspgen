@@ -1,6 +1,7 @@
 package com.example.petstore
 
 import com.example.petstore.api.ApiErrorException
+import com.example.petstore.api.ApiException
 import com.example.petstore.api.CreateResult
 import com.example.petstore.api.NotFoundException
 import com.example.petstore.client.PetStoreApiClient
@@ -15,10 +16,18 @@ import com.example.petstore.models.Toy
 import com.example.petstore.server.PetsService
 import com.example.petstore.server.ToysService
 import com.example.petstore.server.petStoreModule
+import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.request.bearerAuth
+import io.ktor.server.application.install
+import io.ktor.server.auth.Authentication
+import io.ktor.server.auth.UserIdPrincipal
+import io.ktor.server.auth.bearer
 import io.ktor.server.testing.testApplication
+import java.io.Serializable
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class InMemoryPets : PetsService {
@@ -61,8 +70,22 @@ class InMemoryToys : ToysService {
 class PetStoreE2ETest {
     @Test
     fun generatedClientTalksToGeneratedServer() = testApplication {
-        application { petStoreModule(InMemoryPets(), InMemoryToys()) }
-        val api = PetStoreApiClient(createClient { petStoreDefaults() }, "http://localhost")
+        application {
+            install(Authentication) {
+                bearer("api") {
+                    authenticate { credential -> if (credential.token == "secret") UserIdPrincipal("tester") else null }
+                }
+            }
+            petStoreModule(InMemoryPets(), InMemoryToys())
+        }
+        val api = PetStoreApiClient(
+            createClient {
+                petStoreDefaults()
+                defaultRequest { bearerAuth("secret") }
+            },
+            "http://localhost",
+        )
+        val anonymous = PetStoreApiClient(createClient { petStoreDefaults() }, "http://localhost")
 
         val rex = Pet(
             id = 1,
@@ -85,11 +108,15 @@ class PetStoreE2ETest {
         assertEquals(400, bad.status)
         assertEquals("bad_limit", bad.error.code)
 
+        val unauthorized = assertFailsWith<ApiException> { anonymous.pets.remove(1) }
+        assertEquals(401, unauthorized.status)
+
         api.pets.remove(1)
         assertFailsWith<NotFoundException> { api.pets.remove(1) }
 
         api.toys.add(Ball(name = "red", diameter = 3.5f))
         api.toys.add(Rope(name = "long", length = 2))
         assertEquals(listOf(Ball("red", 3.5f), Rope("long", 2)), api.toys.list())
+        assertTrue(Ball("x", 1f) is Serializable)
     }
 }

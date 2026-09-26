@@ -1,4 +1,4 @@
-import type { FileSpec, TargetContext } from "@specgen/emitter-core";
+import { metaNumber, metaObject, type FileSpec, type TargetContext } from "@specgen/emitter-core";
 import { reportDiagnostic } from "@specgen/emitter-typescript";
 import { NoTarget } from "@typespec/compiler";
 import {
@@ -61,10 +61,29 @@ function groupImports(ir: TsIR, g: TsGroup): TsImport[] {
   ];
 }
 
+export interface NextOpExtras {
+  next?: Record<string, unknown>;
+  staleTime?: number;
+}
+
+function nextExtras(ctx: TargetContext, groups: TsGroup[]): Record<string, NextOpExtras> {
+  const extras: Record<string, NextOpExtras> = {};
+  for (const g of groups) {
+    for (const op of g.operations) {
+      const meta = op.meta["typescript:ts-nextjs-client"] ?? {};
+      const next = metaObject(ctx.program, meta, "next", op.id);
+      const staleTime = metaNumber(ctx.program, meta, "staleTime", op.id);
+      extras[op.id] = { ...(next ? { next } : {}), ...(staleTime !== undefined ? { staleTime } : {}) };
+    }
+  }
+  return extras;
+}
+
 export function planNextFiles(ir: TsIR, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const groups = services.flatMap((s) => s.groups);
+  const extras = nextExtras(ctx, groups);
   for (const g of groups) {
     for (const op of g.operations) {
       if (!h.isJson(op)) {
@@ -78,7 +97,7 @@ export function planNextFiles(ir: TsIR, options: NextClientOptions, ctx: TargetC
   }
   const files: FileSpec[] = [file(CORE, ir, [value("HttpError", "api/errors")], "ts-nextjs/core")];
   for (const g of groups) {
-    files.push(file(names.groupFile(g), ir, groupImports(ir, g), "ts-nextjs/group", { group: g }));
+    files.push(file(names.groupFile(g), ir, groupImports(ir, g), "ts-nextjs/group", { group: g, extras }));
   }
   files.push(
     file(
@@ -89,7 +108,7 @@ export function planNextFiles(ir: TsIR, options: NextClientOptions, ctx: TargetC
       { services, exports: [CORE, ...groups.map(names.groupFile)].map((f) => relativeSpecifier("client/index", f, ir.importExtension)) },
     ),
   );
-  if (options["react-query"]) files.push(...reactQueryFiles(ir, services));
+  if (options["react-query"]) files.push(...reactQueryFiles(ir, services, extras));
   if (options["server-actions"]) files.push(...actionFiles(ir, services, options));
   return files;
 }
@@ -101,7 +120,7 @@ function paramsImports(g: TsGroup, ops: TsOperation[]): TsImport[] {
   return ops.filter(h.hasParams).map((op) => type(names.params(g, op), names.groupFile(g)));
 }
 
-function reactQueryFiles(ir: TsIR, services: TsService[]): FileSpec[] {
+function reactQueryFiles(ir: TsIR, services: TsService[], extras: Record<string, NextOpExtras>): FileSpec[] {
   const queryOps = (g: TsGroup) => g.operations.filter((op) => h.isQuery(op) && h.isJson(op));
   const mutationOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isJson(op));
   const groups = services.flatMap((s) => s.groups);
@@ -114,7 +133,7 @@ function reactQueryFiles(ir: TsIR, services: TsService[]): FileSpec[] {
       ...groups.flatMap((g) => paramsImports(g, queryOps(g))),
     ],
     "ts-nextjs/queries",
-    { services, queryOps },
+    { services, queryOps, extras },
   );
   const hooks = file(
     HOOKS,
