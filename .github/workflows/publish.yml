@@ -21,8 +21,10 @@ jobs:
           registry-url: https://npm.pkg.github.com
           scope: "@abhigyakrishna"
       - run: pnpm install --frozen-lockfile
+      # Packages type-check against each other's dist/, so build first.
+      - run: pnpm build
       - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm exec vitest run
       # Versions already in the registry are skipped, so re-runs are safe.
       - run: pnpm -r --filter "./packages/*" publish --no-git-checks
         env:
