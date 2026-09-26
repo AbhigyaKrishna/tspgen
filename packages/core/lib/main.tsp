@@ -1,6 +1,6 @@
 import "../dist/tsp-index.js";
 
-namespace Specgen;
+namespace TspGen;
 
 /**
  * Attach metadata for all languages ("*"), a language ("kotlin", "typescript") or a target

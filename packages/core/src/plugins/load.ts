@@ -1,20 +1,20 @@
 import { NoTarget, type Program } from "@typespec/compiler";
 import { errorMessage, reportDiagnostic } from "../lib.js";
 import { loadModuleDefault } from "../loader.js";
-import type { SpecgenPlugin } from "./plugin.js";
+import type { TspGenPlugin } from "./plugin.js";
 
 /** Load plugins in order; reports a diagnostic and returns undefined on the first failure. */
 export async function loadPlugins(
   program: Program,
   specifiers: readonly string[],
   baseDir: string,
-): Promise<SpecgenPlugin[] | undefined> {
-  const plugins: SpecgenPlugin[] = [];
+): Promise<TspGenPlugin[] | undefined> {
+  const plugins: TspGenPlugin[] = [];
   for (const specifier of specifiers) {
     try {
-      const plugin = await loadModuleDefault<SpecgenPlugin>(specifier, baseDir);
+      const plugin = await loadModuleDefault<TspGenPlugin>(specifier, baseDir);
       if (!plugin || typeof plugin.name !== "string") {
-        throw new Error("default export is not a specgen plugin (missing 'name')");
+        throw new Error("default export is not a tspgen plugin (missing 'name')");
       }
       plugins.push(plugin);
     } catch (error) {

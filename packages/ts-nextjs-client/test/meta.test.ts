@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { nextjs, petSpec } from "./tester.js";
 import { typecheck } from "./typecheck.js";
 
-const withMeta = `using Specgen;\n${petSpec}
+const withMeta = `using TspGen;\n${petSpec}
   @@meta(PetStore.Pets, "typescript:ts-nextjs-client", #{ next: #{ revalidate: 60, tags: #["pets"] }, staleTime: 30000 });
   @@meta(PetStore.Pets.get, "typescript:ts-nextjs-client", #{ next: #{ revalidate: 5, tags: #["pet"] } });
 `;

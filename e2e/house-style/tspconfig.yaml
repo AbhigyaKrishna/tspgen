@@ -1,27 +1,27 @@
 emit:
-  - "@specgen/emitter-kotlin"
-  - "@specgen/emitter-typescript"
+  - "@tspgen/emitter-kotlin"
+  - "@tspgen/emitter-typescript"
 options:
-  "@specgen/emitter-kotlin":
-    emitter-output-dir: "{project-root}/build/generated/specgen"
+  "@tspgen/emitter-kotlin":
+    emitter-output-dir: "{project-root}/build/generated/tspgen"
     package: "com.example"
     packages:
       - namespace: "Shop.Graph"
         package: "com.example.graph"
     errors: thrown
     validation: true
-    plugins: ["./specgen/permissions.js"]
+    plugins: ["./tspgen/permissions.js"]
     targets:
-      - "@specgen/kotlin-ktor-server":
+      - "@tspgen/kotlin-ktor-server":
           grouping: per-namespace
           service-suffix: Api
           module: false
           nest-routes: true
-  "@specgen/emitter-typescript":
+  "@tspgen/emitter-typescript":
     emitter-output-dir: "{project-root}/ts/generated"
     layout: single-file
     errors: thrown
     targets:
-      - "@specgen/ts-nextjs-client":
+      - "@tspgen/ts-nextjs-client":
           client-style: flat
           error-model: ErrorResponse

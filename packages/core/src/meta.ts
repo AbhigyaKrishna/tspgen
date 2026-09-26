@@ -6,7 +6,7 @@ export type MetaData = Record<string, unknown>;
 /** Metadata by scope: "*", "<language>", "<language>:<target>". */
 export type MetaScopes = Record<string, MetaData>;
 
-export const META_DECORATOR = "Specgen.meta";
+export const META_DECORATOR = "TspGen.meta";
 
 function isObject(value: unknown): value is MetaData {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -28,7 +28,7 @@ export function mergeScopes(a: MetaScopes, b: MetaScopes): MetaScopes {
   return out;
 }
 
-/** Metadata scopes from `@Specgen.meta` applications (in source order). */
+/** Metadata scopes from `@TspGen.meta` applications (in source order). */
 export function metaScopes(decorators: DecoratorData | undefined): MetaScopes {
   const scopes: MetaScopes = {};
   for (const [scope, data] of decorators?.[META_DECORATOR] ?? []) {

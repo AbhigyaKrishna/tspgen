@@ -1,5 +1,5 @@
 {
-  "name": "specgen-e2e-kotlin",
+  "name": "tspgen-e2e-kotlin",
   "private": true,
   "type": "module",
   "scripts": {
@@ -7,9 +7,9 @@
     "test": "pnpm generate && ./gradlew test --console=plain"
   },
   "dependencies": {
-    "@specgen/emitter-kotlin": "workspace:*",
-    "@specgen/kotlin-ktor-client": "workspace:*",
-    "@specgen/kotlin-ktor-server": "workspace:*",
+    "@tspgen/emitter-kotlin": "workspace:*",
+    "@tspgen/kotlin-ktor-client": "workspace:*",
+    "@tspgen/kotlin-ktor-server": "workspace:*",
     "@typespec/compiler": "1.16.0",
     "@typespec/http": "1.16.0"
   }

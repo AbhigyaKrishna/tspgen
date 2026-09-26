@@ -6,7 +6,7 @@ import {
   type KtOperation,
   type KtParam,
   type KtTypeUse,
-} from "@specgen/emitter-kotlin";
+} from "@tspgen/emitter-kotlin";
 import type { ServerOperation } from "./context.js";
 import type { KtorServerOptions } from "./options.js";
 import type { ServerUnit } from "./units.js";

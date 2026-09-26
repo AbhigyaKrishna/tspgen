@@ -8,7 +8,7 @@ import { HEADER, petSpec, server } from "./tester.js";
 const DIR = "server/com/acme/server";
 
 function dirWith(files: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), "specgen-ktor-"));
+  const dir = mkdtempSync(join(tmpdir(), "tspgen-ktor-"));
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), content);
@@ -148,13 +148,13 @@ fun Route.petsRoutes(service: PetsService) {
   it("reports unknown routing styles", async () => {
     const [, diagnostics] = await server({ "routing-style": "nope" }).compileAndDiagnose(petSpec);
     expectDiagnostics(diagnostics, {
-      code: "@specgen/emitter-core/target-failed",
+      code: "@tspgen/emitter-core/target-failed",
       message: /unknown routing style 'nope' \(available: dsl, resources\)/,
     });
   });
 
   it("validates target options", async () => {
     const [, diagnostics] = await server({ grouping: "sideways" }).compileAndDiagnose(petSpec);
-    expectDiagnostics(diagnostics, { code: "@specgen/emitter-core/invalid-target-options" });
+    expectDiagnostics(diagnostics, { code: "@tspgen/emitter-core/invalid-target-options" });
   });
 });

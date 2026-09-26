@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ExtensionRegistry, loadModuleDefault } from "../../src/index.js";
 
 describe("loadModuleDefault", () => {
-  const dir = mkdtempSync(join(tmpdir(), "specgen-load-"));
+  const dir = mkdtempSync(join(tmpdir(), "tspgen-load-"));
   writeFileSync(join(dir, "local.mjs"), `export default { name: "local" };`);
   writeFileSync(join(dir, "nodefault.mjs"), `export const x = 1;`);
   mkdirSync(join(dir, "node_modules", "fake-plugin"), { recursive: true });

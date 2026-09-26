@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { buildApiIR } from "../ir/build.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
 import { writeOutputs, type OutputFile } from "../output/manifest.js";
-import type { PluginContext, SpecgenPlugin } from "../plugins/plugin.js";
+import type { PluginContext, TspGenPlugin } from "../plugins/plugin.js";
 import { resolveMeta, type MetaScopes } from "../meta.js";
 import { ExtensionRegistry } from "../plugins/registry.js";
 import type { FileSpec, LanguageModule, Target } from "../targets/target.js";
@@ -19,7 +19,7 @@ export interface PipelineOptions<L> {
   outputDir: string;
   language: LanguageModule<L>;
   targets: PipelineTarget<L>[];
-  plugins?: SpecgenPlugin<L>[];
+  plugins?: TspGenPlugin<L>[];
   templateDir?: string;
   emitterOptions?: Record<string, unknown>;
 }
@@ -108,7 +108,7 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
   await writeOutputs(program, opts.outputDir, outputs);
 }
 
-function templateLayers<L>(opts: PipelineOptions<L>, plugins: SpecgenPlugin<L>[]): TemplateLayer[] {
+function templateLayers<L>(opts: PipelineOptions<L>, plugins: TspGenPlugin<L>[]): TemplateLayer[] {
   const layers: TemplateLayer[] = [];
   if (opts.templateDir) layers.push({ name: "template-dir", dir: opts.templateDir });
   for (const plugin of plugins) {

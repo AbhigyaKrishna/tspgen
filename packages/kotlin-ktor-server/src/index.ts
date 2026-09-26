@@ -1,12 +1,12 @@
-import type { Target } from "@specgen/emitter-core";
-import type { KotlinIR } from "@specgen/emitter-kotlin";
+import type { Target } from "@tspgen/emitter-core";
+import type { KotlinIR } from "@tspgen/emitter-kotlin";
 import { resolve } from "node:path";
 import { ktorServerHelpers } from "./helpers.js";
 import { ktorServerOptionsSchema, type KtorServerOptions } from "./options.js";
 import { planServerFiles } from "./plan.js";
 
 export const ktorServerTarget: Target<KotlinIR> = {
-  name: "@specgen/kotlin-ktor-server",
+  name: "@tspgen/kotlin-ktor-server",
   kind: "server",
   language: "kotlin",
   templates: resolve(import.meta.dirname, "../templates"),

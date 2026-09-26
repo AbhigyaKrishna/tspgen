@@ -15,7 +15,7 @@ import {
   type TypeIR,
   type TypeRef,
   type UnionIR,
-} from "@specgen/emitter-core";
+} from "@tspgen/emitter-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "../lib.js";
 import { memberName, propertyKey, typeName } from "../naming.js";

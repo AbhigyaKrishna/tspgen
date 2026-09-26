@@ -21,7 +21,7 @@ export async function loadTargets<L>(
     try {
       target = await loadModuleDefault<Target<L>>(specifier, baseDir);
       if (!target || typeof target.name !== "string" || typeof target.files !== "function") {
-        throw new Error("default export is not a specgen target (missing 'name' or 'files')");
+        throw new Error("default export is not a tspgen target (missing 'name' or 'files')");
       }
       if (target.language !== language) {
         throw new Error(`target is for language '${target.language}', not '${language}'`);

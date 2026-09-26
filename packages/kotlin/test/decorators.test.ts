@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildApiIR } from "@specgen/emitter-core";
+import { buildApiIR } from "@tspgen/emitter-core";
 import { Tester } from "./tester.js";
 
 describe("Kotlin decorators", () => {

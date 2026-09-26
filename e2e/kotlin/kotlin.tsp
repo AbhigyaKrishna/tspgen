@@ -1,7 +1,7 @@
-import "@specgen/emitter-kotlin";
+import "@tspgen/emitter-kotlin";
 import "./petstore.tsp";
 
-using Specgen;
+using TspGen;
 
 @@meta(PetStore.Toy, "kotlin", #{ implements: #["java.io.Serializable"] });
 @@meta(PetStore.Pet, "kotlin", #{ annotations: #["@Suppress(\"unused\")"] });

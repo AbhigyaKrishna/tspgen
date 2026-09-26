@@ -1,4 +1,4 @@
-import type { KtOperation } from "@specgen/emitter-kotlin";
+import type { KtOperation } from "@tspgen/emitter-kotlin";
 
 /** A route handler, or a wrapper call (e.g. `authenticate("jwt")`) whose block holds nested nodes. */
 export type RouteNode =

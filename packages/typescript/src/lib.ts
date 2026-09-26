@@ -1,4 +1,4 @@
-import { coreEmitterOptionsSchemaProperties, type LanguageEmitterOptions } from "@specgen/emitter-core";
+import { coreEmitterOptionsSchemaProperties, type LanguageEmitterOptions } from "@tspgen/emitter-core";
 import { createTypeSpecLibrary, paramMessage, type JSONSchemaType } from "@typespec/compiler";
 
 export interface TypeScriptEmitterOptions extends LanguageEmitterOptions {
@@ -47,7 +47,7 @@ const optionsSchema = {
 } as const;
 
 export const $lib = createTypeSpecLibrary({
-  name: "@specgen/emitter-typescript",
+  name: "@tspgen/emitter-typescript",
   diagnostics: {
     "duplicate-operation-name": {
       severity: "error",

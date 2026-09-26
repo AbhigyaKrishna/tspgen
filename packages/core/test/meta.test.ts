@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { buildApiIR, mergeMeta, metaScopes, metaStrings, resolveMeta, type MetaScopes } from "../src/index.js";
 
 const MetaTester = createTester(resolvePath(import.meta.dirname, ".."), {
-  libraries: ["@typespec/http", "@specgen/emitter-core"],
+  libraries: ["@typespec/http", "@tspgen/emitter-core"],
 })
   .importLibraries()
-  .using("Http", "Specgen");
+  .using("Http", "TspGen");
 
 describe("meta resolution", () => {
   it("merges keys, later wins, arrays concatenate", () => {
@@ -20,7 +20,7 @@ describe("meta resolution", () => {
 
   it("groups decorator applications by scope and resolves * → language → target", () => {
     const scopes = metaScopes({
-      "Specgen.meta": [
+      "TspGen.meta": [
         ["*", { owner: "a", annotations: ["@All"] }],
         ["kotlin", { table: "pets", annotations: ["@K"] }],
         ["kotlin:ktor-server", { table: "server_pets" }],
@@ -36,7 +36,7 @@ describe("meta resolution", () => {
   });
 });
 
-describe("Specgen.meta decorator", () => {
+describe("TspGen.meta decorator", () => {
   it("compiles on types, properties and operations, including @@meta augments", async () => {
     const { program } = await MetaTester.compile(`
       @service namespace S {
@@ -62,7 +62,7 @@ describe("Specgen.meta decorator", () => {
     expect(metaStrings(program, { annotations: "@One" }, "annotations", "M")).toEqual(["@One"]);
     expect(metaStrings(program, { annotations: 5 }, "annotations", "M")).toEqual([]);
     expectDiagnostics(program.diagnostics, {
-      code: "@specgen/emitter-core/invalid-meta",
+      code: "@tspgen/emitter-core/invalid-meta",
       message: "Metadata key 'annotations' on 'M' must be a string or a list of strings; it is ignored.",
     });
   });

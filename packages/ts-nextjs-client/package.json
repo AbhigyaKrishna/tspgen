@@ -1,5 +1,5 @@
 {
-  "name": "@specgen/ts-nextjs-client",
+  "name": "@tspgen/ts-nextjs-client",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -13,8 +13,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@specgen/emitter-core": "workspace:*",
-    "@specgen/emitter-typescript": "workspace:*"
+    "@tspgen/emitter-core": "workspace:*",
+    "@tspgen/emitter-typescript": "workspace:*"
   },
   "peerDependencies": {
     "@typespec/compiler": "^1.16.0",

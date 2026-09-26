@@ -1,4 +1,4 @@
-import type { ApiIR, HttpVerb, MetaScopes, StatusCodes } from "@specgen/emitter-core";
+import type { ApiIR, HttpVerb, MetaScopes, StatusCodes } from "@tspgen/emitter-core";
 import type { TsImport } from "../imports.js";
 
 /** A TypeScript type at a use site, with its zod schema expression and the imports each needs. */

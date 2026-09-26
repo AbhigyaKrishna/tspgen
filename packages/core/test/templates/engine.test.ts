@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { TemplateEngine, TemplateNotFoundError } from "../../src/index.js";
 
 function dirWith(files: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), "specgen-tpl-"));
+  const dir = mkdtempSync(join(tmpdir(), "tspgen-tpl-"));
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), content);

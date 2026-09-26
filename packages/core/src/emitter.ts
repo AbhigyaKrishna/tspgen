@@ -1,7 +1,7 @@
 import { resolvePath, type EmitContext } from "@typespec/compiler";
 import type { CoreEmitterOptions } from "./options.js";
 import { loadPlugins } from "./plugins/load.js";
-import type { SpecgenPlugin } from "./plugins/plugin.js";
+import type { TspGenPlugin } from "./plugins/plugin.js";
 import { runPipeline } from "./pipeline/run.js";
 import { loadTargets, type TargetSpec } from "./targets/load.js";
 import type { LanguageModule, Target } from "./targets/target.js";
@@ -28,7 +28,7 @@ export async function emitLanguage<L>(
     outputDir: context.emitterOutputDir,
     language,
     targets: [...builtinTargets.map((target) => ({ target, options: {} })), ...targets],
-    plugins: plugins as SpecgenPlugin<L>[],
+    plugins: plugins as TspGenPlugin<L>[],
     templateDir: templateDir ? resolvePath(baseDir, templateDir) : undefined,
     emitterOptions: { ...options },
   });

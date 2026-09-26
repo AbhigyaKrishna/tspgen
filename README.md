@@ -1,38 +1,38 @@
-# specgen — multi-language SDK emitters for TypeSpec
+# tspgen — multi-language SDK emitters for TypeSpec
 
 Generate models, server stubs and typed clients from one [TypeSpec](https://typespec.io) definition.
 The core is language-neutral; languages and server/client libraries plug in as separate packages.
 
 | Package | Role |
 |---|---|
-| `@specgen/emitter-core` | TypeSpec → language-neutral IR, layered Eta templates, plugin API, pipeline, output manifest |
-| `@specgen/emitter-kotlin` | The TypeSpec emitter for Kotlin: kotlinx.serialization models, result/error types, `@Kotlin.*` decorators |
-| `@specgen/kotlin-ktor-server` | Target: Ktor server — service interfaces, routing, module with JSON + StatusPages |
-| `@specgen/kotlin-ktor-client` | Target: Ktor `HttpClient` SDK |
-| `@specgen/emitter-typescript` | The TypeSpec emitter for TypeScript: interfaces, literal-union enums, optional zod schemas, result/error types, `@TS.*` decorators |
-| `@specgen/ts-nextjs-client` | Target: Next.js client SDK — typed `fetch` client, TanStack Query hooks, Server Actions |
+| `@tspgen/emitter-core` | TypeSpec → language-neutral IR, layered Eta templates, plugin API, pipeline, output manifest |
+| `@tspgen/emitter-kotlin` | The TypeSpec emitter for Kotlin: kotlinx.serialization models, result/error types, `@Kotlin.*` decorators |
+| `@tspgen/kotlin-ktor-server` | Target: Ktor server — service interfaces, routing, module with JSON + StatusPages |
+| `@tspgen/kotlin-ktor-client` | Target: Ktor `HttpClient` SDK |
+| `@tspgen/emitter-typescript` | The TypeSpec emitter for TypeScript: interfaces, literal-union enums, optional zod schemas, result/error types, `@TS.*` decorators |
+| `@tspgen/ts-nextjs-client` | Target: Next.js client SDK — typed `fetch` client, TanStack Query hooks, Server Actions |
 
 ## Usage
 
 ```bash
-npm install -D @typespec/compiler @typespec/http @specgen/emitter-kotlin \
-  @specgen/kotlin-ktor-server @specgen/kotlin-ktor-client
+npm install -D @typespec/compiler @typespec/http @tspgen/emitter-kotlin \
+  @tspgen/kotlin-ktor-server @tspgen/kotlin-ktor-client
 ```
 
 `tspconfig.yaml`:
 
 ```yaml
 emit:
-  - "@specgen/emitter-kotlin"
+  - "@tspgen/emitter-kotlin"
 options:
-  "@specgen/emitter-kotlin":
+  "@tspgen/emitter-kotlin":
     package: "com.acme.pets"            # base package (default "generated")
     packages:                           # TypeSpec namespace → Kotlin package (longest prefix wins)
       - { namespace: "PetStore.Admin", package: "com.acme.admin" }
     errors: typed                       # typed | thrown (error responses documented only; you throw your own)
     validation: false                   # true: @minLength/@maxLength/@pattern/@minItems/@maxItems/@minValue/@maxValue → init { require(...) }
     targets:
-      - "@specgen/kotlin-ktor-server":
+      - "@tspgen/kotlin-ktor-server":
           routing-style: dsl            # dsl | resources | <plugin-registered>
           grouping: per-interface       # per-interface | per-namespace | single-file
           handler-shape: params         # params | request-object
@@ -40,11 +40,11 @@ options:
           service-suffix: Service       # interface name suffix, e.g. Api → PetsApi
           module: true                  # false: no <Service>Module.kt (you install ContentNegotiation/StatusPages, and Resources if routing-style: resources)
           nest-routes: false            # true: route("/common/prefix") { get { } get("/{id}") { } } (dsl style)
-      - "@specgen/kotlin-ktor-client": {}
+      - "@tspgen/kotlin-ktor-client": {}
     naming:
       enum-members: UPPER_SNAKE         # UPPER_SNAKE | PascalCase
-    template-dir: ./specgen-templates   # optional template overrides
-    plugins: [./specgen/audit.js]       # optional plugins, applied in order
+    template-dir: ./tspgen-templates   # optional template overrides
+    plugins: [./tspgen/audit.js]       # optional plugins, applied in order
 ```
 
 `packages` is a list, not a map (TypeSpec rejects dots in `tspconfig` option keys): the longest matching
@@ -89,15 +89,15 @@ Authentication is configured on your `HttpClient` (Ktor `Auth` plugin or `defaul
 
 ```yaml
 emit:
-  - "@specgen/emitter-typescript"
+  - "@tspgen/emitter-typescript"
 options:
-  "@specgen/emitter-typescript":
+  "@tspgen/emitter-typescript":
     zod: true                         # emit PetSchema: z.ZodType<Pet> next to each type (default false)
     import-extension: none            # none (Next.js/bundlers) | .js (Node ESM)
     layout: per-type                  # per-type (models/<Name>.ts + barrel) | single-file (types.ts, namespace banners)
     errors: typed                     # typed | thrown (no <Body>Error classes; success unions unchanged; api/errors.ts keeps HttpError)
     targets:
-      - "@specgen/ts-nextjs-client":
+      - "@tspgen/ts-nextjs-client":
           client-style: grouped       # grouped (client/…, hooks, actions) | flat (client.ts: one <Service>Client class)
           react-query: true           # grouped only; no schema default — unset behaves as true (flat: error if set true)
           server-actions: true        # grouped only; no schema default — unset behaves as true (flat: error if set true)
@@ -167,7 +167,7 @@ has all of that model's required fields, else `undefined`; without `error-model`
 the model's other identifier-named fields (nullable types kept as-is), and
 `isUnauthorized`/`isForbidden`/`isNotFound`/`isConflict`.
 
-The flat client does not validate responses with zod, even with `zod: true` on the `@specgen/emitter-typescript`
+The flat client does not validate responses with zod, even with `zod: true` on the `@tspgen/emitter-typescript`
 options — that option only adds `<Type>Schema` exports alongside the models. It also ignores `errors: typed`
 for its own error handling: `<error-class>` is always the flat client's single thrown error type, so the
 `api/` `<Body>Error` classes are still generated but go unused; set `errors: thrown` to skip generating them.
@@ -184,7 +184,7 @@ both) — rename it with `@TS.name`.
 ## Decorators
 
 ```tsp
-import "@specgen/emitter-kotlin";
+import "@tspgen/emitter-kotlin";
 
 @Kotlin.name("Customer")                 // rename the generated declaration/property/operation
 @Kotlin.annotate("@Suppress(\"unused\")") // add annotations (repeatable)
@@ -213,12 +213,12 @@ every instance with its arguments (`@@TS.type(Shop.Page, "Page", "../page")` →
 
 ## Language-specific metadata
 
-Attach metadata for one language or target with `@meta(scope, data)` (namespace `Specgen`, available once
-any specgen emitter library is imported). Scopes: `"*"`, a language (`"kotlin"`, `"typescript"`) or a
+Attach metadata for one language or target with `@meta(scope, data)` (namespace `TspGen`, available once
+any tspgen emitter library is imported). Scopes: `"*"`, a language (`"kotlin"`, `"typescript"`) or a
 target (`"kotlin:ktor-server"`, `"kotlin:ktor-client"`, `"typescript:ts-nextjs-client"`).
 
 ```tsp
-using Specgen;
+using TspGen;
 
 @meta("kotlin", #{ annotations: #["@Entity"], imports: #["jakarta.persistence.Entity"], table: "pets" })
 @meta("typescript", #{ readonly: true })
@@ -229,9 +229,9 @@ Keep it out of the API definition with augment decorators in a separate file:
 
 ```tsp
 // kotlin.tsp — compile this file instead of main.tsp
-import "@specgen/emitter-kotlin";
+import "@tspgen/emitter-kotlin";
 import "./main.tsp";
-using Specgen;
+using TspGen;
 
 @@meta(PetStore.Pets.remove, "kotlin:ktor-server", #{ authenticate: "api" });
 @@meta(PetStore.Toy, "kotlin", #{ implements: #["java.io.Serializable"] });
@@ -262,7 +262,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `typescript:ts-nextjs-client` | `staleTime: number` | GET operations, groups | default `staleTime` in `queryOptions` |
 
 Templates read any metadata with `it.h.meta(item)` / `it.h.meta(item, "ktor-server")`; plugins use
-`resolveMeta(item.meta, language, target)` from `@specgen/emitter-core`.
+`resolveMeta(item.meta, language, target)` from `@tspgen/emitter-core`.
 
 ## Customizing output
 
@@ -288,10 +288,10 @@ language templates, so you can override one partial without forking:
 Templates receive the file data as `it`, emitter options as `it.ctx.options`, and helpers as `it.h`
 (`it.h.kdoc`, `it.h.str`, `it.h.ktorServer.*`, `it.h.ktorClient.*`, plus plugin helpers).
 
-**Plugins.** A plugin is a module whose default export is a `SpecgenPlugin`:
+**Plugins.** A plugin is a module whose default export is a `TspGenPlugin`:
 
 ```js
-// specgen/audit.js
+// tspgen/audit.js
 import { fileURLToPath } from "node:url";
 
 export default {
@@ -322,7 +322,7 @@ Use it with `routing-style: company`.
 
 **Fitting an existing codebase.** `e2e/house-style` shows the full combination: namespace→package mapping,
 `errors: thrown`, validation, `<Feature>Api` interfaces without a generated module, and a small plugin
-(`specgen/permissions.js`) that adds `authenticate`/`requirePermission` wrappers and an `actorId` context
+(`tspgen/permissions.js`) that adds `authenticate`/`requirePermission` wrappers and an `actorId` context
 parameter to every operation. Plugins that edit operation metadata in `transformIR` must replace scope objects
 rather than mutate them, because operations of one group can share them. It also has a TypeScript half (`ts/`):
 single-file layout, `errors: thrown`, and a flat client with an `error-model`, checked with `tsc` (strict flags)

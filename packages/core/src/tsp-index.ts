@@ -6,5 +6,5 @@ export { $lib } from "./lib.js";
 function meta(_context: DecoratorContext, _target: Type, _scope: string, _data: unknown): void {}
 
 export const $decorators = {
-  Specgen: { meta },
+  TspGen: { meta },
 };

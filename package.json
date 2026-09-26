@@ -1,5 +1,5 @@
 {
-  "name": "specgen-monorepo",
+  "name": "tspgen-monorepo",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.5.1",
@@ -7,7 +7,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r build && vitest run",
-    "e2e": "pnpm -r build && pnpm --filter specgen-e2e-kotlin --filter specgen-e2e-typescript --filter specgen-e2e-house-style test"
+    "e2e": "pnpm -r build && pnpm --filter tspgen-e2e-kotlin --filter tspgen-e2e-typescript --filter tspgen-e2e-house-style test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

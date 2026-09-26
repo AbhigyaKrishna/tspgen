@@ -7,7 +7,7 @@ export interface PluginContext {
   registry: ExtensionRegistry;
 }
 
-export interface SpecgenPlugin<L = unknown> {
+export interface TspGenPlugin<L = unknown> {
   name: string;
   /** Restrict to these languages; all languages when omitted. */
   languages?: string[];
@@ -21,6 +21,6 @@ export interface SpecgenPlugin<L = unknown> {
   helpers?: Record<string, unknown>;
 }
 
-export function definePlugin<L = unknown>(plugin: SpecgenPlugin<L>): SpecgenPlugin<L> {
+export function definePlugin<L = unknown>(plugin: TspGenPlugin<L>): TspGenPlugin<L> {
   return plugin;
 }

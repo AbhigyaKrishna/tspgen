@@ -1,4 +1,4 @@
-import type { StatusCodes } from "@specgen/emitter-core";
+import type { StatusCodes } from "@tspgen/emitter-core";
 import {
   camel,
   kotlinString as str,
@@ -6,7 +6,7 @@ import {
   type KtOperation,
   type KtParam,
   type KtResultVariant,
-} from "@specgen/emitter-kotlin";
+} from "@tspgen/emitter-kotlin";
 
 const PARSE: Record<string, string> = {
   Int: "toInt()",

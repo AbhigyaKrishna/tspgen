@@ -5,7 +5,7 @@ export { buildApiIR } from "./ir/build.js";
 export { collectDecorators, decoratorArg, decoratorArgs } from "./ir/decorators.js";
 export { TemplateEngine, TemplateNotFoundError, type TemplateLayer } from "./templates/engine.js";
 export { ExtensionRegistry } from "./plugins/registry.js";
-export { definePlugin, type PluginContext, type SpecgenPlugin } from "./plugins/plugin.js";
+export { definePlugin, type PluginContext, type TspGenPlugin } from "./plugins/plugin.js";
 export { loadPlugins } from "./plugins/load.js";
 export { loadModuleDefault } from "./loader.js";
 export type { FileSpec, LanguageContext, LanguageModule, Target, TargetContext } from "./targets/target.js";

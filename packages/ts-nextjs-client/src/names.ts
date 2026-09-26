@@ -1,4 +1,4 @@
-import { camel, typeName, type TsGroup, type TsOperation, type TsService } from "@specgen/emitter-typescript";
+import { camel, typeName, type TsGroup, type TsOperation, type TsService } from "@tspgen/emitter-typescript";
 
 export const names = {
   groupFile: (g: TsGroup) => `client/${camel(g.name)}`,

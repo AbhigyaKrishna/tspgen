@@ -1,5 +1,5 @@
 {
-  "name": "@specgen/emitter-core",
+  "name": "@tspgen/emitter-core",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",

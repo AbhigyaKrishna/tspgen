@@ -1,12 +1,12 @@
-import type { Target } from "@specgen/emitter-core";
-import type { TsIR } from "@specgen/emitter-typescript";
+import type { Target } from "@tspgen/emitter-core";
+import type { TsIR } from "@tspgen/emitter-typescript";
 import { resolve } from "node:path";
 import { nextjsHelpers } from "./helpers.js";
 import { nextClientOptionsSchema, type NextClientOptions } from "./options.js";
 import { planNextFiles } from "./plan.js";
 
 export const nextClientTarget: Target<TsIR> = {
-  name: "@specgen/ts-nextjs-client",
+  name: "@tspgen/ts-nextjs-client",
   kind: "client",
   language: "typescript",
   templates: resolve(import.meta.dirname, "../templates"),

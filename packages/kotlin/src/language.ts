@@ -1,4 +1,4 @@
-import type { LanguageModule } from "@specgen/emitter-core";
+import type { LanguageModule } from "@tspgen/emitter-core";
 import { resolve } from "node:path";
 import { kotlinHelpers } from "./helpers.js";
 import type { KotlinIR } from "./transform/model.js";

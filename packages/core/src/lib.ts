@@ -1,7 +1,7 @@
 import { createTypeSpecLibrary, paramMessage } from "@typespec/compiler";
 
 export const $lib = createTypeSpecLibrary({
-  name: "@specgen/emitter-core",
+  name: "@tspgen/emitter-core",
   diagnostics: {
     "unsupported-type": {
       severity: "warning",

@@ -1,4 +1,4 @@
-import type { ExtensionRegistry } from "@specgen/emitter-core";
+import type { ExtensionRegistry } from "@tspgen/emitter-core";
 import { ktorServerHelpers } from "./helpers.js";
 import type { KtorServerOptions } from "./options.js";
 import type { ServerUnit } from "./units.js";

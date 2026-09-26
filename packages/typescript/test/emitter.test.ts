@@ -32,7 +32,7 @@ const apiSpec = `
   }
 `;
 
-describe("@specgen/emitter-typescript", () => {
+describe("@tspgen/emitter-typescript", () => {
   it("emits interfaces", async () => {
     const { outputs } = await emitter().compile(spec);
     expect(outputs["models/Pet.ts"]).toBe(`${HEADER}

@@ -7,8 +7,8 @@ import type {
   TypeIR,
   TypeRef,
   UnionIR,
-} from "@specgen/emitter-core";
-import { metaScopes, metaStrings, resolveMeta, type MetaScopes } from "@specgen/emitter-core";
+} from "@tspgen/emitter-core";
+import { metaScopes, metaStrings, resolveMeta, type MetaScopes } from "@tspgen/emitter-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
@@ -31,6 +31,10 @@ const NUMERIC = new Set(["Byte", "Short", "Int", "Long", "Float", "Double"]);
 
 function items(n: number): string {
   return `${n} ${n === 1 ? "item" : "items"}`;
+}
+
+function isEmptyObject(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0;
 }
 
 /** Builds Kotlin declarations for every IR type and resolves TypeRefs to Kotlin type uses. */
@@ -356,11 +360,25 @@ export class DeclarationBuilder {
   }
 
   private defaultLiteral(value: unknown, ref: TypeRef, type: KtTypeUse): string | undefined {
+    if (Array.isArray(value)) return value.length === 0 && ref.kind === "array" ? "emptyList()" : undefined;
+    if (ref.kind === "map") return isEmptyObject(value) ? "emptyMap()" : undefined;
     if (ref.kind === "named") {
       const decl = this.decls.get(ref.id);
-      if (decl?.kind !== "enum") return undefined;
-      const member = decl.members.find((m) => m.serialName === String(value));
-      return member ? `${decl.name}.${member.name}` : undefined;
+      // `#{}` for a model whose properties all have defaults (TypeSpec checks assignability).
+      if (decl?.kind === "data-class") return isEmptyObject(value) ? `${decl.name}()` : undefined;
+      if (decl?.kind === "enum") {
+        const member = decl.members.find((m) => m.serialName === String(value));
+        return member ? `${decl.name}.${member.name}` : undefined;
+      }
+      const mapped = this.mapped.get(ref.id);
+      const source = this.types.get(ref.id);
+      if (mapped && source?.kind === "enum") {
+        const member = source.members.find((m) => String(m.value) === String(value));
+        return member
+          ? `${mapped.text}.${identifier(decoratorArg(member.decorators, "Kotlin.name") ?? this.memberName(member.name))}`
+          : undefined;
+      }
+      return undefined;
     }
     if (typeof value === "string") return type.text === "String" ? kotlinString(value) : undefined;
     if (typeof value === "boolean") return String(value);

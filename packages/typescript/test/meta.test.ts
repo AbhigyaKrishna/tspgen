@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { emitter } from "./tester.js";
 
 const spec = `
-  using Specgen;
+  using TspGen;
   @service namespace S;
   model Owner { name: string }
   @meta("typescript", #{ readonly: true, supertypes: #[#{ name: "Owner", from: "./Owner" }], jsdoc: #["@public"] })

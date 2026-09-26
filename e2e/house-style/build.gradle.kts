@@ -24,8 +24,8 @@ kotlin {
     jvmToolchain(17)
     sourceSets.main {
         kotlin.srcDirs(
-            "build/generated/specgen/models",
-            "build/generated/specgen/server",
+            "build/generated/tspgen/models",
+            "build/generated/tspgen/server",
         )
     }
 }

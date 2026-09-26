@@ -1,5 +1,5 @@
-import { metaNumber, metaObject, type FileSpec, type TargetContext } from "@specgen/emitter-core";
-import { reportDiagnostic } from "@specgen/emitter-typescript";
+import { metaNumber, metaObject, type FileSpec, type TargetContext } from "@tspgen/emitter-core";
+import { reportDiagnostic } from "@tspgen/emitter-typescript";
 import { NoTarget } from "@typespec/compiler";
 import {
   relativeSpecifier,
@@ -9,7 +9,7 @@ import {
   type TsIR,
   type TsOperation,
   type TsService,
-} from "@specgen/emitter-typescript";
+} from "@tspgen/emitter-typescript";
 import { planFlatFiles } from "./flat.js";
 import { nextjsHelpers as h } from "./helpers.js";
 import { names } from "./names.js";

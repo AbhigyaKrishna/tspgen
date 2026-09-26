@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { emitter } from "./tester.js";
 
 const spec = `
-  using Specgen;
+  using TspGen;
   @service namespace S;
   @meta("kotlin", #{ annotations: #["@Entity"], imports: #["jakarta.persistence.Entity"], implements: #["java.io.Serializable"], table: "pets" })
   @meta("*", #{ owner: "team-a" })
@@ -50,7 +50,7 @@ data class Pet(
   });
 
   it("exposes all metadata to templates via it.h.meta", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "specgen-meta-"));
+    const dir = mkdtempSync(join(tmpdir(), "tspgen-meta-"));
     mkdirSync(dirname(join(dir, "kotlin/common/header.eta")), { recursive: true });
     writeFileSync(join(dir, "kotlin/common/header.eta"), `// meta: <%= it.decl ? JSON.stringify(it.h.meta(it.decl)) : "" %>`);
     const { outputs } = await emitter({ "template-dir": dir }).compile(spec);
@@ -61,10 +61,10 @@ data class Pet(
 
   it("warns on built-in keys with the wrong type", async () => {
     const [, diagnostics] = await emitter().compileAndDiagnose(`
-      using Specgen;
+      using TspGen;
       @service namespace S;
       @meta("kotlin", #{ annotations: 5 }) model M { x: int32 }
     `);
-    expectDiagnostics(diagnostics, { code: "@specgen/emitter-core/invalid-meta", message: /'annotations' on 'S.M'/ });
+    expectDiagnostics(diagnostics, { code: "@tspgen/emitter-core/invalid-meta", message: /'annotations' on 'S.M'/ });
   });
 });

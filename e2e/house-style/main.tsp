@@ -1,8 +1,8 @@
-import "@specgen/emitter-kotlin";
-import "@specgen/emitter-typescript";
+import "@tspgen/emitter-kotlin";
+import "@tspgen/emitter-typescript";
 import "./api.tsp";
 
-using Specgen;
+using TspGen;
 
 @@Kotlin.type(Shop.Page, "com.example.core.Page");
 @@Kotlin.type(Shop.isoInstant, "com.example.core.IsoInstant");

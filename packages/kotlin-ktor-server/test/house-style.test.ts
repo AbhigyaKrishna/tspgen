@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HEADER, server } from "./tester.js";
 
 const graphSpec = `
-  using Specgen;
+  using TspGen;
   @service namespace Shop;
   namespace Graph {
     model Node { id: string; name: string }
@@ -191,7 +191,7 @@ fun Route.graphUnmanagedRoutes(service: GraphApi) {
 
   it("fails when a routeSet yields no function name", async () => {
     const [, diagnostics] = await server().compileAndDiagnose(graphSpec + `@@meta(Shop.Graph.Probe, "kotlin:ktor-server", #{ routeSet: "-" });`);
-    expectDiagnostics(diagnostics, { code: "@specgen/emitter-core/target-failed", message: /routeSet '-'/ });
+    expectDiagnostics(diagnostics, { code: "@tspgen/emitter-core/target-failed", message: /routeSet '-'/ });
   });
 
   it("renders a wrapper declared on both namespace and operation once", async () => {
@@ -204,13 +204,13 @@ fun Route.graphUnmanagedRoutes(service: GraphApi) {
   it("refuses wrap, routeSet and nest-routes outside the dsl routing style", async () => {
     const [, diagnostics] = await server({ ...house, "routing-style": "resources" }).compileAndDiagnose(graphSpec + permissions);
     expectDiagnostics(diagnostics, {
-      code: "@specgen/emitter-core/target-failed",
+      code: "@tspgen/emitter-core/target-failed",
       message: /need routing-style "dsl" \(got "resources"\)/,
     });
   });
 
   const pagedSpec = `
-    using Specgen;
+    using TspGen;
     @service namespace Shop;
     model PageParams { @query offset?: int32; @query limit?: int32 }
     model Node { id: string }
@@ -263,14 +263,14 @@ interface NodesService {
       @@meta(Shop.Nodes.readNode, "kotlin:ktor-server", #{ context: #[#{ name: "id", type: "String", expr: "\\"x\\"" }] });
     `);
     expectDiagnostics(diagnostics, {
-      code: "@specgen/emitter-core/target-failed",
+      code: "@tspgen/emitter-core/target-failed",
       message: /context parameter 'id' clashes with a parameter of 'Shop.Nodes.readNode'/,
     });
   });
 
   it("accepts replaces as a single string, applying only where that parameter exists", async () => {
     const { outputs } = await server().compile(`
-      using Specgen;
+      using TspGen;
       @service namespace Shop;
       model Node { id: string }
       @route("/nodes") interface Nodes {
@@ -296,7 +296,7 @@ interface NodesService {
 
   it("backtick-escapes a context name that is a Kotlin keyword", async () => {
     const { outputs } = await server().compile(`
-      using Specgen;
+      using TspGen;
       @service namespace Shop;
       model Node { id: string }
       @route("/nodes") interface Nodes {
@@ -316,7 +316,7 @@ interface NodesService {
 
   it("fails when a context parameter clashes with a reserved handler identifier", async () => {
     const [, diagnostics] = await server().compileAndDiagnose(`
-      using Specgen;
+      using TspGen;
       @service namespace Shop;
       model Node { id: string }
       @route("/nodes") interface Nodes {
@@ -327,14 +327,14 @@ interface NodesService {
       });
     `);
     expectDiagnostics(diagnostics, {
-      code: "@specgen/emitter-core/target-failed",
+      code: "@tspgen/emitter-core/target-failed",
       message: /context parameter 'service' clashes with a parameter of 'Shop.Nodes.readNode'/,
     });
   });
 
   it("fails when replaces names a path parameter", async () => {
     const [, diagnostics] = await server().compileAndDiagnose(`
-      using Specgen;
+      using TspGen;
       @service namespace Shop;
       model Node { id: string }
       @route("/nodes") interface Nodes {
@@ -345,7 +345,7 @@ interface NodesService {
       });
     `);
     expectDiagnostics(diagnostics, {
-      code: "@specgen/emitter-core/target-failed",
+      code: "@tspgen/emitter-core/target-failed",
       message: /context 'page' on 'Shop\.Nodes\.readNode' cannot replace path parameter 'id'/,
     });
   });

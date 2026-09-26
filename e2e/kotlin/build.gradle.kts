@@ -30,9 +30,9 @@ kotlin {
     }
     sourceSets.main {
         kotlin.srcDirs(
-            "build/generated/specgen/models",
-            "build/generated/specgen/server",
-            "build/generated/specgen/client",
+            "build/generated/tspgen/models",
+            "build/generated/tspgen/server",
+            "build/generated/tspgen/client",
         )
     }
 }

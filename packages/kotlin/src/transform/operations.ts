@@ -1,4 +1,4 @@
-import { mergeScopes, metaScopes, type ApiIR, type MetaScopes, type OperationIR, type StatusCodes } from "@specgen/emitter-core";
+import { mergeScopes, metaScopes, type ApiIR, type MetaScopes, type OperationIR, type StatusCodes } from "@tspgen/emitter-core";
 import { camel, identifier, typeName } from "../naming.js";
 import type { DeclarationBuilder } from "./declarations.js";
 import { decoratorArg } from "./decorators.js";

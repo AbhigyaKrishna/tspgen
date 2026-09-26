@@ -1,4 +1,4 @@
-import { camel, typeName, type KtOperation, type KtService } from "@specgen/emitter-kotlin";
+import { camel, typeName, type KtOperation, type KtService } from "@tspgen/emitter-kotlin";
 import type { ServerOperation } from "./context.js";
 import type { KtorServerOptions } from "./options.js";
 

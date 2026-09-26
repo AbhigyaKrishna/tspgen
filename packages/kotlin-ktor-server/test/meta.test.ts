@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { petSpec, server } from "./tester.js";
 
 const DIR = "server/com/acme/server";
-const withMeta = `using Specgen;\n${petSpec}
+const withMeta = `using TspGen;\n${petSpec}
   @@meta(PetStore.Pets.remove, "kotlin:ktor-server", #{ authenticate: "jwt", annotations: #["@Throws(Exception::class)"] });
   @@meta(PetStore.Pets, "kotlin:ktor-client", #{ annotations: #["@JvmSynthetic"] });
 `;
@@ -27,7 +27,7 @@ describe("ktor-server @meta keys", () => {
 
   it("applies group-level authenticate to every route, in Resources style too", async () => {
     const { outputs } = await server({ "routing-style": "resources" }).compile(
-      `using Specgen;\n${petSpec}\n@@meta(PetStore.Pets, "kotlin:ktor-server", #{ authenticate: #["jwt", "basic"] });`,
+      `using TspGen;\n${petSpec}\n@@meta(PetStore.Pets, "kotlin:ktor-server", #{ authenticate: #["jwt", "basic"] });`,
     );
     const routes = outputs[`${DIR}/PetsRoutes.kt`];
     expect(routes.match(/authenticate\("jwt", "basic"\) \{/g)).toHaveLength(4);

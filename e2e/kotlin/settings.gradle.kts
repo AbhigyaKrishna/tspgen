@@ -1,1 +1,1 @@
-rootProject.name = "specgen-e2e-kotlin"
+rootProject.name = "tspgen-e2e-kotlin"

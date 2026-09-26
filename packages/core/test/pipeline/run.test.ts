@@ -15,7 +15,7 @@ import {
 import { Tester } from "../tester.js";
 
 function dirWith(files: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), "specgen-pipe-"));
+  const dir = mkdtempSync(join(tmpdir(), "tspgen-pipe-"));
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), content);
@@ -85,7 +85,7 @@ describe("runPipeline", () => {
     const out = resolveVirtualPath("out");
     const broken: Target<FakeIR> = { ...target, files: () => [{ path: "x.txt", template: "missing", data: {} }] };
     await runPipeline({ program, outputDir: out, language, targets: [{ target: broken, options: {} }] });
-    expectDiagnostics(program.diagnostics, { code: "@specgen/emitter-core/template-error" });
+    expectDiagnostics(program.diagnostics, { code: "@tspgen/emitter-core/template-error" });
     await expect(program.host.readFile(resolvePath(out, "x.txt"))).rejects.toThrow();
   });
 
@@ -96,7 +96,7 @@ describe("runPipeline", () => {
       { path: "a.txt", template: "fake/model", data: { model: { name: "B" } } },
     ] };
     await runPipeline({ program, outputDir: resolveVirtualPath("out"), language, targets: [{ target: dup, options: {} }] });
-    expectDiagnostics(program.diagnostics, { code: "@specgen/emitter-core/duplicate-file" });
+    expectDiagnostics(program.diagnostics, { code: "@tspgen/emitter-core/duplicate-file" });
   });
 
   it("reports plugin failures with the plugin name", async () => {
@@ -104,7 +104,7 @@ describe("runPipeline", () => {
     const bad = definePlugin<FakeIR>({ name: "bad", transformIR() { throw new Error("boom"); } });
     await runPipeline({ program, outputDir: resolveVirtualPath("out"), language, targets: [{ target, options: {} }], plugins: [bad] });
     expectDiagnostics(program.diagnostics, {
-      code: "@specgen/emitter-core/plugin-failed",
+      code: "@tspgen/emitter-core/plugin-failed",
       message: "Plugin 'bad' failed during transformIR: boom",
     });
   });

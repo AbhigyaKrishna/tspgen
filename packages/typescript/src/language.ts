@@ -1,4 +1,4 @@
-import type { LanguageModule } from "@specgen/emitter-core";
+import type { LanguageModule } from "@tspgen/emitter-core";
 import { resolve } from "node:path";
 import { tsHelpers } from "./helpers.js";
 import type { TsIR } from "./transform/model.js";

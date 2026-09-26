@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { buildApiIR, metaScopes, type ModelIR } from "../../src/index.js";
 
 const MetaTester = createTester(resolvePath(import.meta.dirname, "../.."), {
-  libraries: ["@typespec/http", "@specgen/emitter-core"],
+  libraries: ["@typespec/http", "@tspgen/emitter-core"],
 })
   .importLibraries()
-  .using("Http", "Specgen");
+  .using("Http", "TspGen");
 
 describe("IR facts for house-style features", () => {
   it("records enclosing namespace decorators on groups, service namespace first", async () => {

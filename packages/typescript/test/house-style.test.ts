@@ -53,7 +53,7 @@ describe("typescript house-style options", () => {
 
   it("maps templated models with @TS.type and emits const tuples for enums with @meta values", async () => {
     const { outputs } = await emitter({ layout: "single-file" }).compile(`
-      using Specgen;
+      using TspGen;
       @service namespace S;
       model Page<T> { items: T[]; total: int64 }
       enum Kind { a: "A", b: "B" }
@@ -77,7 +77,7 @@ describe("typescript house-style options", () => {
 
   it("resolves relative @TS.type modules from the output root, rebased per file depth", async () => {
     const { outputs } = await emitter({ layout: "single-file" }).compile(`
-      using Specgen;
+      using TspGen;
       @service namespace S;
       model Page<T> { items: T[]; total: int64 }
       model Node { id: string }
@@ -93,25 +93,25 @@ describe("typescript house-style options", () => {
 
   it("ignores an invalid values identifier and reports invalid-meta", async () => {
     const [invalidIdent, notIdentDiagnostics] = await emitter().compileAndDiagnose(`
-      using Specgen;
+      using TspGen;
       @service namespace S;
       enum Kind { a: "A", b: "B" }
       @@meta(S.Kind, "typescript", #{ values: "not an identifier" });
     `);
     expectDiagnostics(notIdentDiagnostics, {
-      code: "@specgen/emitter-core/invalid-meta",
+      code: "@tspgen/emitter-core/invalid-meta",
       message: /'values'.*must be an identifier different from the enum name/,
     });
     expect(invalidIdent.outputs["models/Kind.ts"]).toContain('export type Kind = "A" | "B";');
 
     const [ownName, sameNameDiagnostics] = await emitter().compileAndDiagnose(`
-      using Specgen;
+      using TspGen;
       @service namespace S;
       enum Kind { a: "A", b: "B" }
       @@meta(S.Kind, "typescript", #{ values: "Kind" });
     `);
     expectDiagnostics(sameNameDiagnostics, {
-      code: "@specgen/emitter-core/invalid-meta",
+      code: "@tspgen/emitter-core/invalid-meta",
       message: /'values'.*must be an identifier different from the enum name/,
     });
     expect(ownName.outputs["models/Kind.ts"]).toContain('export type Kind = "A" | "B";');
@@ -119,13 +119,13 @@ describe("typescript house-style options", () => {
 
   it("ignores a values identifier that is a reserved word and reports invalid-meta", async () => {
     const [result, diagnostics] = await emitter().compileAndDiagnose(`
-      using Specgen;
+      using TspGen;
       @service namespace S;
       enum Kind { a: "A", b: "B" }
       @@meta(S.Kind, "typescript", #{ values: "class" });
     `);
     expectDiagnostics(diagnostics, {
-      code: "@specgen/emitter-core/invalid-meta",
+      code: "@tspgen/emitter-core/invalid-meta",
       message: /'values'.*must be an identifier different from the enum name or a reserved word/,
     });
     expect(result.outputs["models/Kind.ts"]).toContain('export type Kind = "A" | "B";');

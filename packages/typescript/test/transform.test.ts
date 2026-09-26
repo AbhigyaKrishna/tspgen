@@ -1,4 +1,4 @@
-import { buildApiIR } from "@specgen/emitter-core";
+import { buildApiIR } from "@tspgen/emitter-core";
 import { describe, expect, it } from "vitest";
 import { transformToTs, type TsDecl, type TsIR } from "../src/transform/index.js";
 import { Tester } from "./tester.js";

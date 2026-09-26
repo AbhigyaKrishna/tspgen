@@ -1,4 +1,4 @@
-import type { ApiIR, AuthIR, HttpVerb, MetaScopes, ServerIR, StatusCodes } from "@specgen/emitter-core";
+import type { ApiIR, AuthIR, HttpVerb, MetaScopes, ServerIR, StatusCodes } from "@tspgen/emitter-core";
 
 /** A Kotlin type as written at a use site, with the imports it needs. */
 export interface KtTypeUse {
