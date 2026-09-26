@@ -1,0 +1,35 @@
+<% const s = it.h.ktorServer; const params = it.units.map((u) => `${s.paramName(u)}: ${u.serviceName}`).join(", "); const args = it.units.map((u) => s.paramName(u)).join(", "); -%>
+/**
+ * Installs content negotiation, error handling and all <%= it.service.name %> routes.
+ */
+fun Application.<%= it.moduleFn %>(<%= params %>) {
+    install(ContentNegotiation) {
+        json()
+    }
+<% for (const p of it.installs) { -%>
+    install(<%= it.h.simpleName(p) %>)
+<% } -%>
+    install(StatusPages) {
+        <%= it.errorsFn %>()
+    }
+    routing {
+        <%= it.apiRoutesFn %>(<%= args %>)
+    }
+}
+
+fun Route.<%= it.apiRoutesFn %>(<%= params %>) {
+<% for (const u of it.units) { -%>
+    <%= u.routesFn %>(<%= s.paramName(u) %>)
+<% } -%>
+}
+
+fun StatusPagesConfig.<%= it.errorsFn %>() {
+<% for (const e of it.exceptions) { -%>
+    exception<<%= e %>> { call, cause ->
+        call.respond(HttpStatusCode.fromValue(cause.status), cause.error)
+    }
+<% } -%>
+    exception<ApiException> { call, cause ->
+        call.respond(HttpStatusCode.fromValue(cause.status))
+    }
+}

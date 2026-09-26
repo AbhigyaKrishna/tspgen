@@ -61,6 +61,7 @@ describe("service IR", () => {
     ]);
 
     expect(create.body).toEqual({
+      name: "pet",
       type: { kind: "named", id: "PetStore.Pet" },
       contentTypes: ["application/json"],
       optional: false,
@@ -95,6 +96,18 @@ describe("service IR", () => {
     const ids = buildApiIR(program).types.map((t) => t.id);
     expect(ids).toContain("S.Pet");
     expect(ids).not.toContain("S.PetCreated");
+  });
+
+  it("refers to the named model for implicit bodies of envelope models", async () => {
+    const { program } = await Tester.compile(`
+      @service namespace S;
+      @error model NotFound { @statusCode _: 404; message: string }
+      op remove(): void | NotFound;
+    `);
+    const ir = buildApiIR(program);
+    const responses = ir.services[0].groups[0].operations[0].responses;
+    expect(responses[1]).toMatchObject({ statusCodes: 404, isError: true, body: { type: { kind: "named", id: "S.NotFound" } } });
+    expect(ir.types.find((t) => t.id === "S.NotFound")).toMatchObject({ properties: [{ name: "message" }] });
   });
 
   it("groups namespace-level operations under the namespace", async () => {

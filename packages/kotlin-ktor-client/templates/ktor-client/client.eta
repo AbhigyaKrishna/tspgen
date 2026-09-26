@@ -1,0 +1,29 @@
+<% const g = it.group; const c = it.h.ktorClient; -%>
+<%~ it.h.kdoc(g.docs) %>class <%= g.name %>Client(
+    private val http: HttpClient,
+    private val baseUrl: String,
+) {
+<% g.operations.forEach((op, i) => { const segments = c.pathSegments(op); -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations(op.annotations, "    ") %>    suspend fun <%= op.name %>(<%= c.signature(op) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %> {
+        val response = http.request {
+            method = HttpMethod.<%= c.method(op.verb) %>
+            url {
+                takeFrom(baseUrl)
+<% if (segments) { -%>
+                appendPathSegments(<%~ segments %>)
+<% } -%>
+<% for (const line of c.queryLines(op)) { -%>
+                <%~ line %>
+<% } -%>
+            }
+<% for (const line of c.requestLines(op)) { -%>
+            <%~ line %>
+<% } -%>
+        }
+<%~ include("ktor-client/response", { op, h: it.h }) %>
+    }
+<% }) -%>
+}

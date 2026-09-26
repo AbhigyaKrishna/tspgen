@@ -1,0 +1,31 @@
+internal fun ApplicationCall.pathParam(name: String): String =
+    parameters[name] ?: throw MissingRequestParameterException(name)
+
+internal fun ApplicationCall.queryParam(name: String): String? = request.queryParameters[name]
+
+internal fun ApplicationCall.queryParams(name: String): List<String> =
+    request.queryParameters.getAll(name) ?: emptyList()
+
+internal fun ApplicationCall.headerParam(name: String): String? = request.headers[name]
+
+internal fun ApplicationCall.cookieParam(name: String): String? = request.cookies[name]
+
+internal fun <T : Any> T?.required(name: String): T = this ?: throw MissingRequestParameterException(name)
+
+internal inline fun <T> String.convertParam(name: String, convert: (String) -> T): T =
+    try {
+        convert(this)
+    } catch (e: Exception) {
+        throw ParameterConversionException(name, "value", e)
+    }
+
+@PublishedApi
+internal val paramJson: Json = Json { isLenient = true }
+
+internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))
+
+internal inline fun <reified T> encodeParam(value: T): String =
+    when (val element = paramJson.encodeToJsonElement(value)) {
+        is JsonPrimitive -> element.content
+        else -> element.toString()
+    }

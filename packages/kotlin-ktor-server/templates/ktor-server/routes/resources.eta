@@ -1,0 +1,25 @@
+<% const u = it.unit; const s = it.h.ktorServer; -%>
+object <%= u.resourcesObject %> {
+<% u.operations.forEach((op, i) => { const params = s.resourceParams(op); -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+    @Serializable
+    @Resource(<%~ it.h.str(op.path) %>)
+    class <%= s.resourceName(op) %><% if (params.length) { %>(<%= params.map((p) => (p.serialName ? `@SerialName(${it.h.str(p.serialName)}) ` : "") + "val " + p.name + ": " + p.type + (p.optional ? " = null" : "")).join(", ") %>)<% } %>
+<% }) -%>
+}
+
+fun Route.<%= u.routesFn %>(service: <%= u.serviceName %>) {
+<% for (const op of u.operations) { -%>
+    <%= op.verb %><<%= u.resourcesObject %>.<%= s.resourceName(op) %>> { resource ->
+<% for (const p of op.params) { -%>
+        val <%= p.name %> = <%~ p.location === "path" || p.location === "query" ? "resource." + p.name : s.paramExpr(p) %>
+<% } -%>
+<% if (op.body) { -%>
+        val <%= op.body.name %> = <%~ s.bodyExpr(op.body) %>
+<% } -%>
+<%~ include("ktor-server/routes/respond", { op, call: s.callExpr(op, u, it.options), h: it.h }) -%>
+    }
+<% } -%>
+}

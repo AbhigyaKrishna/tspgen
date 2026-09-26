@@ -1,0 +1,17 @@
+<% const r = it.op.result; const c = it.h.ktorClient; -%>
+<% if (r.kind === "single") { -%>
+        if (response.status.isSuccess()) {
+            return<%= r.type.text === "Unit" ? "" : " response.body()" %>
+        }
+<% } else { -%>
+        when (response.status.value) {
+<% for (const v of r.decl.variants) { -%>
+            <%= c.statusMatch(v.statusCodes) %> -> return <%= r.decl.name %>.<%= v.name %><%~ c.variantArgs(v) %>
+<% } -%>
+        }
+<% } -%>
+        throw when (response.status.value) {
+<% for (const e of c.errorBranches(it.op)) { -%>
+            <%= e.match %> -> <%~ e.expr %>
+<% } -%>
+        }

@@ -1,0 +1,7 @@
+/**
+ * Base class for HTTP error responses; typed subclasses carry the decoded error body.
+ */
+open class ApiException(
+    val status: Int,
+    message: String? = null,
+) : RuntimeException(message ?: "HTTP status $status")

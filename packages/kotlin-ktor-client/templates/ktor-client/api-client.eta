@@ -1,0 +1,18 @@
+<% const s = it.service; -%>
+/**
+ * Entry point for the <%= s.name %> API.
+ */
+class <%= it.clientName %>(http: HttpClient, baseUrl: String) {
+<% for (const g of s.groups) { -%>
+    val <%= it.h.ktorClient.propertyName(g) %> = <%= g.name %>Client(http, baseUrl)
+<% } -%>
+}
+
+/**
+ * Installs JSON content negotiation compatible with the generated models.
+ */
+fun HttpClientConfig<*>.<%= it.defaultsFn %>(format: Json = Json) {
+    install(ContentNegotiation) {
+        json(format)
+    }
+}

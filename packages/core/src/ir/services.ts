@@ -125,10 +125,12 @@ function buildOperation(
   };
   const body = op.parameters.body;
   if (body) {
+    const property = "property" in body ? body.property : undefined;
     ir.body = {
+      ...(property ? { name: property.name } : {}),
       type: collector.ref(body.type, `${base}Request`),
       contentTypes: body.contentTypes,
-      optional: "property" in body && body.property ? body.property.optional : false,
+      optional: property?.optional ?? false,
       kind: body.bodyKind,
     };
   }

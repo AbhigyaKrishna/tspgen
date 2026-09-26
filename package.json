@@ -6,11 +6,12 @@
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r build && vitest run"
+    "test": "pnpm -r build && vitest run",
+    "e2e": "pnpm -r build && pnpm --filter specgen-e2e-kotlin test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.2"
+    "vitest": "5.0.1"
   }
 }

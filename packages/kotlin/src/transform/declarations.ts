@@ -1,0 +1,307 @@
+import type {
+  ApiIR,
+  DecoratorData,
+  EnumIR,
+  ModelIR,
+  PropertyIR,
+  TypeIR,
+  TypeRef,
+  UnionIR,
+} from "@specgen/emitter-core";
+import { NoTarget, type Program } from "@typespec/compiler";
+import { kotlinString } from "../kotlin-string.js";
+import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
+import { camel, identifier, typeName, upperSnake } from "../naming.js";
+import { decoratorArg, decoratorArgs } from "./decorators.js";
+import type { KtDataClass, KtDecl, KtEnumMember, KtProperty, KtTypeUse } from "./model.js";
+import { fqnTypeUse, JSON_ELEMENT, listOf, mapOf, nullable, scalarTypeUse } from "./type-map.js";
+
+type UnionShape = "enum" | "string-alias" | "sealed-interface" | "json";
+
+export interface DeclarationOptions {
+  modelsPackage: string;
+  enumMemberNaming: EnumMemberNaming;
+}
+
+/** Builds Kotlin declarations for every IR type and resolves TypeRefs to Kotlin type uses. */
+export class DeclarationBuilder {
+  private readonly decls = new Map<string, KtDecl>();
+  private readonly mapped = new Map<string, KtTypeUse>();
+  private readonly types: Map<string, TypeIR>;
+
+  constructor(
+    private readonly program: Program,
+    private readonly api: ApiIR,
+    private readonly options: DeclarationOptions,
+  ) {
+    this.types = new Map(api.types.map((t) => [t.id, t]));
+  }
+
+  build(): KtDecl[] {
+    for (const t of this.api.types) {
+      const fqn = decoratorArg(t.decorators, "Kotlin.type");
+      if (fqn) this.mapped.set(t.id, fqnTypeUse(fqn));
+    }
+    const own = this.api.types.filter((t) => !this.mapped.has(t.id));
+    for (const t of own) this.decls.set(t.id, this.shell(t));
+    // Enums (and enum-like unions) first so model defaults can reference members; sealed unions
+    // last so they can adjust their variant data classes.
+    for (const t of own) if (t.kind === "enum") this.fillEnum(t);
+    for (const t of own) if (t.kind === "union" && this.unionShape(t) !== "sealed-interface") this.fillUnion(t);
+    for (const t of own) if (t.kind === "model") this.fillModel(t);
+    for (const t of own) if (t.kind === "union" && this.unionShape(t) === "sealed-interface") this.fillUnion(t);
+    this.checkDuplicates();
+    return [...this.decls.values()];
+  }
+
+  typeUse(ref: TypeRef): KtTypeUse {
+    switch (ref.kind) {
+      case "named": {
+        const mapped = this.mapped.get(ref.id);
+        if (mapped) return mapped;
+        const decl = this.decls.get(ref.id);
+        return decl ? { text: decl.name, imports: [decl.fqn], nullable: false } : JSON_ELEMENT;
+      }
+      case "array":
+        return listOf(this.typeUse(ref.of));
+      case "map":
+        return mapOf(this.typeUse(ref.of));
+      case "scalar": {
+        const fqn = decoratorArg(ref.custom?.decorators, "Kotlin.type");
+        return fqn ? fqnTypeUse(fqn) : scalarTypeUse(ref.name);
+      }
+      case "literal":
+        return scalarTypeUse(
+          typeof ref.value === "string"
+            ? "string"
+            : typeof ref.value === "boolean"
+              ? "boolean"
+              : Number.isInteger(ref.value)
+                ? "int32"
+                : "float64",
+        );
+      case "nullable":
+        return nullable(this.typeUse(ref.of));
+      case "unknown":
+        return JSON_ELEMENT;
+    }
+  }
+
+  /** True if a model-level declaration already uses this simple name. */
+  hasName(name: string): boolean {
+    return [...this.decls.values()].some((d) => d.name === name);
+  }
+
+  annotations(item: { decorators: DecoratorData; deprecated?: string }): string[] {
+    const list: string[] = [];
+    if (item.deprecated) list.push(`@Deprecated(${kotlinString(item.deprecated)})`);
+    list.push(...decoratorArgs(item.decorators, "Kotlin.annotate"));
+    return list;
+  }
+
+  private shell(t: TypeIR): KtDecl {
+    const name = decoratorArg(t.decorators, "Kotlin.name") ?? typeName(t.name);
+    const pkg = decoratorArg(t.decorators, "Kotlin.packageName") ?? this.options.modelsPackage;
+    const base = {
+      id: t.id,
+      name,
+      package: pkg,
+      fqn: `${pkg}.${name}`,
+      ...(t.docs ? { docs: t.docs } : {}),
+      annotations: this.annotations(t),
+    };
+    switch (t.kind) {
+      case "model":
+        return t.discriminator
+          ? { ...base, kind: "sealed-interface", discriminator: t.discriminator.property, properties: [] }
+          : { ...base, kind: "data-class", properties: [], implements: [] };
+      case "enum":
+        return t.members.every((m) => typeof m.value === "string")
+          ? { ...base, kind: "enum", members: [] }
+          : { ...base, kind: "typealias", target: JSON_ELEMENT };
+      case "union":
+        switch (this.unionShape(t)) {
+          case "enum":
+            return { ...base, kind: "enum", members: [] };
+          case "sealed-interface":
+            return { ...base, kind: "sealed-interface", discriminator: t.discriminator!.property, properties: [] };
+          default:
+            return { ...base, kind: "typealias", target: JSON_ELEMENT };
+        }
+    }
+  }
+
+  private unionShape(u: UnionIR): UnionShape {
+    const types = u.variants.map((v) => v.type);
+    const stringLiterals = types.filter((t) => t.kind === "literal" && typeof t.value === "string").length;
+    if (stringLiterals === types.length) return "enum";
+    const strings = types.filter((t) => t.kind === "scalar" && t.name === "string").length;
+    if (stringLiterals > 0 && stringLiterals + strings === types.length) return "string-alias";
+    if (
+      u.discriminator?.envelope === "none" &&
+      types.every((t) => t.kind === "named" && this.types.get(t.id)?.kind === "model")
+    ) {
+      return "sealed-interface";
+    }
+    return "json";
+  }
+
+  private memberName(name: string): string {
+    return this.options.enumMemberNaming === "PascalCase" ? typeName(name) : upperSnake(name);
+  }
+
+  private fillEnum(e: EnumIR): void {
+    const decl = this.decls.get(e.id)!;
+    if (decl.kind === "enum") {
+      decl.members = e.members.map(
+        (m): KtEnumMember => ({
+          name: identifier(decoratorArg(m.decorators, "Kotlin.name") ?? this.memberName(m.name)),
+          serialName: String(m.value),
+          ...(m.docs ? { docs: m.docs } : {}),
+          annotations: this.annotations(m),
+        }),
+      );
+      return;
+    }
+    if (decl.kind === "typealias") {
+      const integers = e.members.every((m) => Number.isInteger(m.value));
+      decl.target = scalarTypeUse(integers ? "int32" : "float64");
+      reportDiagnostic(this.program, { code: "numeric-enum", format: { id: e.id, type: decl.target.text }, target: NoTarget });
+    }
+  }
+
+  private fillUnion(u: UnionIR): void {
+    const decl = this.decls.get(u.id)!;
+    const shape = this.unionShape(u);
+    if (decl.kind === "enum") {
+      decl.members = u.variants.map((v) => {
+        const value = v.type.kind === "literal" ? String(v.type.value) : "";
+        return {
+          name: identifier(this.memberName(v.name ?? value)),
+          serialName: value,
+          ...(v.docs ? { docs: v.docs } : {}),
+          annotations: [],
+        };
+      });
+    } else if (decl.kind === "sealed-interface") {
+      for (const variant of u.variants) {
+        if (variant.type.kind !== "named") continue;
+        const target = this.decls.get(variant.type.id);
+        if (target?.kind !== "data-class") continue;
+        target.implements.push(decl.fqn);
+        if (target.serialName === undefined && variant.name) target.serialName = variant.name;
+        target.properties = target.properties.filter((p) => p.wireName !== decl.discriminator);
+      }
+    } else if (decl.kind === "typealias") {
+      if (shape === "string-alias") {
+        decl.target = scalarTypeUse("string");
+      } else {
+        decl.target = JSON_ELEMENT;
+        reportDiagnostic(this.program, { code: "unsupported-union", format: { id: u.id }, target: NoTarget });
+      }
+    }
+  }
+
+  private fillModel(model: ModelIR): void {
+    const decl = this.decls.get(model.id)!;
+    if (decl.kind === "sealed-interface") {
+      decl.properties = model.properties
+        .filter((p) => p.name !== model.discriminator?.property)
+        .map((p) => this.property(p, false));
+      return;
+    }
+    if (decl.kind !== "data-class") return;
+    const chain = this.chain(model);
+    const discriminators = new Set(chain.flatMap((m) => (m.discriminator ? [m.discriminator.property] : [])));
+    const sealedBases = chain.slice(0, -1).filter((m) => m.discriminator && this.decls.get(m.id)?.kind === "sealed-interface");
+    const abstractNames = new Set(sealedBases.flatMap((m) => m.properties.map((p) => p.name)));
+    const byName = new Map<string, PropertyIR>();
+    for (const m of chain) for (const p of m.properties) if (!discriminators.has(p.name)) byName.set(p.name, p);
+    decl.properties = [...byName.values()].map((p) => this.property(p, abstractNames.has(p.name)));
+    this.fillSealedParents(model, decl, sealedBases);
+    if (chain.some((m) => m.additionalProperties)) {
+      reportDiagnostic(this.program, { code: "additional-properties", format: { id: model.id }, target: NoTarget });
+    }
+  }
+
+  private fillSealedParents(model: ModelIR, decl: KtDataClass, sealedBases: ModelIR[]): void {
+    for (const base of sealedBases) {
+      decl.implements.push(this.decls.get(base.id)!.fqn);
+      const value = Object.entries(base.discriminator!.mapping).find(([, id]) => id === model.id)?.[0];
+      if (value !== undefined) decl.serialName = value;
+    }
+  }
+
+  private chain(model: ModelIR): ModelIR[] {
+    const chain: ModelIR[] = [];
+    let current: ModelIR | undefined = model;
+    while (current) {
+      chain.unshift(current);
+      const base: TypeIR | undefined = current.baseId ? this.types.get(current.baseId) : undefined;
+      current = base?.kind === "model" ? base : undefined;
+    }
+    return chain;
+  }
+
+  private property(p: PropertyIR, override: boolean): KtProperty {
+    const name = identifier(decoratorArg(p.decorators, "Kotlin.name") ?? camel(p.name));
+    const fqn = decoratorArg(p.decorators, "Kotlin.type");
+    let type = fqn ? fqnTypeUse(fqn) : this.typeUse(p.type);
+    const defaultValue = p.default !== undefined ? this.defaultLiteral(p.default, p.type, type) : undefined;
+    if (p.optional && defaultValue === undefined) type = nullable(type);
+    const prop: KtProperty = {
+      name,
+      wireName: p.wireName,
+      type,
+      override,
+      ...(p.docs ? { docs: p.docs } : {}),
+      annotations: this.annotations(p),
+    };
+    if (name.replace(/`/g, "") !== p.wireName) prop.serialName = p.wireName;
+    if (defaultValue !== undefined) prop.default = defaultValue;
+    else if (p.optional) prop.default = "null";
+    return prop;
+  }
+
+  private defaultLiteral(value: unknown, ref: TypeRef, type: KtTypeUse): string | undefined {
+    if (ref.kind === "named") {
+      const decl = this.decls.get(ref.id);
+      if (decl?.kind !== "enum") return undefined;
+      const member = decl.members.find((m) => m.serialName === String(value));
+      return member ? `${decl.name}.${member.name}` : undefined;
+    }
+    if (typeof value === "string") return type.text === "String" ? kotlinString(value) : undefined;
+    if (typeof value === "boolean") return String(value);
+    if (typeof value !== "number") return undefined;
+    switch (type.text) {
+      case "Long":
+        return `${value}L`;
+      case "Float":
+        return `${value}f`;
+      case "Double":
+        return Number.isInteger(value) ? `${value}.0` : String(value);
+      case "Int":
+      case "Short":
+      case "Byte":
+        return String(value);
+      default:
+        return undefined;
+    }
+  }
+
+  private checkDuplicates(): void {
+    const seen = new Map<string, string>();
+    for (const decl of this.decls.values()) {
+      const first = seen.get(decl.fqn);
+      if (first) {
+        reportDiagnostic(this.program, {
+          code: "duplicate-type-name",
+          format: { fqn: decl.fqn, first, second: decl.id },
+          target: NoTarget,
+        });
+      } else {
+        seen.set(decl.fqn, decl.id);
+      }
+    }
+  }
+}

@@ -101,7 +101,17 @@ export class TypeCollector {
     if (isRecordModelType(model) && model.name === "Record") {
       return { kind: "map", of: this.ref(model.indexer.value, `${hint}Value`) };
     }
-    return { kind: "named", id: this.collectModel(model, hint) };
+    return { kind: "named", id: this.collectModel(this.spreadSource(model) ?? model, hint) };
+  }
+
+  /**
+   * HTTP bodies of envelope models (e.g. `@error model NotFound { @statusCode _: 404; ... }`) are
+   * anonymous spreads of the named model minus its metadata; refer to the named model instead.
+   */
+  private spreadSource(model: Model): Model | undefined {
+    if (model.name || model.sourceModels.length !== 1) return undefined;
+    const [source] = model.sourceModels;
+    return source.usage === "spread" && source.model.name ? source.model : undefined;
   }
 
   private scalarRef(scalar: Scalar): TypeRef {

@@ -1,0 +1,7 @@
+<% const d = it.decl; %>
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@JsonClassDiscriminator(<%~ it.h.str(d.discriminator) %>)
+sealed interface <%= d.name %><% if (d.properties.length) { %> {
+<% for (const p of d.properties) { %><%~ it.h.kdoc(p.docs, "    ") %>    val <%= p.name %>: <%= p.type.text %>
+<% } %>}<% } %>

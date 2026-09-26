@@ -1,0 +1,14 @@
+<% const u = it.unit; const s = it.h.ktorServer; -%>
+fun Route.<%= u.routesFn %>(service: <%= u.serviceName %>) {
+<% for (const op of u.operations) { -%>
+    <%= op.verb %>(<%~ it.h.str(op.path) %>) {
+<% for (const p of op.params) { -%>
+        val <%= p.name %> = <%~ s.paramExpr(p) %>
+<% } -%>
+<% if (op.body) { -%>
+        val <%= op.body.name %> = <%~ s.bodyExpr(op.body) %>
+<% } -%>
+<%~ include("ktor-server/routes/respond", { op, call: s.callExpr(op, u, it.options), h: it.h }) -%>
+    }
+<% } -%>
+}

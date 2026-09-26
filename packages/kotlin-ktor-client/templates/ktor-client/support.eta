@@ -1,0 +1,10 @@
+@PublishedApi
+internal val paramJson: Json = Json { isLenient = true }
+
+internal inline fun <reified T> encodeParam(value: T): String =
+    when (val element = paramJson.encodeToJsonElement(value)) {
+        is JsonPrimitive -> element.content
+        else -> element.toString()
+    }
+
+internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))

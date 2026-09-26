@@ -1,0 +1,20 @@
+<% const r = it.op.result; const s = it.h.ktorServer; -%>
+<% if (r.kind === "single") { -%>
+<% if (r.type.text === "Unit") { -%>
+        <%= it.call %>
+        call.respond(<%= s.status(r.status) %>)
+<% } else { -%>
+        call.respond(<%= s.status(r.status) %>, <%= it.call %>)
+<% } -%>
+<% } else { -%>
+        when (val result = <%= it.call %>) {
+<% for (const v of r.decl.variants) { -%>
+            is <%= r.decl.name %>.<%= v.name %> -> {
+<% for (const h of v.headers) { -%>
+                <%~ s.headerWrite(h) %>
+<% } -%>
+                call.respond(<%= v.status === undefined ? "HttpStatusCode.fromValue(result.status)" : s.status(v.status) %><%= v.body ? ", result.body" : "" %>)
+            }
+<% } -%>
+        }
+<% } -%>

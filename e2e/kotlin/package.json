@@ -1,0 +1,16 @@
+{
+  "name": "specgen-e2e-kotlin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "tsp compile petstore.tsp",
+    "test": "pnpm generate && ./gradlew test --console=plain"
+  },
+  "dependencies": {
+    "@specgen/emitter-kotlin": "workspace:*",
+    "@specgen/kotlin-ktor-client": "workspace:*",
+    "@specgen/kotlin-ktor-server": "workspace:*",
+    "@typespec/compiler": "1.16.0",
+    "@typespec/http": "1.16.0"
+  }
+}

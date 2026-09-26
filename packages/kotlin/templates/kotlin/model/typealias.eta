@@ -1,0 +1,2 @@
+<% const d = it.decl; %>
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>typealias <%= d.name %> = <%= d.target.text %>

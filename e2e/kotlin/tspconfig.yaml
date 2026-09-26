@@ -1,0 +1,9 @@
+emit:
+  - "@specgen/emitter-kotlin"
+options:
+  "@specgen/emitter-kotlin":
+    emitter-output-dir: "{project-root}/build/generated/specgen"
+    package: "com.example.petstore"
+    targets:
+      - "@specgen/kotlin-ktor-server": {}
+      - "@specgen/kotlin-ktor-client": {}

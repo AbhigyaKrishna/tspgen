@@ -1,0 +1,7 @@
+<%~ include("kotlin/common/header", it) %>
+package <%= it.package %>
+
+<% for (const i of it.imports) { %>import <%= i %>
+<% } %>
+
+<%~ include(it.body, it) %>
