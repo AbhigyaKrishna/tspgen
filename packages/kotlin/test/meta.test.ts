@@ -65,6 +65,6 @@ data class Pet(
       @service namespace S;
       @meta("kotlin", #{ annotations: 5 }) model M { x: int32 }
     `);
-    expectDiagnostics(diagnostics, { code: "@tspgen/emitter-core/invalid-meta", message: /'annotations' on 'S.M'/ });
+    expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-core/invalid-meta", message: /'annotations' on 'S.M'/ });
   });
 });

@@ -1,4 +1,4 @@
-import { metaStrings, type ExtensionRegistry, type FileSpec } from "@tspgen/emitter-core";
+import { metaStrings, type ExtensionRegistry, type FileSpec } from "@abhigyakrishna/tspgen-core";
 import type { Program } from "@typespec/compiler";
 import {
   camel,
@@ -7,7 +7,7 @@ import {
   typeName,
   type KotlinIR,
   type KtService,
-} from "@tspgen/emitter-kotlin";
+} from "@abhigyakrishna/tspgen-kotlin";
 import { withContext, type ServerOperation } from "./context.js";
 import type { KtorServerOptions } from "./options.js";
 import { commonPrefix, routeTree, type RouteFunction } from "./routes.js";

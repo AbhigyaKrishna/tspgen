@@ -1,4 +1,4 @@
-import { coreEmitterOptionsSchemaProperties, type CoreEmitterOptions, type TargetSpec } from "@tspgen/emitter-core";
+import { coreEmitterOptionsSchemaProperties, type CoreEmitterOptions, type TargetSpec } from "@abhigyakrishna/tspgen-core";
 import { createTypeSpecLibrary, paramMessage, type JSONSchemaType } from "@typespec/compiler";
 
 export type EnumMemberNaming = "UPPER_SNAKE" | "PascalCase";
@@ -65,7 +65,7 @@ const optionsSchema = {
 } as const;
 
 export const $lib = createTypeSpecLibrary({
-  name: "@tspgen/emitter-kotlin",
+  name: "@abhigyakrishna/tspgen-kotlin",
   diagnostics: {
     "unsupported-union": {
       severity: "warning",

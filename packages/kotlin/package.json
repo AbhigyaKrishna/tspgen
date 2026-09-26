@@ -1,6 +1,14 @@
 {
-  "name": "@tspgen/emitter-kotlin",
+  "name": "@abhigyakrishna/tspgen-kotlin",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AbhigyaKrishna/tspgen.git",
+    "directory": "packages/kotlin"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,13 +20,17 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "lib", "templates"],
+  "files": [
+    "dist",
+    "lib",
+    "templates"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@tspgen/emitter-core": "workspace:*"
+    "@abhigyakrishna/tspgen-core": "workspace:*"
   },
   "peerDependencies": {
     "@typespec/compiler": "^1.16.0",

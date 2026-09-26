@@ -1,4 +1,4 @@
-import { pascal } from "@tspgen/emitter-core";
+import { pascal } from "@abhigyakrishna/tspgen-core";
 
 const KEYWORDS = new Set([
   "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in", "interface",

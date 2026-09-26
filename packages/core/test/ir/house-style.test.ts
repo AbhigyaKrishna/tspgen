@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { buildApiIR, metaScopes, type ModelIR } from "../../src/index.js";
 
 const MetaTester = createTester(resolvePath(import.meta.dirname, "../.."), {
-  libraries: ["@typespec/http", "@tspgen/emitter-core"],
+  libraries: ["@typespec/http", "@abhigyakrishna/tspgen-core"],
 })
   .importLibraries()
   .using("Http", "TspGen");

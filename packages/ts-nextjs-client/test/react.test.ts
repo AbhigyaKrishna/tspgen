@@ -70,7 +70,7 @@ describe("next.js react-query and server actions", () => {
       @service namespace S;
       @route("/notes") @post op addNote(@header contentType: "text/plain", @body note: string): void;
     `);
-    expectDiagnostics(diagnostics, { code: "@tspgen/emitter-typescript/non-json-body", severity: "warning" });
+    expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-typescript/non-json-body", severity: "warning" });
     expect(outputs["client/s.ts"]).toContain("async addNote(");
     expect(outputs["client/actions/s.ts"]).toBeUndefined();
   });

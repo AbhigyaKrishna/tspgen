@@ -5,34 +5,34 @@ The core is language-neutral; languages and server/client libraries plug in as s
 
 | Package | Role |
 |---|---|
-| `@tspgen/emitter-core` | TypeSpec → language-neutral IR, layered Eta templates, plugin API, pipeline, output manifest |
-| `@tspgen/emitter-kotlin` | The TypeSpec emitter for Kotlin: kotlinx.serialization models, result/error types, `@Kotlin.*` decorators |
-| `@tspgen/kotlin-ktor-server` | Target: Ktor server — service interfaces, routing, module with JSON + StatusPages |
-| `@tspgen/kotlin-ktor-client` | Target: Ktor `HttpClient` SDK |
-| `@tspgen/emitter-typescript` | The TypeSpec emitter for TypeScript: interfaces, literal-union enums, optional zod schemas, result/error types, `@TS.*` decorators |
-| `@tspgen/ts-nextjs-client` | Target: Next.js client SDK — typed `fetch` client, TanStack Query hooks, Server Actions |
+| `@abhigyakrishna/tspgen-core` | TypeSpec → language-neutral IR, layered Eta templates, plugin API, pipeline, output manifest |
+| `@abhigyakrishna/tspgen-kotlin` | The TypeSpec emitter for Kotlin: kotlinx.serialization models, result/error types, `@Kotlin.*` decorators |
+| `@abhigyakrishna/tspgen-kotlin-ktor-server` | Target: Ktor server — service interfaces, routing, module with JSON + StatusPages |
+| `@abhigyakrishna/tspgen-kotlin-ktor-client` | Target: Ktor `HttpClient` SDK |
+| `@abhigyakrishna/tspgen-typescript` | The TypeSpec emitter for TypeScript: interfaces, literal-union enums, optional zod schemas, result/error types, `@TS.*` decorators |
+| `@abhigyakrishna/tspgen-ts-nextjs-client` | Target: Next.js client SDK — typed `fetch` client, TanStack Query hooks, Server Actions |
 
 ## Usage
 
 ```bash
-npm install -D @typespec/compiler @typespec/http @tspgen/emitter-kotlin \
-  @tspgen/kotlin-ktor-server @tspgen/kotlin-ktor-client
+npm install -D @typespec/compiler @typespec/http @abhigyakrishna/tspgen-kotlin \
+  @abhigyakrishna/tspgen-kotlin-ktor-server @abhigyakrishna/tspgen-kotlin-ktor-client
 ```
 
 `tspconfig.yaml`:
 
 ```yaml
 emit:
-  - "@tspgen/emitter-kotlin"
+  - "@abhigyakrishna/tspgen-kotlin"
 options:
-  "@tspgen/emitter-kotlin":
+  "@abhigyakrishna/tspgen-kotlin":
     package: "com.acme.pets"            # base package (default "generated")
     packages:                           # TypeSpec namespace → Kotlin package (longest prefix wins)
       - { namespace: "PetStore.Admin", package: "com.acme.admin" }
     errors: typed                       # typed | thrown (error responses documented only; you throw your own)
     validation: false                   # true: @minLength/@maxLength/@pattern/@minItems/@maxItems/@minValue/@maxValue → init { require(...) }
     targets:
-      - "@tspgen/kotlin-ktor-server":
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
           routing-style: dsl            # dsl | resources | <plugin-registered>
           grouping: per-interface       # per-interface | per-namespace | single-file
           handler-shape: params         # params | request-object
@@ -40,7 +40,7 @@ options:
           service-suffix: Service       # interface name suffix, e.g. Api → PetsApi
           module: true                  # false: no <Service>Module.kt (you install ContentNegotiation/StatusPages, and Resources if routing-style: resources)
           nest-routes: false            # true: route("/common/prefix") { get { } get("/{id}") { } } (dsl style)
-      - "@tspgen/kotlin-ktor-client": {}
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client": {}
     naming:
       enum-members: UPPER_SNAKE         # UPPER_SNAKE | PascalCase
     template-dir: ./tspgen-templates   # optional template overrides
@@ -89,15 +89,15 @@ Authentication is configured on your `HttpClient` (Ktor `Auth` plugin or `defaul
 
 ```yaml
 emit:
-  - "@tspgen/emitter-typescript"
+  - "@abhigyakrishna/tspgen-typescript"
 options:
-  "@tspgen/emitter-typescript":
+  "@abhigyakrishna/tspgen-typescript":
     zod: true                         # emit PetSchema: z.ZodType<Pet> next to each type (default false)
     import-extension: none            # none (Next.js/bundlers) | .js (Node ESM)
     layout: per-type                  # per-type (models/<Name>.ts + barrel) | single-file (types.ts, namespace banners)
     errors: typed                     # typed | thrown (no <Body>Error classes; success unions unchanged; api/errors.ts keeps HttpError)
     targets:
-      - "@tspgen/ts-nextjs-client":
+      - "@abhigyakrishna/tspgen-ts-nextjs-client":
           client-style: grouped       # grouped (client/…, hooks, actions) | flat (client.ts: one <Service>Client class)
           react-query: true           # grouped only; no schema default — unset behaves as true (flat: error if set true)
           server-actions: true        # grouped only; no schema default — unset behaves as true (flat: error if set true)
@@ -167,7 +167,7 @@ has all of that model's required fields, else `undefined`; without `error-model`
 the model's other identifier-named fields (nullable types kept as-is), and
 `isUnauthorized`/`isForbidden`/`isNotFound`/`isConflict`.
 
-The flat client does not validate responses with zod, even with `zod: true` on the `@tspgen/emitter-typescript`
+The flat client does not validate responses with zod, even with `zod: true` on the `@abhigyakrishna/tspgen-typescript`
 options — that option only adds `<Type>Schema` exports alongside the models. It also ignores `errors: typed`
 for its own error handling: `<error-class>` is always the flat client's single thrown error type, so the
 `api/` `<Body>Error` classes are still generated but go unused; set `errors: thrown` to skip generating them.
@@ -184,7 +184,7 @@ both) — rename it with `@TS.name`.
 ## Decorators
 
 ```tsp
-import "@tspgen/emitter-kotlin";
+import "@abhigyakrishna/tspgen-kotlin";
 
 @Kotlin.name("Customer")                 // rename the generated declaration/property/operation
 @Kotlin.annotate("@Suppress(\"unused\")") // add annotations (repeatable)
@@ -229,7 +229,7 @@ Keep it out of the API definition with augment decorators in a separate file:
 
 ```tsp
 // kotlin.tsp — compile this file instead of main.tsp
-import "@tspgen/emitter-kotlin";
+import "@abhigyakrishna/tspgen-kotlin";
 import "./main.tsp";
 using TspGen;
 
@@ -262,7 +262,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `typescript:ts-nextjs-client` | `staleTime: number` | GET operations, groups | default `staleTime` in `queryOptions` |
 
 Templates read any metadata with `it.h.meta(item)` / `it.h.meta(item, "ktor-server")`; plugins use
-`resolveMeta(item.meta, language, target)` from `@tspgen/emitter-core`.
+`resolveMeta(item.meta, language, target)` from `@abhigyakrishna/tspgen-core`.
 
 ## Customizing output
 

@@ -85,7 +85,7 @@ describe("runPipeline", () => {
     const out = resolveVirtualPath("out");
     const broken: Target<FakeIR> = { ...target, files: () => [{ path: "x.txt", template: "missing", data: {} }] };
     await runPipeline({ program, outputDir: out, language, targets: [{ target: broken, options: {} }] });
-    expectDiagnostics(program.diagnostics, { code: "@tspgen/emitter-core/template-error" });
+    expectDiagnostics(program.diagnostics, { code: "@abhigyakrishna/tspgen-core/template-error" });
     await expect(program.host.readFile(resolvePath(out, "x.txt"))).rejects.toThrow();
   });
 
@@ -96,7 +96,7 @@ describe("runPipeline", () => {
       { path: "a.txt", template: "fake/model", data: { model: { name: "B" } } },
     ] };
     await runPipeline({ program, outputDir: resolveVirtualPath("out"), language, targets: [{ target: dup, options: {} }] });
-    expectDiagnostics(program.diagnostics, { code: "@tspgen/emitter-core/duplicate-file" });
+    expectDiagnostics(program.diagnostics, { code: "@abhigyakrishna/tspgen-core/duplicate-file" });
   });
 
   it("reports plugin failures with the plugin name", async () => {
@@ -104,7 +104,7 @@ describe("runPipeline", () => {
     const bad = definePlugin<FakeIR>({ name: "bad", transformIR() { throw new Error("boom"); } });
     await runPipeline({ program, outputDir: resolveVirtualPath("out"), language, targets: [{ target, options: {} }], plugins: [bad] });
     expectDiagnostics(program.diagnostics, {
-      code: "@tspgen/emitter-core/plugin-failed",
+      code: "@abhigyakrishna/tspgen-core/plugin-failed",
       message: "Plugin 'bad' failed during transformIR: boom",
     });
   });

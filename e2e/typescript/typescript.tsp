@@ -1,4 +1,4 @@
-import "@tspgen/emitter-typescript";
+import "@abhigyakrishna/tspgen-typescript";
 import "./petstore.tsp";
 
 using TspGen;

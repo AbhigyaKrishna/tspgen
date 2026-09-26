@@ -1,12 +1,12 @@
-import type { Target } from "@tspgen/emitter-core";
-import type { KotlinIR } from "@tspgen/emitter-kotlin";
+import type { Target } from "@abhigyakrishna/tspgen-core";
+import type { KotlinIR } from "@abhigyakrishna/tspgen-kotlin";
 import { resolve } from "node:path";
 import { ktorClientHelpers } from "./helpers.js";
 import { ktorClientOptionsSchema, type KtorClientOptions } from "./options.js";
 import { planClientFiles } from "./plan.js";
 
 export const ktorClientTarget: Target<KotlinIR> = {
-  name: "@tspgen/kotlin-ktor-client",
+  name: "@abhigyakrishna/tspgen-kotlin-ktor-client",
   kind: "client",
   language: "kotlin",
   templates: resolve(import.meta.dirname, "../templates"),

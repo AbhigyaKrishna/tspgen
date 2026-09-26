@@ -1,5 +1,5 @@
 import "../dist/tsp-index.js";
-import "@tspgen/emitter-core";
+import "@abhigyakrishna/tspgen-core";
 
 using TypeSpec.Reflection;
 

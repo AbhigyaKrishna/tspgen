@@ -148,13 +148,13 @@ fun Route.petsRoutes(service: PetsService) {
   it("reports unknown routing styles", async () => {
     const [, diagnostics] = await server({ "routing-style": "nope" }).compileAndDiagnose(petSpec);
     expectDiagnostics(diagnostics, {
-      code: "@tspgen/emitter-core/target-failed",
+      code: "@abhigyakrishna/tspgen-core/target-failed",
       message: /unknown routing style 'nope' \(available: dsl, resources\)/,
     });
   });
 
   it("validates target options", async () => {
     const [, diagnostics] = await server({ grouping: "sideways" }).compileAndDiagnose(petSpec);
-    expectDiagnostics(diagnostics, { code: "@tspgen/emitter-core/invalid-target-options" });
+    expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-core/invalid-target-options" });
   });
 });

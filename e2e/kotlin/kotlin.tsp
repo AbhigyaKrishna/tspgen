@@ -1,4 +1,4 @@
-import "@tspgen/emitter-kotlin";
+import "@abhigyakrishna/tspgen-kotlin";
 import "./petstore.tsp";
 
 using TspGen;

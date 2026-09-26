@@ -1,8 +1,8 @@
 emit:
-  - "@tspgen/emitter-kotlin"
-  - "@tspgen/emitter-typescript"
+  - "@abhigyakrishna/tspgen-kotlin"
+  - "@abhigyakrishna/tspgen-typescript"
 options:
-  "@tspgen/emitter-kotlin":
+  "@abhigyakrishna/tspgen-kotlin":
     emitter-output-dir: "{project-root}/build/generated/tspgen"
     package: "com.example"
     packages:
@@ -12,16 +12,16 @@ options:
     validation: true
     plugins: ["./tspgen/permissions.js"]
     targets:
-      - "@tspgen/kotlin-ktor-server":
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
           grouping: per-namespace
           service-suffix: Api
           module: false
           nest-routes: true
-  "@tspgen/emitter-typescript":
+  "@abhigyakrishna/tspgen-typescript":
     emitter-output-dir: "{project-root}/ts/generated"
     layout: single-file
     errors: thrown
     targets:
-      - "@tspgen/ts-nextjs-client":
+      - "@abhigyakrishna/tspgen-ts-nextjs-client":
           client-style: flat
           error-model: ErrorResponse

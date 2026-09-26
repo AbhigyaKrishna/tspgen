@@ -7,8 +7,8 @@
     "test": "pnpm generate && tsc -p tsconfig.json && vitest run"
   },
   "dependencies": {
-    "@tspgen/emitter-typescript": "workspace:*",
-    "@tspgen/ts-nextjs-client": "workspace:*",
+    "@abhigyakrishna/tspgen-typescript": "workspace:*",
+    "@abhigyakrishna/tspgen-ts-nextjs-client": "workspace:*",
     "@tanstack/react-query": "^5.100.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",

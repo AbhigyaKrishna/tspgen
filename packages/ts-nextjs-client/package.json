@@ -1,20 +1,34 @@
 {
-  "name": "@tspgen/ts-nextjs-client",
+  "name": "@abhigyakrishna/tspgen-ts-nextjs-client",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AbhigyaKrishna/tspgen.git",
+    "directory": "packages/ts-nextjs-client"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
-  "files": ["dist", "templates"],
+  "files": [
+    "dist",
+    "templates"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@tspgen/emitter-core": "workspace:*",
-    "@tspgen/emitter-typescript": "workspace:*"
+    "@abhigyakrishna/tspgen-core": "workspace:*",
+    "@abhigyakrishna/tspgen-typescript": "workspace:*"
   },
   "peerDependencies": {
     "@typespec/compiler": "^1.16.0",

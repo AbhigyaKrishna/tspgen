@@ -1,1 +1,1 @@
-export { decoratorArg, decoratorArgs } from "@tspgen/emitter-core";
+export { decoratorArg, decoratorArgs } from "@abhigyakrishna/tspgen-core";

@@ -1,4 +1,4 @@
-import { pascal } from "@tspgen/emitter-core";
+import { pascal } from "@abhigyakrishna/tspgen-core";
 
 export function typeName(value: string): string {
   const name = pascal(value);

@@ -33,7 +33,7 @@ describe("loadTargets", () => {
     const { program } = await Tester.compile(`model M {}`);
     const targets = await loadTargets(program, [{ "./target.mjs": { style: "c" } }], dir, "kotlin");
     expect(targets).toBeUndefined();
-    expectDiagnostics(program.diagnostics, { code: "@tspgen/emitter-core/invalid-target-options" });
+    expectDiagnostics(program.diagnostics, { code: "@abhigyakrishna/tspgen-core/invalid-target-options" });
   });
 
   it("rejects targets written for another language", async () => {
@@ -41,7 +41,7 @@ describe("loadTargets", () => {
     const targets = await loadTargets(program, ["./target.mjs"], dir, "python");
     expect(targets).toBeUndefined();
     expectDiagnostics(program.diagnostics, {
-      code: "@tspgen/emitter-core/module-load-failed",
+      code: "@abhigyakrishna/tspgen-core/module-load-failed",
       message: /not 'python'/,
     });
   });

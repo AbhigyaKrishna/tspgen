@@ -99,7 +99,7 @@ describe("typescript house-style options", () => {
       @@meta(S.Kind, "typescript", #{ values: "not an identifier" });
     `);
     expectDiagnostics(notIdentDiagnostics, {
-      code: "@tspgen/emitter-core/invalid-meta",
+      code: "@abhigyakrishna/tspgen-core/invalid-meta",
       message: /'values'.*must be an identifier different from the enum name/,
     });
     expect(invalidIdent.outputs["models/Kind.ts"]).toContain('export type Kind = "A" | "B";');
@@ -111,7 +111,7 @@ describe("typescript house-style options", () => {
       @@meta(S.Kind, "typescript", #{ values: "Kind" });
     `);
     expectDiagnostics(sameNameDiagnostics, {
-      code: "@tspgen/emitter-core/invalid-meta",
+      code: "@abhigyakrishna/tspgen-core/invalid-meta",
       message: /'values'.*must be an identifier different from the enum name/,
     });
     expect(ownName.outputs["models/Kind.ts"]).toContain('export type Kind = "A" | "B";');
@@ -125,7 +125,7 @@ describe("typescript house-style options", () => {
       @@meta(S.Kind, "typescript", #{ values: "class" });
     `);
     expectDiagnostics(diagnostics, {
-      code: "@tspgen/emitter-core/invalid-meta",
+      code: "@abhigyakrishna/tspgen-core/invalid-meta",
       message: /'values'.*must be an identifier different from the enum name or a reserved word/,
     });
     expect(result.outputs["models/Kind.ts"]).toContain('export type Kind = "A" | "B";');

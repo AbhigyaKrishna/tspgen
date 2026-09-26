@@ -1,5 +1,5 @@
-import type { StatusCodes } from "@tspgen/emitter-core";
-import type { TsGroup, TsHeader, TsOperation, TsResultVariant, TsTypeUse } from "@tspgen/emitter-typescript";
+import type { StatusCodes } from "@abhigyakrishna/tspgen-core";
+import type { TsGroup, TsHeader, TsOperation, TsResultVariant, TsTypeUse } from "@abhigyakrishna/tspgen-typescript";
 import { names } from "./names.js";
 
 export interface Field {

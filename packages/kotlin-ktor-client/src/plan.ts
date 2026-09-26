@@ -1,6 +1,6 @@
-import { metaStrings, type FileSpec } from "@tspgen/emitter-core";
+import { metaStrings, type FileSpec } from "@abhigyakrishna/tspgen-core";
 import type { Program } from "@typespec/compiler";
-import { camel, organizeImports, type KotlinIR, type KtGroup } from "@tspgen/emitter-kotlin";
+import { camel, organizeImports, type KotlinIR, type KtGroup } from "@abhigyakrishna/tspgen-kotlin";
 import type { KtorClientOptions } from "./options.js";
 
 const SUPPORT_IMPORTS = [

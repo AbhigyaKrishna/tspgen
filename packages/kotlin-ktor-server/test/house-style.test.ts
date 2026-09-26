@@ -191,7 +191,7 @@ fun Route.graphUnmanagedRoutes(service: GraphApi) {
 
   it("fails when a routeSet yields no function name", async () => {
     const [, diagnostics] = await server().compileAndDiagnose(graphSpec + `@@meta(Shop.Graph.Probe, "kotlin:ktor-server", #{ routeSet: "-" });`);
-    expectDiagnostics(diagnostics, { code: "@tspgen/emitter-core/target-failed", message: /routeSet '-'/ });
+    expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-core/target-failed", message: /routeSet '-'/ });
   });
 
   it("renders a wrapper declared on both namespace and operation once", async () => {
@@ -204,7 +204,7 @@ fun Route.graphUnmanagedRoutes(service: GraphApi) {
   it("refuses wrap, routeSet and nest-routes outside the dsl routing style", async () => {
     const [, diagnostics] = await server({ ...house, "routing-style": "resources" }).compileAndDiagnose(graphSpec + permissions);
     expectDiagnostics(diagnostics, {
-      code: "@tspgen/emitter-core/target-failed",
+      code: "@abhigyakrishna/tspgen-core/target-failed",
       message: /need routing-style "dsl" \(got "resources"\)/,
     });
   });
@@ -263,7 +263,7 @@ interface NodesService {
       @@meta(Shop.Nodes.readNode, "kotlin:ktor-server", #{ context: #[#{ name: "id", type: "String", expr: "\\"x\\"" }] });
     `);
     expectDiagnostics(diagnostics, {
-      code: "@tspgen/emitter-core/target-failed",
+      code: "@abhigyakrishna/tspgen-core/target-failed",
       message: /context parameter 'id' clashes with a parameter of 'Shop.Nodes.readNode'/,
     });
   });
@@ -327,7 +327,7 @@ interface NodesService {
       });
     `);
     expectDiagnostics(diagnostics, {
-      code: "@tspgen/emitter-core/target-failed",
+      code: "@abhigyakrishna/tspgen-core/target-failed",
       message: /context parameter 'service' clashes with a parameter of 'Shop.Nodes.readNode'/,
     });
   });
@@ -345,7 +345,7 @@ interface NodesService {
       });
     `);
     expectDiagnostics(diagnostics, {
-      code: "@tspgen/emitter-core/target-failed",
+      code: "@abhigyakrishna/tspgen-core/target-failed",
       message: /context 'page' on 'Shop\.Nodes\.readNode' cannot replace path parameter 'id'/,
     });
   });

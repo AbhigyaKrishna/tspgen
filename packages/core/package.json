@@ -1,6 +1,14 @@
 {
-  "name": "@tspgen/emitter-core",
+  "name": "@abhigyakrishna/tspgen-core",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AbhigyaKrishna/tspgen.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

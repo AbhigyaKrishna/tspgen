@@ -1,5 +1,5 @@
-import { metaObjects, metaStrings, type MetaData } from "@tspgen/emitter-core";
-import { fqnTypeUse, identifier, type KtOperation, type KtTypeUse } from "@tspgen/emitter-kotlin";
+import { metaObjects, metaStrings, type MetaData } from "@abhigyakrishna/tspgen-core";
+import { fqnTypeUse, identifier, type KtOperation, type KtTypeUse } from "@abhigyakrishna/tspgen-kotlin";
 import type { Program } from "@typespec/compiler";
 
 /** A service parameter supplied by a route-handler expression instead of the HTTP request. */

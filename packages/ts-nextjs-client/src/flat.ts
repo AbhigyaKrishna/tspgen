@@ -1,4 +1,4 @@
-import type { FileSpec, TargetContext } from "@tspgen/emitter-core";
+import type { FileSpec, TargetContext } from "@abhigyakrishna/tspgen-core";
 import {
   propertyKey,
   relativeSpecifier,
@@ -9,7 +9,7 @@ import {
   type TsIR,
   type TsOperation,
   type TsParam,
-} from "@tspgen/emitter-typescript";
+} from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
 import type { NextClientOptions } from "./options.js";
 

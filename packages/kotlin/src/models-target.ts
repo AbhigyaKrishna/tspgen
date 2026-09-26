@@ -1,4 +1,4 @@
-import type { Target } from "@tspgen/emitter-core";
+import type { Target } from "@abhigyakrishna/tspgen-core";
 import { apiDeclImports, qualifyDecl, resolveDeclImports } from "./imports.js";
 import type { KotlinIR } from "./transform/model.js";
 

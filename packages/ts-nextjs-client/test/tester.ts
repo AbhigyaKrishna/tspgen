@@ -3,7 +3,7 @@ import { createTester } from "@typespec/compiler/testing";
 import { resolve } from "node:path";
 
 export const Tester = createTester(resolvePath(import.meta.dirname, ".."), {
-  libraries: ["@typespec/http", "@tspgen/emitter-core", "@tspgen/emitter-typescript"],
+  libraries: ["@typespec/http", "@abhigyakrishna/tspgen-core", "@abhigyakrishna/tspgen-typescript"],
 })
   .importLibraries()
   .using("Http");
@@ -11,7 +11,7 @@ export const Tester = createTester(resolvePath(import.meta.dirname, ".."), {
 export const TARGET = resolve(import.meta.dirname, "../dist/index.js");
 
 export function nextjs(targetOptions: Record<string, unknown> = {}, emitterOptions: Record<string, unknown> = {}) {
-  return Tester.emit("@tspgen/emitter-typescript", { targets: [{ [TARGET]: targetOptions }], ...emitterOptions });
+  return Tester.emit("@abhigyakrishna/tspgen-typescript", { targets: [{ [TARGET]: targetOptions }], ...emitterOptions });
 }
 
 export const petSpec = `

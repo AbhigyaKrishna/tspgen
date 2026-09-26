@@ -1,4 +1,4 @@
-import type { FileSpec, Target } from "@tspgen/emitter-core";
+import type { FileSpec, Target } from "@abhigyakrishna/tspgen-core";
 import { relativeSpecifier, renderImports, type TsImport } from "./imports.js";
 import type { TsDecl, TsIR } from "./transform/model.js";
 

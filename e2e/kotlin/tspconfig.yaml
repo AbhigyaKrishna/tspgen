@@ -1,9 +1,9 @@
 emit:
-  - "@tspgen/emitter-kotlin"
+  - "@abhigyakrishna/tspgen-kotlin"
 options:
-  "@tspgen/emitter-kotlin":
+  "@abhigyakrishna/tspgen-kotlin":
     emitter-output-dir: "{project-root}/build/generated/tspgen"
     package: "com.example.petstore"
     targets:
-      - "@tspgen/kotlin-ktor-server": {}
-      - "@tspgen/kotlin-ktor-client": {}
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server": {}
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client": {}

@@ -7,10 +7,10 @@
     "test": "pnpm generate && ./gradlew test --console=plain && tsc -p ts/tsconfig.json && vitest run --root ts"
   },
   "dependencies": {
-    "@tspgen/emitter-kotlin": "workspace:*",
-    "@tspgen/emitter-typescript": "workspace:*",
-    "@tspgen/kotlin-ktor-server": "workspace:*",
-    "@tspgen/ts-nextjs-client": "workspace:*",
+    "@abhigyakrishna/tspgen-kotlin": "workspace:*",
+    "@abhigyakrishna/tspgen-typescript": "workspace:*",
+    "@abhigyakrishna/tspgen-kotlin-ktor-server": "workspace:*",
+    "@abhigyakrishna/tspgen-ts-nextjs-client": "workspace:*",
     "@types/node": "^24.0.0",
     "@typespec/compiler": "1.16.0",
     "@typespec/http": "1.16.0"

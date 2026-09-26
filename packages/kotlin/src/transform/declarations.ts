@@ -7,8 +7,8 @@ import type {
   TypeIR,
   TypeRef,
   UnionIR,
-} from "@tspgen/emitter-core";
-import { metaScopes, metaStrings, resolveMeta, type MetaScopes } from "@tspgen/emitter-core";
+} from "@abhigyakrishna/tspgen-core";
+import { metaScopes, metaStrings, resolveMeta, type MetaScopes } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";

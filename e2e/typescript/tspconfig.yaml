@@ -1,8 +1,8 @@
 emit:
-  - "@tspgen/emitter-typescript"
+  - "@abhigyakrishna/tspgen-typescript"
 options:
-  "@tspgen/emitter-typescript":
+  "@abhigyakrishna/tspgen-typescript":
     emitter-output-dir: "{project-root}/generated"
     zod: true
     targets:
-      - "@tspgen/ts-nextjs-client": {}
+      - "@abhigyakrishna/tspgen-ts-nextjs-client": {}

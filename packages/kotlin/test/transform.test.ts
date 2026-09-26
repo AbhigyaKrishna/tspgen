@@ -1,4 +1,4 @@
-import { buildApiIR } from "@tspgen/emitter-core";
+import { buildApiIR } from "@abhigyakrishna/tspgen-core";
 import { expectDiagnostics } from "@typespec/compiler/testing";
 import { describe, expect, it } from "vitest";
 import { transformToKotlin, type KotlinIR, type KtDecl } from "../src/transform/index.js";
@@ -104,7 +104,7 @@ describe("transformToKotlin", () => {
     expect(decl(ir, "Pet")).toMatchObject({ kind: "sealed-interface", discriminator: "type" });
     expect(decl(ir, "Cat")).toMatchObject({ serialName: "cat", implements: ["com.acme.models.Pet"] });
     expect(decl(ir, "Mixed")).toMatchObject({ kind: "typealias", target: { text: "JsonElement" } });
-    expectDiagnostics(program.diagnostics, [{ code: "@tspgen/emitter-kotlin/unsupported-union" }]);
+    expectDiagnostics(program.diagnostics, [{ code: "@abhigyakrishna/tspgen-kotlin/unsupported-union" }]);
   });
 
   it("applies Kotlin decorators", async () => {
@@ -147,7 +147,7 @@ describe("transformToKotlin", () => {
     );
     expect(decl(ir, "Level")).toMatchObject({ kind: "typealias", target: { text: "Int" } });
     expect(decl(ir, "Mode")).toMatchObject({ members: [{ name: "FastMode" }, { name: "SlowMode" }] });
-    expectDiagnostics(program.diagnostics, [{ code: "@tspgen/emitter-kotlin/numeric-enum" }]);
+    expectDiagnostics(program.diagnostics, [{ code: "@abhigyakrishna/tspgen-kotlin/numeric-enum" }]);
   });
 
   it("reports duplicate Kotlin type names", async () => {
@@ -156,7 +156,7 @@ describe("transformToKotlin", () => {
       model A { x: int32 }
       @Kotlin.name("A") model B { y: int32 }
     `);
-    expectDiagnostics(program.diagnostics, [{ code: "@tspgen/emitter-kotlin/duplicate-type-name" }]);
+    expectDiagnostics(program.diagnostics, [{ code: "@abhigyakrishna/tspgen-kotlin/duplicate-type-name" }]);
   });
 
   it("maps services, groups and operations", async () => {

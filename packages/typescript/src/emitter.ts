@@ -1,4 +1,4 @@
-import { emitLanguage } from "@tspgen/emitter-core";
+import { emitLanguage } from "@abhigyakrishna/tspgen-core";
 import type { EmitContext } from "@typespec/compiler";
 import { typescriptLanguage } from "./language.js";
 import type { TypeScriptEmitterOptions } from "./lib.js";

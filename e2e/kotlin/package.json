@@ -7,9 +7,9 @@
     "test": "pnpm generate && ./gradlew test --console=plain"
   },
   "dependencies": {
-    "@tspgen/emitter-kotlin": "workspace:*",
-    "@tspgen/kotlin-ktor-client": "workspace:*",
-    "@tspgen/kotlin-ktor-server": "workspace:*",
+    "@abhigyakrishna/tspgen-kotlin": "workspace:*",
+    "@abhigyakrishna/tspgen-kotlin-ktor-client": "workspace:*",
+    "@abhigyakrishna/tspgen-kotlin-ktor-server": "workspace:*",
     "@typespec/compiler": "1.16.0",
     "@typespec/http": "1.16.0"
   }

@@ -1,4 +1,4 @@
-import type { ApiIR } from "@tspgen/emitter-core";
+import type { ApiIR } from "@abhigyakrishna/tspgen-core";
 import type { Program } from "@typespec/compiler";
 import type { EnumMemberNaming } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";

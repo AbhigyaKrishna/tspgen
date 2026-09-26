@@ -1,5 +1,5 @@
-import "@tspgen/emitter-kotlin";
-import "@tspgen/emitter-typescript";
+import "@abhigyakrishna/tspgen-kotlin";
+import "@abhigyakrishna/tspgen-typescript";
 import "./api.tsp";
 
 using TspGen;

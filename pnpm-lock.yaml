@@ -178,16 +178,16 @@ importers:
 
   e2e/house-style:
     dependencies:
-      '@tspgen/emitter-kotlin':
+      '@abhigyakrishna/tspgen-kotlin':
         specifier: workspace:*
         version: link:../../packages/kotlin
-      '@tspgen/emitter-typescript':
+      '@abhigyakrishna/tspgen-typescript':
         specifier: workspace:*
         version: link:../../packages/typescript
-      '@tspgen/kotlin-ktor-server':
+      '@abhigyakrishna/tspgen-kotlin-ktor-server':
         specifier: workspace:*
         version: link:../../packages/kotlin-ktor-server
-      '@tspgen/ts-nextjs-client':
+      '@abhigyakrishna/tspgen-ts-nextjs-client':
         specifier: workspace:*
         version: link:../../packages/ts-nextjs-client
       '@types/node':
@@ -202,13 +202,13 @@ importers:
 
   e2e/kotlin:
     dependencies:
-      '@tspgen/emitter-kotlin':
+      '@abhigyakrishna/tspgen-kotlin':
         specifier: workspace:*
         version: link:../../packages/kotlin
-      '@tspgen/kotlin-ktor-client':
+      '@abhigyakrishna/tspgen-kotlin-ktor-client':
         specifier: workspace:*
         version: link:../../packages/kotlin-ktor-client
-      '@tspgen/kotlin-ktor-server':
+      '@abhigyakrishna/tspgen-kotlin-ktor-server':
         specifier: workspace:*
         version: link:../../packages/kotlin-ktor-server
       '@typespec/compiler':
@@ -220,10 +220,10 @@ importers:
 
   e2e/typescript:
     dependencies:
-      '@tspgen/emitter-typescript':
+      '@abhigyakrishna/tspgen-typescript':
         specifier: workspace:*
         version: link:../../packages/typescript
-      '@tspgen/ts-nextjs-client':
+      '@abhigyakrishna/tspgen-ts-nextjs-client':
         specifier: workspace:*
         version: link:../../packages/ts-nextjs-client
       '@tanstack/react-query':
@@ -272,7 +272,7 @@ importers:
 
   packages/kotlin:
     dependencies:
-      '@tspgen/emitter-core':
+      '@abhigyakrishna/tspgen-core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -285,10 +285,10 @@ importers:
 
   packages/kotlin-ktor-client:
     dependencies:
-      '@tspgen/emitter-core':
+      '@abhigyakrishna/tspgen-core':
         specifier: workspace:*
         version: link:../core
-      '@tspgen/emitter-kotlin':
+      '@abhigyakrishna/tspgen-kotlin':
         specifier: workspace:*
         version: link:../kotlin
     devDependencies:
@@ -301,10 +301,10 @@ importers:
 
   packages/kotlin-ktor-server:
     dependencies:
-      '@tspgen/emitter-core':
+      '@abhigyakrishna/tspgen-core':
         specifier: workspace:*
         version: link:../core
-      '@tspgen/emitter-kotlin':
+      '@abhigyakrishna/tspgen-kotlin':
         specifier: workspace:*
         version: link:../kotlin
     devDependencies:
@@ -317,10 +317,10 @@ importers:
 
   packages/ts-nextjs-client:
     dependencies:
-      '@tspgen/emitter-core':
+      '@abhigyakrishna/tspgen-core':
         specifier: workspace:*
         version: link:../core
-      '@tspgen/emitter-typescript':
+      '@abhigyakrishna/tspgen-typescript':
         specifier: workspace:*
         version: link:../typescript
     devDependencies:
@@ -345,7 +345,7 @@ importers:
 
   packages/typescript:
     dependencies:
-      '@tspgen/emitter-core':
+      '@abhigyakrishna/tspgen-core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
