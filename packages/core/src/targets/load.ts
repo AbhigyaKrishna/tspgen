@@ -1,0 +1,52 @@
+import { NoTarget, type Program } from "@typespec/compiler";
+import { errorMessage, reportDiagnostic } from "../lib.js";
+import { loadModuleDefault } from "../loader.js";
+import { validateOptions } from "../options-validate.js";
+import type { PipelineTarget } from "../pipeline/run.js";
+import type { Target } from "./target.js";
+
+/** A target reference from emitter options: `"pkg"` or `{ "pkg": { ...options } }`. */
+export type TargetSpec = string | Record<string, Record<string, unknown> | null>;
+
+export async function loadTargets<L>(
+  program: Program,
+  specs: readonly TargetSpec[],
+  baseDir: string,
+  language: string,
+): Promise<PipelineTarget<L>[] | undefined> {
+  const loaded: PipelineTarget<L>[] = [];
+  for (const spec of specs) {
+    const [specifier, raw] = typeof spec === "string" ? [spec, {}] : (Object.entries(spec)[0] ?? ["", {}]);
+    let target: Target<L>;
+    try {
+      target = await loadModuleDefault<Target<L>>(specifier, baseDir);
+      if (!target || typeof target.name !== "string" || typeof target.files !== "function") {
+        throw new Error("default export is not a specgen target (missing 'name' or 'files')");
+      }
+      if (target.language !== language) {
+        throw new Error(`target is for language '${target.language}', not '${language}'`);
+      }
+    } catch (error) {
+      reportDiagnostic(program, {
+        code: "module-load-failed",
+        format: { kind: "target", specifier, message: errorMessage(error) },
+        target: NoTarget,
+      });
+      return undefined;
+    }
+    const options = structuredClone(raw ?? {});
+    if (target.optionsSchema) {
+      const errors = validateOptions(target.optionsSchema, options);
+      if (errors.length > 0) {
+        reportDiagnostic(program, {
+          code: "invalid-target-options",
+          format: { name: target.name, errors: errors.join("; ") },
+          target: NoTarget,
+        });
+        return undefined;
+      }
+    }
+    loaded.push({ target, options });
+  }
+  return loaded;
+}
