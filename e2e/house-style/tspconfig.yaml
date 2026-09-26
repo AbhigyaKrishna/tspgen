@@ -1,0 +1,18 @@
+emit:
+  - "@specgen/emitter-kotlin"
+options:
+  "@specgen/emitter-kotlin":
+    emitter-output-dir: "{project-root}/build/generated/specgen"
+    package: "com.example"
+    packages:
+      - namespace: "Shop.Graph"
+        package: "com.example.graph"
+    errors: thrown
+    validation: true
+    plugins: ["./specgen/permissions.js"]
+    targets:
+      - "@specgen/kotlin-ktor-server":
+          grouping: per-namespace
+          service-suffix: Api
+          module: false
+          nest-routes: true

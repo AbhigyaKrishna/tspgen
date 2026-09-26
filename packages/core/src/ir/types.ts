@@ -17,6 +17,17 @@ export interface CustomScalarIR {
   decorators: DecoratorData;
 }
 
+/** TypeSpec constraint decorators on a property (or its scalar type). */
+export interface ConstraintsIR {
+  minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  minValue?: number;
+  maxValue?: number;
+  pattern?: string;
+}
+
 export interface DocInfo {
   docs?: string;
   deprecated?: string;
@@ -36,6 +47,8 @@ export interface ModelIR extends NamedTypeBase {
   additionalProperties?: TypeRef;
   /** mapping: discriminator value → model id */
   discriminator?: { property: string; mapping: Record<string, string> };
+  /** Template-instance arguments (`Page<Pet>` → [Pet]); absent for non-instances. */
+  templateArgs?: TypeRef[];
 }
 
 export interface PropertyIR extends DocInfo {
@@ -44,6 +57,8 @@ export interface PropertyIR extends DocInfo {
   type: TypeRef;
   optional: boolean;
   default?: unknown;
+  /** Present only when at least one constraint applies. */
+  constraints?: ConstraintsIR;
   decorators: DecoratorData;
 }
 
@@ -105,6 +120,8 @@ export interface OperationGroupIR extends DocInfo {
   name: string;
   namespace: string[];
   decorators: DecoratorData;
+  /** Decorators of the namespaces enclosing the group, service namespace first (the group's own excluded). */
+  namespaceDecorators: DecoratorData[];
   operations: OperationIR[];
 }
 

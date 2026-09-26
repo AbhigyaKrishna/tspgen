@@ -2,7 +2,14 @@ import {
   getDiscriminatedUnion,
   getDiscriminator,
   getFriendlyName,
+  getMaxItems,
+  getMaxLength,
+  getMaxValue,
+  getMinItems,
+  getMinLength,
+  getMinValue,
   getNamespaceFullName,
+  getPattern,
   getTypeName,
   isArrayModelType,
   isNullType,
@@ -27,7 +34,7 @@ import { reportDiagnostic } from "../lib.js";
 import { pascal } from "../naming.js";
 import { collectDecorators } from "./decorators.js";
 import { docInfo } from "./docs.js";
-import type { EnumIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
+import type { ConstraintsIR, EnumIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
 
 const UNKNOWN: TypeRef = { kind: "unknown" };
 
@@ -177,6 +184,10 @@ export class TypeCollector {
         mapping: this.discriminatorMapping(model, discriminator.propertyName),
       };
     }
+    // Template arguments only matter to mapping decorators (e.g. Kotlin.type); recording them
+    // for undecorated instances would pull otherwise-unused argument types into the IR.
+    const args = Object.keys(ir.decorators).length > 0 ? templateArgTypes(model) : [];
+    if (args.length > 0) ir.templateArgs = args.map((arg, i) => this.ref(arg, `${name}Arg${i + 1}`));
     return id;
   }
 
@@ -200,8 +211,32 @@ export class TypeCollector {
       ...docInfo(this.program, prop),
       decorators: collectDecorators(prop),
     };
+    const constraints = this.constraints(prop);
+    if (constraints) ir.constraints = constraints;
     if (prop.defaultValue) ir.default = serializeValueAsJson(this.program, prop.defaultValue, prop.type);
     return ir;
+  }
+
+  private constraints(prop: ModelProperty): ConstraintsIR | undefined {
+    const sources: Type[] = prop.type.kind === "Scalar" ? [prop, prop.type] : [prop];
+    const first = <T>(get: (program: Program, target: Type) => T | undefined): T | undefined => {
+      for (const source of sources) {
+        const value = get(this.program, source);
+        if (value !== undefined) return value;
+      }
+      return undefined;
+    };
+    const all: ConstraintsIR = {
+      minLength: first(getMinLength),
+      maxLength: first(getMaxLength),
+      minItems: first(getMinItems),
+      maxItems: first(getMaxItems),
+      minValue: first(getMinValue),
+      maxValue: first(getMaxValue),
+      pattern: first(getPattern),
+    };
+    const set = Object.entries(all).filter(([, value]) => value !== undefined);
+    return set.length > 0 ? (Object.fromEntries(set) as ConstraintsIR) : undefined;
   }
 
   private collectEnum(e: Enum): string {
@@ -296,4 +331,14 @@ function templateArgsName(type: Model | Union | Enum): string {
 
 export function splitNamespace(fullName: string): string[] {
   return fullName ? fullName.split(".") : [];
+}
+
+function templateArgTypes(model: Model): Type[] {
+  return (model.templateMapper?.args ?? []).filter(
+    (arg): arg is Type =>
+      typeof arg === "object" &&
+      arg !== null &&
+      (arg as { entityKind?: string }).entityKind === "Type" &&
+      (arg as Type).kind !== "Intrinsic",
+  );
 }

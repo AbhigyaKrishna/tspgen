@@ -27,18 +27,31 @@ emit:
 options:
   "@specgen/emitter-kotlin":
     package: "com.acme.pets"            # base package (default "generated")
+    packages:                           # TypeSpec namespace → Kotlin package (longest prefix wins)
+      - { namespace: "PetStore.Admin", package: "com.acme.admin" }
+    errors: typed                       # typed | thrown (error responses documented only; you throw your own)
+    validation: false                   # true: @minLength/@maxLength/@pattern/@minItems/@maxItems/@minValue/@maxValue → init { require(...) }
     targets:
       - "@specgen/kotlin-ktor-server":
           routing-style: dsl            # dsl | resources | <plugin-registered>
           grouping: per-interface       # per-interface | per-namespace | single-file
           handler-shape: params         # params | request-object
           call-access: false            # pass ApplicationCall to handlers
+          service-suffix: Service       # interface name suffix, e.g. Api → PetsApi
+          module: true                  # false: no <Service>Module.kt (you install ContentNegotiation/StatusPages, and Resources if routing-style: resources)
+          nest-routes: false            # true: route("/common/prefix") { get { } get("/{id}") { } } (dsl style)
       - "@specgen/kotlin-ktor-client": {}
     naming:
       enum-members: UPPER_SNAKE         # UPPER_SNAKE | PascalCase
     template-dir: ./specgen-templates   # optional template overrides
     plugins: [./specgen/audit.js]       # optional plugins, applied in order
 ```
+
+`packages` is a list, not a map (TypeSpec rejects dots in `tspconfig` option keys): the longest matching
+namespace prefix wins, `@Kotlin.packageName` on a type wins over `packages`, and anonymous inline types
+(no namespace) always go to `<package>.models`. On the Ktor server target, the same mapping applies per
+service/routes unit (see `grouping` below): a unit lands in its groups' mapped package only when every
+group in it maps to the same one, otherwise it falls back to the target package.
 
 Output (inside the emitter output dir):
 
@@ -139,6 +152,10 @@ model User {
 model Money { amount: string }
 ```
 
+`@Kotlin.type` on a templated model maps every instance with its arguments
+(`@@Kotlin.type(Shop.Page, "com.acme.core.Page")` → `Page<Node>`), and on a scalar maps every use of it
+(`@@Kotlin.type(Shop.isoInstant, "com.acme.core.IsoInstant")`). Mapped types are never generated.
+
 TypeScript: `@TS.name("Customer")` renames a generated type; `@TS.type("Decimal", "decimal.js")` maps a
 model, scalar, enum, union or property to an external type (module optional, e.g. `@TS.type("Date")`).
 
@@ -169,16 +186,22 @@ using Specgen;
 ```
 
 Resolution: `"*"` → language → `language:target`, key by key (later wins; arrays concatenate).
-Operations inherit their interface/namespace metadata. Built-in keys (wrong types produce an
-`invalid-meta` warning; unknown keys pass through untouched):
+Operations inherit metadata from enclosing namespaces (outermost first), then their interface. `wrap`, `routeSet`
+and `nest-routes` require `routing-style: dsl`; with any other style the target fails rather than dropping guards.
+Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass through untouched):
 
 | Scope | Key | On | Effect |
 |---|---|---|---|
 | `kotlin` | `annotations: string[]` | types, properties, enum members, operations | annotation lines |
 | `kotlin` | `imports: string[]` | types | extra imports |
 | `kotlin` | `implements: string[]` | models, sealed hierarchies | extra supertypes (FQN; qualified automatically on name clashes) |
+| `kotlin` | `checks: string[]` | models | statements appended to the data class `init { }` block (`init` is reserved in TypeSpec) |
 | `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`) |
 | `kotlin:ktor-server` / `kotlin:ktor-client` | `annotations: string[]` | operations, groups | annotations on service / client methods |
+| `kotlin:ktor-server` | `wrap: string[]` | namespaces, groups, operations | route-builder calls wrapped around routes, outermost first (dsl style); duplicates within one chain are dropped and shared prefixes share one block |
+| `kotlin:ktor-server` | `imports: string[]` | namespaces, groups, operations | imports added to the routes file (for names used in `wrap`/`context`; a `wrap` call to `authenticate(...)` needs `io.ktor.server.auth.authenticate` here — only the `authenticate` key adds it automatically) |
+| `kotlin:ktor-server` | `context: { name, type, expr, replaces? }[]` | namespaces, groups, operations | service parameters supplied by `expr` in the route handler (`call` in scope); `replaces` (string or list) hides those HTTP parameters from the service signature — never a path parameter — and the entry applies only where they all exist; names are backtick-escaped if they are Kotlin keywords, `call`/`service`/`resource` are reserved, and later entries with the same name win |
+| `kotlin:ktor-server` | `routeSet: string` | namespaces, groups, operations | move routes into `fun Route.<unit><RouteSet>Routes(service)` (dsl style); with `module: true` the generated module mounts every route function, including per-routeSet ones; a name that isn't a valid Kotlin identifier fails the target |
 | `typescript` | `readonly: boolean` | models, properties | `readonly` properties |
 | `typescript` | `supertypes: { name, from? }[]` | models | `interface X extends A` (zod schema cast; inherited members not validated) |
 | `typescript` | `jsdoc: string[]` | declarations, properties | extra JSDoc lines |
@@ -243,6 +266,12 @@ export default {
 ```
 
 Use it with `routing-style: company`.
+
+**Fitting an existing codebase.** `e2e/house-style` shows the full combination: namespace→package mapping,
+`errors: thrown`, validation, `<Feature>Api` interfaces without a generated module, and a small plugin
+(`specgen/permissions.js`) that adds `authenticate`/`requirePermission` wrappers and an `actorId` context
+parameter to every operation. Plugins that edit operation metadata in `transformIR` must replace scope objects
+rather than mutate them, because operations of one group can share them.
 
 ## Adding a language or library
 

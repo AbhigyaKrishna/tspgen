@@ -5,5 +5,5 @@
 <% } else { %>data class <%= d.name %>(
 <% for (const p of d.properties) { %><%~ it.h.kdoc(p.docs, "    ") %><%~ it.h.annotations(p.annotations, "    ") %><% if (p.serialName !== undefined) { %>    @SerialName(<%~ it.h.str(p.serialName) %>)
 <% } %>    <%= p.override ? "override " : "" %>val <%= p.name %>: <%= p.type.text %><%= p.default !== undefined ? " = " + p.default : "" %>,
-<% } %>)<%= sup %>
+<% } %>)<%= sup %><%~ it.h.initBlock(d.checks) %>
 <% } %>

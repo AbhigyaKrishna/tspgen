@@ -20,5 +20,7 @@ export default ktorServerTarget;
 export { ktorServerHelpers, type HandlerField, type ResourceParam } from "./helpers.js";
 export { ktorServerOptionsSchema, type KtorServerOptions } from "./options.js";
 export { builtinStyles, resolveStyle, ROUTING_STYLE_KIND, type RoutingStyle } from "./styles.js";
+export { commonPrefix, routeTree, type RouteFunction, type RouteItem, type RouteNode } from "./routes.js";
 export { buildUnits, type ServerUnit } from "./units.js";
 export type { ServerOpExtras } from "./plan.js";
+export { withContext, type ContextParam, type ServerOperation } from "./context.js";

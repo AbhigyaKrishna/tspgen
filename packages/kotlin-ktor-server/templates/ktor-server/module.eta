@@ -18,8 +18,10 @@ fun Application.<%= it.moduleFn %>(<%= params %>) {
 }
 
 fun Route.<%= it.apiRoutesFn %>(<%= params %>) {
-<% for (const u of it.units) { -%>
-    <%= u.routesFn %>(<%= s.paramName(u) %>)
+<% for (const [i, u] of it.units.entries()) { -%>
+<% for (const fn of it.mounts[i]) { -%>
+    <%= fn %>(<%= s.paramName(u) %>)
+<% } -%>
 <% } -%>
 }
 

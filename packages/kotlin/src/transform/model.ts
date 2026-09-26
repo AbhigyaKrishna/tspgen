@@ -42,6 +42,8 @@ export interface KtDataClass extends KtDeclBase {
   serialName?: string;
   /** Fully-qualified names of implemented sealed interfaces. */
   implements: string[];
+  /** Kotlin statements for the `init` block (validation checks, @meta checks lines). */
+  checks: string[];
 }
 
 export interface KtSealedInterface extends KtDeclBase {
@@ -118,6 +120,8 @@ export interface KtGroup {
   id: string;
   name: string;
   namespace: string[];
+  /** Kotlin package mapped from the group's namespace (`packages` option); absent when unmapped. */
+  package?: string;
   docs?: string;
   annotations: string[];
   meta: MetaScopes;

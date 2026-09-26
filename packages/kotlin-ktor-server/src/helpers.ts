@@ -7,6 +7,7 @@ import {
   type KtParam,
   type KtTypeUse,
 } from "@specgen/emitter-kotlin";
+import type { ServerOperation } from "./context.js";
 import type { KtorServerOptions } from "./options.js";
 import type { ServerUnit } from "./units.js";
 
@@ -78,6 +79,7 @@ function requestFields(op: KtOperation): HandlerField[] {
   return [
     ...op.params.map((p) => ({ name: p.name, type: p.type })),
     ...(op.body ? [{ name: op.body.name, type: op.body.type }] : []),
+    ...((op as Partial<ServerOperation>).context ?? []).map((c) => ({ name: c.name, type: c.type })),
   ];
 }
 

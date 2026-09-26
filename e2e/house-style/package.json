@@ -1,0 +1,15 @@
+{
+  "name": "specgen-e2e-house-style",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "tsp compile main.tsp",
+    "test": "pnpm generate && ./gradlew test --console=plain"
+  },
+  "dependencies": {
+    "@specgen/emitter-kotlin": "workspace:*",
+    "@specgen/kotlin-ktor-server": "workspace:*",
+    "@typespec/compiler": "1.16.0",
+    "@typespec/http": "1.16.0"
+  }
+}

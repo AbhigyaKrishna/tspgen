@@ -33,5 +33,10 @@ export const kotlinHelpers = {
       .map((line) => (line ? pad + line : line))
       .join("\n");
   },
+  /** ` { init { … } }` for a data class with checks; "" when there are none. */
+  initBlock(checks: readonly string[] = []): string {
+    if (checks.length === 0) return "";
+    return ` {\n    init {\n${checks.map((c) => `        ${c}\n`).join("")}    }\n}`;
+  },
   str: kotlinString,
 };

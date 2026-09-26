@@ -15,20 +15,37 @@ import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { camel, identifier, typeName, upperSnake } from "../naming.js";
 import { decoratorArg, decoratorArgs } from "./decorators.js";
 import type { KtDataClass, KtDecl, KtEnumMember, KtProperty, KtTypeUse } from "./model.js";
-import { fqnTypeUse, JSON_ELEMENT, listOf, mapOf, nullable, scalarTypeUse } from "./type-map.js";
+import { mappedPackage } from "./packages.js";
+import { fqnTypeUse, genericOf, JSON_ELEMENT, listOf, mapOf, nullable, scalarTypeUse } from "./type-map.js";
 
 type UnionShape = "enum" | "string-alias" | "sealed-interface" | "json";
 
 export interface DeclarationOptions {
   modelsPackage: string;
   enumMemberNaming: EnumMemberNaming;
+  packages?: Record<string, string>;
+  validation?: boolean;
+}
+
+const NUMERIC = new Set(["Byte", "Short", "Int", "Long", "Float", "Double"]);
+
+function items(n: number): string {
+  return `${n} ${n === 1 ? "item" : "items"}`;
 }
 
 /** Builds Kotlin declarations for every IR type and resolves TypeRefs to Kotlin type uses. */
 export class DeclarationBuilder {
   private readonly decls = new Map<string, KtDecl>();
   private readonly mapped = new Map<string, KtTypeUse>();
+  /** Template instances mapped with @Kotlin.type: rendered as `<fqn><args>`. */
+  private readonly generic = new Map<string, { fqn: string; args: TypeRef[] }>();
   private readonly types: Map<string, TypeIR>;
+  /**
+   * Per data-class decl id, the source PropertyIR by wire name — recorded in `fillModel` and
+   * consulted only after sealed unions have removed discriminator properties, so validation
+   * checks are never emitted for properties no longer on the class.
+   */
+  private readonly modelProps = new Map<string, Map<string, PropertyIR>>();
 
   constructor(
     private readonly program: Program,
@@ -41,9 +58,11 @@ export class DeclarationBuilder {
   build(): KtDecl[] {
     for (const t of this.api.types) {
       const fqn = decoratorArg(t.decorators, "Kotlin.type");
-      if (fqn) this.mapped.set(t.id, fqnTypeUse(fqn));
+      if (!fqn) continue;
+      if (t.kind === "model" && t.templateArgs?.length) this.generic.set(t.id, { fqn, args: t.templateArgs });
+      else this.mapped.set(t.id, fqnTypeUse(fqn));
     }
-    const own = this.api.types.filter((t) => !this.mapped.has(t.id));
+    const own = this.api.types.filter((t) => !this.mapped.has(t.id) && !this.generic.has(t.id));
     for (const t of own) this.decls.set(t.id, this.shell(t));
     // Enums (and enum-like unions) first so model defaults can reference members; sealed unions
     // last so they can adjust their variant data classes.
@@ -51,6 +70,7 @@ export class DeclarationBuilder {
     for (const t of own) if (t.kind === "union" && this.unionShape(t) !== "sealed-interface") this.fillUnion(t);
     for (const t of own) if (t.kind === "model") this.fillModel(t);
     for (const t of own) if (t.kind === "union" && this.unionShape(t) === "sealed-interface") this.fillUnion(t);
+    this.fillChecks();
     this.checkDuplicates();
     return [...this.decls.values()];
   }
@@ -60,6 +80,8 @@ export class DeclarationBuilder {
       case "named": {
         const mapped = this.mapped.get(ref.id);
         if (mapped) return mapped;
+        const generic = this.generic.get(ref.id);
+        if (generic) return genericOf(fqnTypeUse(generic.fqn), generic.args.map((arg) => this.typeUse(arg)));
         const decl = this.decls.get(ref.id);
         return decl ? { text: decl.name, imports: [decl.fqn], nullable: false } : JSON_ELEMENT;
       }
@@ -103,12 +125,16 @@ export class DeclarationBuilder {
     if (item.deprecated) list.push(`@Deprecated(${kotlinString(item.deprecated)})`);
     list.push(...decoratorArgs(item.decorators, "Kotlin.annotate"));
     list.push(...metaStrings(this.program, resolveMeta(scopes, "kotlin"), "annotations", where));
-    return list;
+    // Merged scopes concatenate arrays, so an annotation inherited from several levels repeats.
+    return [...new Set(list)];
   }
 
   private shell(t: TypeIR): KtDecl {
     const name = decoratorArg(t.decorators, "Kotlin.name") ?? typeName(t.name);
-    const pkg = decoratorArg(t.decorators, "Kotlin.packageName") ?? this.options.modelsPackage;
+    const pkg =
+      decoratorArg(t.decorators, "Kotlin.packageName") ??
+      mappedPackage(this.options.packages, t.namespace) ??
+      this.options.modelsPackage;
     const scopes = metaScopes(t.decorators);
     const meta = resolveMeta(scopes, "kotlin");
     const implementsMeta = metaStrings(this.program, meta, "implements", t.id);
@@ -126,7 +152,7 @@ export class DeclarationBuilder {
       case "model":
         return t.discriminator
           ? { ...base, kind: "sealed-interface", discriminator: t.discriminator.property, properties: [], implements: [...implementsMeta] }
-          : { ...base, kind: "data-class", properties: [], implements: [...implementsMeta] };
+          : { ...base, kind: "data-class", properties: [], implements: [...implementsMeta], checks: [] };
       case "enum":
         return t.members.every((m) => typeof m.value === "string")
           ? { ...base, kind: "enum", members: [] }
@@ -231,10 +257,33 @@ export class DeclarationBuilder {
     const abstractNames = new Set(sealedBases.flatMap((m) => m.properties.map((p) => p.name)));
     const byName = new Map<string, PropertyIR>();
     for (const m of chain) for (const p of m.properties) if (!discriminators.has(p.name)) byName.set(p.name, p);
-    decl.properties = [...byName.values()].map((p) => this.property(p, abstractNames.has(p.name), model.id));
+    const props = [...byName.values()];
+    decl.properties = props.map((p) => this.property(p, abstractNames.has(p.name), model.id));
+    this.modelProps.set(model.id, new Map(props.map((p) => [p.wireName, p])));
     this.fillSealedParents(model, decl, sealedBases);
     if (chain.some((m) => m.additionalProperties)) {
       reportDiagnostic(this.program, { code: "additional-properties", format: { id: model.id }, target: NoTarget });
+    }
+  }
+
+  /**
+   * Fills `checks` on every data class, after sealed unions have removed discriminator
+   * properties (`fillUnion` runs after `fillModel` for sealed interfaces) — so a check for a
+   * property no longer on the class is never emitted. Property order first, then @meta lines.
+   */
+  private fillChecks(): void {
+    for (const [id, byWireName] of this.modelProps) {
+      const decl = this.decls.get(id);
+      if (decl?.kind !== "data-class") continue;
+      decl.checks = [
+        ...(this.options.validation
+          ? decl.properties.flatMap((prop) => {
+              const p = byWireName.get(prop.wireName);
+              return p ? this.checks(p, prop) : [];
+            })
+          : []),
+        ...metaStrings(this.program, resolveMeta(decl.meta, "kotlin"), "checks", id),
+      ];
     }
   }
 
@@ -276,6 +325,34 @@ export class DeclarationBuilder {
     if (defaultValue !== undefined) prop.default = defaultValue;
     else if (p.optional) prop.default = "null";
     return prop;
+  }
+
+  private checks(p: PropertyIR, prop: KtProperty): string[] {
+    const c = p.constraints;
+    if (!c) return [];
+    const name = prop.name;
+    const label = p.name;
+    const base = prop.type.text.replace(/\?$/, "");
+    const out: string[] = [];
+    const add = (condition: string, message: string) => {
+      const guarded = prop.type.nullable ? `${name} == null || ${condition}` : condition;
+      out.push(`require(${guarded}) { ${kotlinString(message)} }`);
+    };
+    if (base === "String") {
+      if (c.minLength === 1) add(`${name}.isNotBlank()`, `${label} must not be blank`);
+      else if (c.minLength !== undefined) add(`${name}.length >= ${c.minLength}`, `${label} must be at least ${c.minLength} characters`);
+      if (c.maxLength !== undefined) add(`${name}.length <= ${c.maxLength}`, `${label} must be at most ${c.maxLength} characters`);
+      if (c.pattern !== undefined) add(`Regex(${kotlinString(c.pattern)}).containsMatchIn(${name})`, `${label} must match ${c.pattern}`);
+    }
+    if (base.startsWith("List<")) {
+      if (c.minItems !== undefined) add(`${name}.size >= ${c.minItems}`, `${label} must have at least ${items(c.minItems)}`);
+      if (c.maxItems !== undefined) add(`${name}.size <= ${c.maxItems}`, `${label} must have at most ${items(c.maxItems)}`);
+    }
+    if (NUMERIC.has(base)) {
+      if (c.minValue !== undefined) add(`${name} >= ${c.minValue}`, `${label} must be at least ${c.minValue}`);
+      if (c.maxValue !== undefined) add(`${name} <= ${c.maxValue}`, `${label} must be at most ${c.maxValue}`);
+    }
+    return out;
   }
 
   private defaultLiteral(value: unknown, ref: TypeRef, type: KtTypeUse): string | undefined {

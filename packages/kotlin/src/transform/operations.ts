@@ -2,6 +2,7 @@ import { mergeScopes, metaScopes, type ApiIR, type MetaScopes, type OperationIR,
 import { camel, identifier, typeName } from "../naming.js";
 import type { DeclarationBuilder } from "./declarations.js";
 import { decoratorArg } from "./decorators.js";
+import { mappedPackage } from "./packages.js";
 import type {
   KtApiDecl,
   KtApiExceptionDecl,
@@ -49,6 +50,17 @@ function typeOf(decl: { name: string; fqn: string }): KtTypeUse {
   return { text: decl.name, imports: [decl.fqn], nullable: false };
 }
 
+/** Identity of an error body: the declaration FQN when it is a named declaration, else its text. */
+function errorKey(body: KtTypeUse): string {
+  const [fqn] = body.imports;
+  return body.imports.length === 1 && fqn.endsWith(`.${body.text}`) ? fqn : body.text;
+}
+
+export interface ApiOptions {
+  errors?: "typed" | "thrown";
+  packages?: Record<string, string>;
+}
+
 /** Builds Kotlin services plus the shared result/exception declarations they reference. */
 export class ApiBuilder {
   private readonly results: KtResultDecl[] = [];
@@ -59,6 +71,7 @@ export class ApiBuilder {
   constructor(
     private readonly types: DeclarationBuilder,
     private readonly apiPackage: string,
+    private readonly options: ApiOptions = {},
   ) {
     this.apiException = {
       kind: "api-exception",
@@ -81,11 +94,16 @@ export class ApiBuilder {
       auth: s.auth,
       groups: s.groups.map((g) => {
         const name = decoratorArg(g.decorators, "Kotlin.name") ?? typeName(g.name);
-        const groupScopes = metaScopes(g.decorators);
+        const groupScopes = [...g.namespaceDecorators.map(metaScopes), metaScopes(g.decorators)].reduce(
+          (acc, scopes) => mergeScopes(acc, scopes),
+          {} as MetaScopes,
+        );
+        const pkg = mappedPackage(this.options.packages, g.namespace);
         return {
           id: g.id,
           name,
           namespace: g.namespace,
+          ...(pkg ? { package: pkg } : {}),
           ...(g.docs ? { docs: g.docs } : {}),
           annotations: this.types.annotations(g, g.id, groupScopes),
           meta: groupScopes,
@@ -148,7 +166,8 @@ export class ApiBuilder {
       params,
       responses,
       result: this.result(plain(name), groupName, responses.filter((r) => !r.isError)),
-      errors: responses.filter((r) => r.isError).map((r) => this.error(r)),
+      errors:
+        this.options.errors === "thrown" ? [] : responses.filter((r) => r.isError).map((r) => this.error(r)),
     };
     if (op.body) {
       const taken = new Set(params.map((p) => p.name));
@@ -213,6 +232,19 @@ export class ApiBuilder {
     return name;
   }
 
+  /** Exception name for an error body; a clash with another model's exception is qualified by its package. */
+  private exceptionName(body: KtTypeUse, key: string): string {
+    const taken = (n: string) => [...this.exceptions.values()].some((e) => e.decl.name === n);
+    const base = `${typeName(body.text)}Exception`;
+    if (!taken(base)) return base;
+    const pkg = key.endsWith(`.${body.text}`) ? key.slice(0, -body.text.length - 1) : "";
+    const segment = pkg.split(".").pop() ?? "";
+    const qualified = segment ? `${typeName(segment)}${base}` : base;
+    let name = qualified;
+    for (let i = 2; taken(name); i++) name = `${qualified}${i}`;
+    return name;
+  }
+
   private error(r: KtResponse): KtError {
     const error: KtError = {
       statusCodes: r.statusCodes,
@@ -220,9 +252,10 @@ export class ApiBuilder {
       exception: typeOf(this.apiException),
     };
     if (!r.body) return error;
-    let entry = this.exceptions.get(r.body.text);
+    const key = errorKey(r.body);
+    let entry = this.exceptions.get(key);
     if (!entry) {
-      const name = `${typeName(r.body.text)}Exception`;
+      const name = this.exceptionName(r.body, key);
       entry = {
         decl: {
           kind: "exception",
@@ -235,7 +268,7 @@ export class ApiBuilder {
         },
         codes: new Set(),
       };
-      this.exceptions.set(r.body.text, entry);
+      this.exceptions.set(key, entry);
     }
     entry.codes.add(typeof r.statusCodes === "number" ? String(r.statusCodes) : JSON.stringify(r.statusCodes));
     error.exception = typeOf(entry.decl);

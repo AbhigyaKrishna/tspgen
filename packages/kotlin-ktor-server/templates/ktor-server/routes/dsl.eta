@@ -1,12 +1,15 @@
 <% const u = it.unit; -%>
-fun Route.<%= u.routesFn %>(service: <%= u.serviceName %>) {
-<% for (const op of u.operations) { const auth = it.extras[op.id].authenticate; const route = include("ktor-server/routes/dsl-route", { op, unit: u, options: it.options, h: it.h }); -%>
-<% if (auth.length) { -%>
-    authenticate(<%~ auth.map((a) => it.h.str(a)).join(", ") %>) {
-<%~ it.h.indent(route, "    ") %>
+<% for (const [i, fn] of it.routeFunctions.entries()) { const body = include("ktor-server/routes/dsl-nodes", { nodes: fn.nodes, unit: u, options: it.options, h: it.h }).trimEnd(); -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+fun Route.<%= fn.name %>(service: <%= u.serviceName %>) {
+<% if (fn.prefix) { -%>
+    route(<%~ it.h.str(fn.prefix) %>) {
+<%~ it.h.indent(body, "    ") %>
     }
 <% } else { -%>
-<%~ route %>
-<% } -%>
+<%~ body %>
 <% } -%>
 }
+<% } -%>

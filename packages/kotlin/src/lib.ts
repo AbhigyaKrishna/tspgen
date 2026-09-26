@@ -7,6 +7,9 @@ export interface KotlinEmitterOptions extends CoreEmitterOptions {
   package?: string;
   targets?: TargetSpec[];
   naming?: { "enum-members"?: EnumMemberNaming };
+  packages?: { namespace: string; package: string }[];
+  errors?: "typed" | "thrown";
+  validation?: boolean;
 }
 
 const optionsSchema = {
@@ -33,6 +36,29 @@ const optionsSchema = {
       properties: {
         "enum-members": { type: "string", enum: ["UPPER_SNAKE", "PascalCase"], nullable: true },
       },
+    },
+    packages: {
+      type: "array",
+      nullable: true,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["namespace", "package"],
+        properties: { namespace: { type: "string" }, package: { type: "string" } },
+      },
+      description:
+        'TypeSpec namespace → Kotlin package, e.g. [{ namespace: "Shop.Graph", package: "com.acme.graph" }]; longest prefix wins.',
+    },
+    errors: {
+      type: "string",
+      enum: ["typed", "thrown"],
+      nullable: true,
+      description: "typed (default): …Exception per error body; thrown: error responses are documentation only.",
+    },
+    validation: {
+      type: "boolean",
+      nullable: true,
+      description: "Render constraint decorators as init { require(...) } checks (default false).",
     },
   },
   required: [],

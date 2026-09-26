@@ -1,0 +1,9 @@
+<% for (const n of it.nodes) { -%>
+<% if (n.kind === "block") { -%>
+    <%~ n.wrapper %> {
+<%~ it.h.indent(include("ktor-server/routes/dsl-nodes", { nodes: n.children, unit: it.unit, options: it.options, h: it.h }).trimEnd(), "    ") %>
+    }
+<% } else { -%>
+<%~ include("ktor-server/routes/dsl-route", { op: n.op, path: n.path, unit: it.unit, options: it.options, h: it.h }).trimEnd() %>
+<% } -%>
+<% } -%>

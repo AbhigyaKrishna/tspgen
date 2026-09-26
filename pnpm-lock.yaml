@@ -176,6 +176,21 @@ importers:
         specifier: 5.0.1
         version: 5.0.1(@types/node@24.13.6)(vite@8.3.1(@types/node@24.13.6)(yaml@2.9.1))
 
+  e2e/house-style:
+    dependencies:
+      '@specgen/emitter-kotlin':
+        specifier: workspace:*
+        version: link:../../packages/kotlin
+      '@specgen/kotlin-ktor-server':
+        specifier: workspace:*
+        version: link:../../packages/kotlin-ktor-server
+      '@typespec/compiler':
+        specifier: 1.16.0
+        version: 1.16.0(@types/node@24.13.6)
+      '@typespec/http':
+        specifier: 1.16.0
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+
   e2e/kotlin:
     dependencies:
       '@specgen/emitter-kotlin':

@@ -58,3 +58,12 @@ export function listOf(item: KtTypeUse): KtTypeUse {
 export function mapOf(value: KtTypeUse): KtTypeUse {
   return { text: `Map<String, ${value.text}>`, imports: value.imports, nullable: false };
 }
+
+/** `Page` + [`Pet`] → `Page<Pet>` carrying the imports of both. */
+export function genericOf(base: KtTypeUse, args: readonly KtTypeUse[]): KtTypeUse {
+  return {
+    text: `${base.text}<${args.map((a) => a.text).join(", ")}>`,
+    imports: [...base.imports, ...args.flatMap((a) => a.imports)],
+    nullable: false,
+  };
+}

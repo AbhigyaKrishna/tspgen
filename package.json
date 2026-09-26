@@ -7,7 +7,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r build && vitest run",
-    "e2e": "pnpm -r build && pnpm --filter specgen-e2e-kotlin --filter specgen-e2e-typescript test"
+    "e2e": "pnpm -r build && pnpm --filter specgen-e2e-kotlin --filter specgen-e2e-typescript --filter specgen-e2e-house-style test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
