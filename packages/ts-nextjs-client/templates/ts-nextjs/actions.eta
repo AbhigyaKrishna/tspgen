@@ -1,0 +1,15 @@
+<% const n = it.h.nextjs; const g = it.group; const prop = n.names.groupProperty(g); const server = n.names.serverClient(it.service); -%>
+<% it.operations.forEach((op, i) => { const has = n.hasParams(op); const params = n.names.params(g, op); -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+<%~ it.h.jsdoc(op.docs) %>export async function <%= n.names.action(g, op) %>(<%= has ? "params: " + params : "" %>): Promise<ActionResult<<%= op.result.type.text %>>> {
+<% if (has && it.zod) { -%>
+  const parsed = <%= params %>Schema.safeParse(params);
+  if (!parsed.success) return { ok: false, status: 400, error: { issues: parsed.error.issues } };
+  return runAction(() => <%= server %>().<%= prop %>.<%= op.name %>(parsed.data));
+<% } else { -%>
+  return runAction(() => <%= server %>().<%= prop %>.<%= op.name %>(<%= has ? "params" : "" %>));
+<% } -%>
+}
+<% }) -%>

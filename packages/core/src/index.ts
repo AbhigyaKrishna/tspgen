@@ -2,7 +2,7 @@ export { $lib, reportDiagnostic, createDiagnostic, errorMessage } from "./lib.js
 export { pascal } from "./naming.js";
 export * from "./ir/types.js";
 export { buildApiIR } from "./ir/build.js";
-export { collectDecorators } from "./ir/decorators.js";
+export { collectDecorators, decoratorArg, decoratorArgs } from "./ir/decorators.js";
 export { TemplateEngine, TemplateNotFoundError, type TemplateLayer } from "./templates/engine.js";
 export { ExtensionRegistry } from "./plugins/registry.js";
 export { definePlugin, type PluginContext, type SpecgenPlugin } from "./plugins/plugin.js";
@@ -14,3 +14,4 @@ export { runPipeline, type PipelineOptions, type PipelineTarget } from "./pipeli
 export { coreEmitterOptionsSchemaProperties, type CoreEmitterOptions } from "./options.js";
 export { validateOptions } from "./options-validate.js";
 export { loadTargets, type TargetSpec } from "./targets/load.js";
+export { emitLanguage, type LanguageEmitterOptions } from "./emitter.js";

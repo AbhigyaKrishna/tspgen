@@ -1,0 +1,8 @@
+emit:
+  - "@specgen/emitter-typescript"
+options:
+  "@specgen/emitter-typescript":
+    emitter-output-dir: "{project-root}/generated"
+    zod: true
+    targets:
+      - "@specgen/ts-nextjs-client": {}

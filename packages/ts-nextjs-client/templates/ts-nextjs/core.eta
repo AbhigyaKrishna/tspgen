@@ -1,0 +1,121 @@
+export type HeadersInput = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
+
+export interface ClientConfig {
+  /** Absolute API URL, or a path such as "/api" when running in the browser. */
+  baseUrl: string;
+  /** Custom fetch implementation (defaults to the global fetch). */
+  fetch?: typeof fetch;
+  /** Headers sent with every request; may be async (e.g. auth read from cookies()). */
+  headers?: HeadersInput;
+  /** Validate response bodies with the generated zod schemas when available (default true). */
+  validate?: boolean;
+}
+
+/** Per-call options passed through to fetch, including Next.js caching. */
+export interface RequestOptions {
+  next?: { revalidate?: number | false; tags?: string[] };
+  cache?: RequestCache;
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+}
+
+type Scalar = string | number | boolean | null | undefined;
+
+export type ParamValue = Scalar | readonly Scalar[];
+
+export interface RequestSpec {
+  method: string;
+  path: string;
+  /** [name, value, explode] */
+  query?: ReadonlyArray<readonly [string, ParamValue, boolean]>;
+  headers?: Record<string, ParamValue>;
+  cookies?: Record<string, ParamValue>;
+  body?: unknown;
+  contentType?: string;
+}
+
+/** Minimal schema contract, satisfied by zod schemas. */
+export interface Schema<T> {
+  parse(value: unknown): T;
+}
+
+export type ErrorFactory = (status: number, body: unknown) => Error;
+
+function encode(value: ParamValue): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return Array.isArray(value) ? value.map(String).join(",") : String(value);
+}
+
+function resolveUrl(baseUrl: string, path: string): URL {
+  const origin = (globalThis as { location?: { origin: string } }).location?.origin;
+  return new URL(baseUrl.replace(/\/+$/, "") + path, origin);
+}
+
+export async function request(config: ClientConfig, spec: RequestSpec, options: RequestOptions = {}): Promise<Response> {
+  const url = resolveUrl(config.baseUrl, spec.path);
+  for (const [name, value, explode] of spec.query ?? []) {
+    if (Array.isArray(value) && explode) {
+      for (const item of value) url.searchParams.append(name, String(item));
+      continue;
+    }
+    const encoded = encode(value);
+    if (encoded !== undefined) url.searchParams.append(name, encoded);
+  }
+  const headers = new Headers(typeof config.headers === "function" ? await config.headers() : config.headers);
+  new Headers(options.headers).forEach((headerValue, headerName) => headers.set(headerName, headerValue));
+  for (const [name, headerValue] of Object.entries(spec.headers ?? {})) {
+    const encoded = encode(headerValue);
+    if (encoded !== undefined) headers.set(name, encoded);
+  }
+  const cookies = Object.entries(spec.cookies ?? {}).flatMap(([name, cookieValue]) => {
+    const encoded = encode(cookieValue);
+    return encoded === undefined ? [] : [`${name}=${encodeURIComponent(encoded)}`];
+  });
+  if (cookies.length > 0) headers.append("cookie", cookies.join("; "));
+  let body: string | undefined;
+  if (spec.body !== undefined) {
+    const contentType = spec.contentType ?? "application/json";
+    headers.set("content-type", contentType);
+    body = contentType.includes("json") || typeof spec.body !== "string" ? JSON.stringify(spec.body) : spec.body;
+  }
+  const init: RequestInit & { next?: RequestOptions["next"] } = {
+    method: spec.method,
+    headers,
+    body,
+    cache: options.cache,
+    signal: options.signal,
+    next: options.next,
+  };
+  return (config.fetch ?? fetch)(url, init);
+}
+
+/** Reads a response body: JSON when the content type says so, text otherwise, undefined when empty. */
+export async function readBody(res: Response): Promise<unknown> {
+  const raw = await res.text();
+  if (!raw) return undefined;
+  return (res.headers.get("content-type") ?? "").includes("json") ? JSON.parse(raw) : raw;
+}
+
+export async function parse<T>(config: ClientConfig, res: Response, schema?: Schema<T>): Promise<T> {
+  const body = await readBody(res);
+  return schema && config.validate !== false ? schema.parse(body) : (body as T);
+}
+
+/** Maps an error response to an error instance by exact status, status class ("4XX") or default. */
+export async function toError(res: Response, factories: Record<string, ErrorFactory>): Promise<Error> {
+  const body = await readBody(res).catch(() => undefined);
+  const factory = factories[String(res.status)] ?? factories[`${Math.floor(res.status / 100)}XX`] ?? factories.default;
+  return factory ? factory(res.status, body) : new HttpError(res.status, body);
+}
+
+export function requireHeader(res: Response, name: string): string {
+  const headerValue = res.headers.get(name);
+  if (headerValue === null) throw new HttpError(res.status, undefined, `Missing response header '${name}'`);
+  return headerValue;
+}
+
+export function optionalHeader<T = string>(res: Response, name: string, map?: (value: string) => T): T | undefined {
+  const headerValue = res.headers.get(name);
+  if (headerValue === null) return undefined;
+  return map ? map(headerValue) : (headerValue as T);
+}

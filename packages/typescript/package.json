@@ -1,0 +1,32 @@
+{
+  "name": "@specgen/emitter-typescript",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "tspMain": "lib/main.tsp",
+  "exports": {
+    ".": {
+      "typespec": "./lib/main.tsp",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "lib", "templates"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@specgen/emitter-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@typespec/compiler": "^1.16.0",
+    "@typespec/http": "^1.16.0"
+  },
+  "devDependencies": {
+    "@typespec/compiler": "1.16.0",
+    "@typespec/http": "1.16.0",
+    "zod": "^4.6.5"
+  }
+}

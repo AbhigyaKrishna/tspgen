@@ -1,0 +1,3 @@
+<% for (const spec of it.exports) { -%>
+export * from "<%= spec %>";
+<% } -%>

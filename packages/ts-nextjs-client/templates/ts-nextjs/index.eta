@@ -1,0 +1,23 @@
+<% const n = it.h.nextjs; -%>
+<% for (const spec of it.exports) { -%>
+export * from "<%= spec %>";
+<% } -%>
+<% for (const s of it.services) { -%>
+
+/** Entry point for the <%= s.name %> API. */
+export class <%= n.names.apiClient(s) %> {
+<% for (const g of s.groups) { -%>
+  readonly <%= n.names.groupProperty(g) %>: <%= n.names.groupClass(g) %>;
+<% } -%>
+
+  constructor(config: ClientConfig) {
+<% for (const g of s.groups) { -%>
+    this.<%= n.names.groupProperty(g) %> = new <%= n.names.groupClass(g) %>(config);
+<% } -%>
+  }
+}
+
+export function <%= n.names.factory(s) %>(config: ClientConfig): <%= n.names.apiClient(s) %> {
+  return new <%= n.names.apiClient(s) %>(config);
+}
+<% } -%>

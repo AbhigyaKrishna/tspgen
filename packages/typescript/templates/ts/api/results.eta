@@ -1,0 +1,7 @@
+<% it.results.forEach((r, i) => { -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+export type <%= r.name %> =
+  | <%~ r.variants.map(it.h.resultVariant).join("\n  | ") %>;
+<% }) -%>

@@ -1,0 +1,10 @@
+<%~ include("ts/common/header", it) %>
+<% if (it.directive) { -%>
+"<%= it.directive %>";
+
+<% } -%>
+<% for (const line of it.imports) { -%>
+<%~ line %>
+<% } -%>
+
+<%~ include(it.body, it) %>

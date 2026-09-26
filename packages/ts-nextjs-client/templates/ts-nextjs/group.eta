@@ -1,0 +1,53 @@
+<% const g = it.group; const n = it.h.nextjs; -%>
+<% for (const op of g.operations) { if (!n.hasParams(op)) continue; const name = n.names.params(g, op); -%>
+export interface <%= name %> {
+<% for (const f of n.fields(op)) { -%>
+<%~ it.h.jsdoc(f.docs, "  ") %>  <%= f.key %><%= f.optional ? "?" : "" %>: <%= f.type.text %>;
+<% } -%>
+}
+<% if (it.zod) { -%>
+
+export const <%= name %>Schema: z.ZodType<<%= name %>> = z.object({
+<% for (const f of n.fields(op)) { -%>
+  <%= f.key %>: <%= f.type.schema %><%= f.optional ? ".optional()" : "" %>,
+<% } -%>
+});
+<% } -%>
+
+<% } -%>
+<%~ it.h.jsdoc(g.docs) %>export class <%= n.names.groupClass(g) %> {
+  private readonly config: ClientConfig;
+
+  constructor(config: ClientConfig) {
+    this.config = config;
+  }
+<% for (const op of g.operations) { -%>
+
+<%~ it.h.jsdoc(op.docs, "  ", op.deprecated) %>  async <%= op.name %>(<%= n.signature(g, op) %>): Promise<<%= op.result.type.text %>> {
+    const res = await request(
+      this.config,
+      {
+        method: "<%= op.verb.toUpperCase() %>",
+        path: <%~ n.pathExpr(op) %>,
+<% for (const line of n.specLines(op)) { -%>
+        <%~ line %>
+<% } -%>
+      },
+      options,
+    );
+<% for (const line of n.successLines(op, it.zod)) { -%>
+    <%~ line %>
+<% } -%>
+<% const factories = n.errorFactories(op); -%>
+<% if (factories.length === 0) { -%>
+    throw await toError(res, {});
+<% } else { -%>
+    throw await toError(res, {
+<% for (const f of factories) { -%>
+      <%~ f %>,
+<% } -%>
+    });
+<% } -%>
+  }
+<% } -%>
+}

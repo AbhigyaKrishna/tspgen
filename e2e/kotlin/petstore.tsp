@@ -1,5 +1,4 @@
 import "@typespec/http";
-import "@specgen/emitter-kotlin";
 
 using Http;
 

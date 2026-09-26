@@ -1,0 +1,20 @@
+<% const n = it.h.nextjs; -%>
+<% it.services.forEach((s, i) => { const client = n.names.apiClient(s); -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+let <%= n.names.serverClient(s) %>Overrides: Partial<ClientConfig> = {};
+
+/** Customizes the client used by the generated <%= s.name %> Server Actions (e.g. auth headers). */
+export function <%= n.names.configureActions(s) %>(config: Partial<ClientConfig>): void {
+  <%= n.names.serverClient(s) %>Overrides = config;
+}
+
+/** Server-side client; base URL from process.env.<%= it.env %> unless configured. */
+export function <%= n.names.serverClient(s) %>(): <%= client %> {
+  const overrides = <%= n.names.serverClient(s) %>Overrides;
+  const baseUrl = overrides.baseUrl ?? process.env.<%= it.env %>;
+  if (!baseUrl) throw new Error("<%= it.env %> is not set");
+  return new <%= client %>({ ...overrides, baseUrl });
+}
+<% }) -%>

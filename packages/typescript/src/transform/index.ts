@@ -1,0 +1,36 @@
+import type { ApiIR } from "@specgen/emitter-core";
+import type { Program } from "@typespec/compiler";
+import { DeclarationBuilder } from "./declarations.js";
+import type { TsIR } from "./model.js";
+import { ApiBuilder } from "./operations.js";
+
+export * from "./model.js";
+
+export interface TsTransformOptions {
+  zod: boolean;
+  importExtension: "" | ".js";
+}
+
+export function resolveTsOptions(options: Record<string, unknown>): TsTransformOptions {
+  return {
+    zod: options.zod === true,
+    importExtension: options["import-extension"] === ".js" ? ".js" : "",
+  };
+}
+
+export function transformToTs(program: Program, api: ApiIR, options: TsTransformOptions): TsIR {
+  const builder = new DeclarationBuilder(program, api);
+  const declarations = builder.build();
+  const apiBuilder = new ApiBuilder(builder);
+  const services = apiBuilder.services(api);
+  return {
+    declarations,
+    errorClasses: apiBuilder.errors(),
+    results: apiBuilder.results,
+    services,
+    apiActive: apiBuilder.active,
+    zod: options.zod,
+    importExtension: options.importExtension,
+    api,
+  };
+}

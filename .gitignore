@@ -6,3 +6,6 @@ coverage/
 build/
 tsp-output/
 .nodeterm/
+.tmp-*/
+generated/
+e2e/typescript/petstore.tsp

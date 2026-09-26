@@ -9,6 +9,8 @@ The core is language-neutral; languages and server/client libraries plug in as s
 | `@specgen/emitter-kotlin` | The TypeSpec emitter for Kotlin: kotlinx.serialization models, result/error types, `@Kotlin.*` decorators |
 | `@specgen/kotlin-ktor-server` | Target: Ktor server — service interfaces, routing, module with JSON + StatusPages |
 | `@specgen/kotlin-ktor-client` | Target: Ktor `HttpClient` SDK |
+| `@specgen/emitter-typescript` | The TypeSpec emitter for TypeScript: interfaces, literal-union enums, optional zod schemas, result/error types, `@TS.*` decorators |
+| `@specgen/ts-nextjs-client` | Target: Next.js client SDK — typed `fetch` client, TanStack Query hooks, Server Actions |
 
 ## Usage
 
@@ -70,6 +72,58 @@ val pet = api.pets.get(petId = 1)                             // typed errors ar
 
 Authentication is configured on your `HttpClient` (Ktor `Auth` plugin or `defaultRequest`).
 
+## TypeScript / Next.js
+
+```yaml
+emit:
+  - "@specgen/emitter-typescript"
+options:
+  "@specgen/emitter-typescript":
+    zod: true                         # emit PetSchema: z.ZodType<Pet> next to each type (default false)
+    import-extension: none            # none (Next.js/bundlers) | .js (Node ESM)
+    targets:
+      - "@specgen/ts-nextjs-client":
+          react-query: true           # keys, queryOptions and hooks (default true)
+          server-actions: true        # "use server" actions for non-GET operations (default true)
+          base-url-env: API_BASE_URL  # env var read by the actions' server-side client
+```
+
+Output: `models/` (one file per type + `index.ts`), `api/` (`HttpError` + typed `<Body>Error` classes,
+multi-status result unions), and `client/`:
+
+```
+client/core.ts                   ClientConfig, RequestOptions, request/parse/toError runtime
+client/<group>.ts                <Group>Client + <Group><Op>Params (and zod params schemas)
+client/index.ts                  <Service>ApiClient, create<Service>Client, re-exports
+client/react-query/queries.ts    <service>Keys, <service>Queries (server-safe, for prefetch)
+client/react-query/hooks.ts      "use client": <Service>ClientProvider, use<Group><Op>Query/Mutation
+client/actions/<group>.ts        "use server": <group><Op>Action → ActionResult<T>
+client/actions/server-client.ts  configure<Service>Actions(), server-side client factory
+```
+
+```ts
+// Server Component / Route Handler — Next.js caching options pass straight through to fetch
+const api = createPetStoreClient({ baseUrl: process.env.API_BASE_URL!, headers: async () => ({ authorization: await token() }) });
+const pets = await api.pets.list({ limit: 10 }, { next: { revalidate: 60, tags: ["pets"] } });
+
+// Client Component
+<PetStoreClientProvider client={createPetStoreClient({ baseUrl: "/api" })}>…</PetStoreClientProvider>
+const { data } = usePetsGetQuery({ petId: 1 });
+const create = usePetsCreateMutation({ onSuccess: () => queryClient.invalidateQueries({ queryKey: petStoreKeys.pets.all }) });
+
+// Prefetch on the server, hydrate on the client
+await queryClient.prefetchQuery(petStoreQueries.pets.get(api, { petId: 1 }));
+
+// Server Action from a form or Client Component — errors come back as data, not exceptions
+const result = await petsCreateAction({ pet });
+if (!result.ok) console.error(result.status, result.error);
+```
+
+The fetch client throws `HttpError` subclasses (`NotFoundError` has a typed `.error`); with zod on,
+responses are validated (`validate: false` in `ClientConfig` turns it off) and Server Action input is
+checked first (`{ ok: false, status: 400, error: { issues } }`). Property names match the JSON wire
+names; dates are ISO strings.
+
 ## Decorators
 
 ```tsp
@@ -84,6 +138,9 @@ model User {
 @Kotlin.packageName("com.acme.shared")    // place a model/enum/union in another package
 model Money { amount: string }
 ```
+
+TypeScript: `@TS.name("Customer")` renames a generated type; `@TS.type("Decimal", "decimal.js")` maps a
+model, scalar, enum, union or property to an external type (module optional, e.g. `@TS.type("Date")`).
 
 ## Customizing output
 
@@ -100,6 +157,11 @@ language templates, so you can override one partial without forking:
 | `ktor-server/{service,module,support}` | server interface, module, parameter helpers |
 | `ktor-server/routes/{dsl,resources,respond}` | routing styles and the response partial |
 | `ktor-client/{client,response,api-client,support}` | client classes |
+| `ts/file`, `ts/common/header`, `ts/barrel` | TypeScript file skeleton, header, barrels |
+| `ts/model/{interface,alias,enum}`, `ts/api/{errors,results}` | TypeScript models and shared api types |
+| `ts-nextjs/{core,group,index}` | fetch runtime and clients |
+| `ts-nextjs/{queries,hooks}` | TanStack Query |
+| `ts-nextjs/{actions,action-result,server-client}` | Server Actions |
 
 Templates receive the file data as `it`, emitter options as `it.ctx.options`, and helpers as `it.h`
 (`it.h.kdoc`, `it.h.str`, `it.h.ktorServer.*`, `it.h.ktorClient.*`, plus plugin helpers).
@@ -150,7 +212,7 @@ Use it with `routing-style: company`.
 ```bash
 pnpm install
 pnpm test        # build all packages, run unit + emitter tests (vitest)
-pnpm e2e         # generate e2e/kotlin from petstore.tsp, compile with Gradle, run client↔server test
+pnpm e2e         # Kotlin: Gradle build + client↔server test; TypeScript: tsc --strict + stub-server tests
 ```
 
 The e2e build needs JDK 17+. If Gradle cannot download over IPv6 on your network, run

@@ -1,0 +1,228 @@
+import {
+  decoratorArg,
+  type ApiIR,
+  type DecoratorData,
+  type EnumIR,
+  type ModelIR,
+  type PropertyIR,
+  type TypeIR,
+  type TypeRef,
+  type UnionIR,
+} from "@specgen/emitter-core";
+import { NoTarget, type Program } from "@typespec/compiler";
+import { reportDiagnostic } from "../lib.js";
+import { memberName, propertyKey, typeName } from "../naming.js";
+import type { TsDecl, TsEnumMember, TsProperty, TsTypeUse } from "./model.js";
+import {
+  arrayOf,
+  declUse,
+  externalUse,
+  literalUse,
+  nullable,
+  objectUse,
+  recordOf,
+  scalarUse,
+  simple,
+  unionOf,
+  UNKNOWN,
+} from "./type-map.js";
+
+/** `@TS.type(name, module?)` override, if applied. */
+export function typeOverride(decorators: DecoratorData | undefined): TsTypeUse | undefined {
+  const args = decorators?.["TS.type"]?.at(-1);
+  if (!args || typeof args[0] !== "string") return undefined;
+  return externalUse(args[0], typeof args[1] === "string" ? args[1] : undefined);
+}
+
+/** Builds TS declarations for every IR type and resolves TypeRefs to TS type uses. */
+export class DeclarationBuilder {
+  private readonly decls = new Map<string, TsDecl>();
+  private readonly mapped = new Map<string, TsTypeUse>();
+  private readonly types: Map<string, TypeIR>;
+
+  constructor(
+    private readonly program: Program,
+    private readonly api: ApiIR,
+  ) {
+    this.types = new Map(api.types.map((t) => [t.id, t]));
+  }
+
+  build(): TsDecl[] {
+    for (const t of this.api.types) {
+      const override = typeOverride(t.decorators);
+      if (override) this.mapped.set(t.id, override);
+    }
+    const own = this.api.types.filter((t) => !this.mapped.has(t.id));
+    for (const t of own) this.decls.set(t.id, this.shell(t));
+    for (const t of own) if (t.kind === "enum") this.fillEnum(t);
+    for (const t of own) if (t.kind === "model") this.fillModel(t);
+    for (const t of own) if (t.kind === "union") this.fillUnion(t);
+    this.checkDuplicates();
+    return [...this.decls.values()];
+  }
+
+  hasName(name: string): boolean {
+    return [...this.decls.values()].some((d) => d.name === name);
+  }
+
+  typeUse(ref: TypeRef): TsTypeUse {
+    switch (ref.kind) {
+      case "named": {
+        const mapped = this.mapped.get(ref.id);
+        if (mapped) return mapped;
+        const decl = this.decls.get(ref.id);
+        return decl ? declUse(decl.name, decl.file) : UNKNOWN;
+      }
+      case "array":
+        return arrayOf(this.typeUse(ref.of));
+      case "map":
+        return recordOf(this.typeUse(ref.of));
+      case "scalar":
+        return typeOverride(ref.custom?.decorators) ?? scalarUse(ref.name);
+      case "literal":
+        return literalUse(ref.value);
+      case "nullable":
+        return nullable(this.typeUse(ref.of));
+      case "unknown":
+        return UNKNOWN;
+    }
+  }
+
+  private shell(t: TypeIR): TsDecl {
+    const name = decoratorArg(t.decorators, "TS.name") ?? typeName(t.name);
+    const base = {
+      id: t.id,
+      name,
+      file: `models/${name}`,
+      ...(t.docs ? { docs: t.docs } : {}),
+      ...(t.deprecated ? { deprecated: t.deprecated } : {}),
+    };
+    if (t.kind === "enum" || (t.kind === "union" && this.isStringLiteralUnion(t))) {
+      return { ...base, kind: "enum", members: [] };
+    }
+    if (t.kind === "model" && !(t.discriminator && Object.keys(t.discriminator.mapping).length > 0)) {
+      return { ...base, kind: "interface", properties: [] };
+    }
+    return { ...base, kind: "alias", type: UNKNOWN };
+  }
+
+  private isStringLiteralUnion(u: UnionIR): boolean {
+    return u.variants.every((v) => v.type.kind === "literal" && typeof v.type.value === "string");
+  }
+
+  private fillEnum(e: EnumIR): void {
+    const decl = this.decls.get(e.id)!;
+    if (decl.kind !== "enum") return;
+    decl.members = e.members.map(
+      (m): TsEnumMember => ({
+        name: decoratorArg(m.decorators, "TS.name") ?? memberName(m.name),
+        value: m.value,
+        ...(m.docs ? { docs: m.docs } : {}),
+      }),
+    );
+  }
+
+  private fillModel(model: ModelIR): void {
+    const decl = this.decls.get(model.id)!;
+    if (decl.kind === "alias") {
+      const ids = [...new Set(Object.values(model.discriminator!.mapping))];
+      decl.type = unionOf(ids.map((id) => this.typeUse({ kind: "named", id })));
+      return;
+    }
+    if (decl.kind !== "interface") return;
+    const byName = new Map<string, PropertyIR>();
+    for (const m of this.chain(model)) for (const p of m.properties) byName.set(p.name, p);
+    decl.properties = [...byName.values()].map((p) => this.property(p));
+    for (const base of this.chain(model).slice(0, -1)) {
+      if (!base.discriminator) continue;
+      const value = Object.entries(base.discriminator.mapping).find(([, id]) => id === model.id)?.[0];
+      if (value !== undefined) this.inject(model.id, base.discriminator.property, value);
+    }
+  }
+
+  private fillUnion(u: UnionIR): void {
+    const decl = this.decls.get(u.id)!;
+    if (decl.kind === "enum") {
+      decl.members = u.variants.map((v) => {
+        const value = v.type.kind === "literal" ? String(v.type.value) : "";
+        return { name: memberName(v.name ?? value), value, ...(v.docs ? { docs: v.docs } : {}) };
+      });
+      return;
+    }
+    if (decl.kind !== "alias") return;
+    const types = u.variants.map((v) => v.type);
+    const literals = types.filter((t) => t.kind === "literal" && typeof t.value === "string");
+    const strings = types.filter((t) => t.kind === "scalar" && t.name === "string");
+    if (literals.length > 0 && literals.length + strings.length === types.length) {
+      decl.type = simple(`${literals.map((t) => this.typeUse(t).text).join(" | ")} | (string & {})`, "z.string()");
+      return;
+    }
+    const disc = u.discriminator;
+    if (disc?.envelope === "object") {
+      decl.type = unionOf(
+        u.variants.map((v, i) =>
+          objectUse([
+            { key: propertyKey(disc.property), type: literalUse(v.name ?? String(i)), optional: false },
+            { key: propertyKey(disc.envelopeProperty), type: this.typeUse(v.type), optional: false },
+          ]),
+        ),
+      );
+      return;
+    }
+    if (disc) {
+      for (const v of u.variants) if (v.name && v.type.kind === "named") this.inject(v.type.id, disc.property, v.name);
+    }
+    decl.type = unionOf(types.map((t) => this.typeUse(t)));
+  }
+
+  /** Ensure a variant interface declares the discriminator as a literal property. */
+  private inject(modelId: string, property: string, value: string): void {
+    const decl = this.decls.get(modelId);
+    if (decl?.kind !== "interface") return;
+    const existing = decl.properties.find((p) => p.wireName === property);
+    if (existing) {
+      existing.type = literalUse(value);
+      return;
+    }
+    decl.properties.unshift({ key: propertyKey(property), wireName: property, type: literalUse(value), optional: false });
+  }
+
+  private chain(model: ModelIR): ModelIR[] {
+    const chain: ModelIR[] = [];
+    let current: ModelIR | undefined = model;
+    while (current) {
+      chain.unshift(current);
+      const base: TypeIR | undefined = current.baseId ? this.types.get(current.baseId) : undefined;
+      current = base?.kind === "model" ? base : undefined;
+    }
+    return chain;
+  }
+
+  private property(p: PropertyIR): TsProperty {
+    return {
+      key: propertyKey(p.wireName),
+      wireName: p.wireName,
+      type: typeOverride(p.decorators) ?? this.typeUse(p.type),
+      optional: p.optional,
+      ...(p.docs ? { docs: p.docs } : {}),
+      ...(p.deprecated ? { deprecated: p.deprecated } : {}),
+      ...(p.default !== undefined ? { defaultDoc: JSON.stringify(p.default) } : {}),
+    };
+  }
+
+  private checkDuplicates(): void {
+    const seen = new Map<string, string>();
+    for (const decl of this.decls.values()) {
+      const first = seen.get(decl.name);
+      if (first) {
+        reportDiagnostic(this.program, {
+          code: "duplicate-type-name",
+          format: { name: decl.name, first, second: decl.id },
+          target: NoTarget,
+        });
+      } else {
+        seen.set(decl.name, decl.id);
+      }
+    }
+  }
+}

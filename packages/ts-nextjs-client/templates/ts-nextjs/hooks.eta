@@ -1,0 +1,38 @@
+<% const n = it.h.nextjs; -%>
+<% for (const s of it.services) { const client = n.names.apiClient(s); -%>
+const <%= n.names.context(s) %> = createContext<<%= client %> | null>(null);
+
+/** Makes a <%= s.name %> client available to the generated hooks. */
+export function <%= n.names.provider(s) %>(props: { client: <%= client %>; children?: ReactNode }): ReactNode {
+  return createElement(<%= n.names.context(s) %>.Provider, { value: props.client }, props.children);
+}
+
+export function <%= n.names.useClient(s) %>(): <%= client %> {
+  const client = useContext(<%= n.names.context(s) %>);
+  if (!client) throw new Error("<%= n.names.provider(s) %> is missing");
+  return client;
+}
+<% for (const g of s.groups) { const prop = n.names.groupProperty(g); -%>
+<% for (const op of it.queryOps(g)) { const has = n.hasParams(op); const data = op.result.type.text; -%>
+
+<%~ it.h.jsdoc(op.docs) %>export function <%= n.names.queryHook(g, op) %>(
+<% if (has) { -%>
+  <%= n.paramsDecl(g, op) %>,
+<% } -%>
+  options?: Omit<UseQueryOptions<<%= data %>, Error, <%= data %>, ReturnType<typeof <%= n.names.keys(s) %>.<%= prop %>.<%= op.name %>>>, "queryKey" | "queryFn">,
+) {
+  const client = <%= n.names.useClient(s) %>();
+  return useQuery({ ...<%= n.names.queries(s) %>.<%= prop %>.<%= op.name %>(client<%= has ? ", params" : "" %>), ...options });
+}
+<% } -%>
+<% for (const op of it.mutationOps(g)) { const has = n.hasParams(op); const vars = has ? n.names.params(g, op) : "void"; -%>
+
+<%~ it.h.jsdoc(op.docs) %>export function <%= n.names.mutationHook(g, op) %>(
+  options?: Omit<UseMutationOptions<<%= op.result.type.text %>, Error, <%= vars %>>, "mutationFn">,
+) {
+  const client = <%= n.names.useClient(s) %>();
+  return useMutation({ ...options, mutationFn: (<%= has ? "params: " + vars : "" %>) => client.<%= prop %>.<%= op.name %>(<%= has ? "params" : "" %>) });
+}
+<% } -%>
+<% } -%>
+<% } -%>

@@ -1,0 +1,14 @@
+/** Serializable result of a generated Server Action. */
+export type ActionResult<T> = { ok: true; data: T } | { ok: false; status: number; error: unknown };
+
+/** Runs a client call, converting HttpErrors into failure results that survive serialization. */
+export async function runAction<T>(call: () => Promise<T>): Promise<ActionResult<T>> {
+  try {
+    return { ok: true, data: await call() };
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return { ok: false, status: error.status, error: "error" in error ? error.error : error.body };
+    }
+    throw error;
+  }
+}

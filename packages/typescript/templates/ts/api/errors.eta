@@ -1,0 +1,24 @@
+/** Base class for non-success HTTP responses; `body` is the raw decoded response body. */
+export class HttpError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(status: number, body: unknown, message?: string) {
+    super(message ?? `HTTP ${status}`);
+    this.name = "HttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+<% for (const e of it.errors) { -%>
+
+export class <%= e.name %> extends HttpError {
+  readonly error: <%= e.body.text %>;
+
+  constructor(status: number, error: <%= e.body.text %>) {
+    super(status, error);
+    this.name = <%~ it.h.str(e.name) %>;
+    this.error = error;
+  }
+}
+<% } -%>

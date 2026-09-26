@@ -1,0 +1,31 @@
+<% const n = it.h.nextjs; -%>
+<% it.services.forEach((s, si) => { -%>
+<% if (si > 0) { -%>
+
+<% } -%>
+export const <%= n.names.keys(s) %> = {
+  all: [<%~ it.h.str(s.name) %>] as const,
+<% for (const g of s.groups) { const prop = n.names.groupProperty(g); -%>
+  <%= prop %>: {
+    all: [<%~ it.h.str(s.name) %>, <%~ it.h.str(prop) %>] as const,
+<% for (const op of it.queryOps(g)) { const params = n.paramsDecl(g, op); -%>
+    <%= op.name %>: (<%= params %>) => [<%~ it.h.str(s.name) %>, <%~ it.h.str(prop) %>, <%~ it.h.str(op.name) %><%= params ? ", params" : "" %>] as const,
+<% } -%>
+  },
+<% } -%>
+};
+
+export const <%= n.names.queries(s) %> = {
+<% for (const g of s.groups) { const prop = n.names.groupProperty(g); const ops = it.queryOps(g); if (ops.length === 0) continue; -%>
+  <%= prop %>: {
+<% for (const op of ops) { const has = n.hasParams(op); -%>
+    <%= op.name %>: (client: <%= n.names.apiClient(s) %><%= has ? ", params: " + n.names.params(g, op) : "" %>) =>
+      queryOptions({
+        queryKey: <%= n.names.keys(s) %>.<%= prop %>.<%= op.name %>(<%= has ? "params" : "" %>),
+        queryFn: ({ signal }) => client.<%= prop %>.<%= op.name %>(<%= has ? "params, " : "" %>{ signal }),
+      }),
+<% } -%>
+  },
+<% } -%>
+};
+<% }) -%>
