@@ -1,15 +1,16 @@
 <% const n = it.h.nextjs; -%>
+<% const key = (...parts) => [...(!it.keyPrefix ? [] : [it.keyPrefix]), ...parts].map((p) => it.h.str(p)).join(", "); -%>
 <% it.services.forEach((s, si) => { -%>
 <% if (si > 0) { -%>
 
 <% } -%>
 export const <%= n.names.keys(s) %> = {
-  all: [<%~ it.h.str(s.name) %>] as const,
+  all: [<%~ key(s.name) %>] as const,
 <% for (const g of s.groups) { const prop = n.names.groupProperty(g); -%>
   <%= prop %>: {
-    all: [<%~ it.h.str(s.name) %>, <%~ it.h.str(prop) %>] as const,
+    all: [<%~ key(s.name, prop) %>] as const,
 <% for (const op of it.queryOps(g)) { const params = n.paramsDecl(g, op); -%>
-    <%= op.name %>: (<%= params %>) => [<%~ it.h.str(s.name) %>, <%~ it.h.str(prop) %>, <%~ it.h.str(op.name) %><%= params ? ", params" : "" %>] as const,
+    <%= op.name %>: (<%= params %>) => [<%~ key(s.name, prop, op.name) %><%= params ? ", params" : "" %>] as const,
 <% } -%>
   },
 <% } -%>

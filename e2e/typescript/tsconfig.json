@@ -9,7 +9,7 @@
     "jsx": "react-jsx",
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node", "next"]
   },
   "include": ["generated/**/*.ts", "versioned/generated/**/*.ts", "app/**/*.tsx", "test/**/*.ts"]
 }

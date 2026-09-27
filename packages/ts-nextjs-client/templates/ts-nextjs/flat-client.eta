@@ -1,4 +1,37 @@
 <% const e = it.error; -%>
+export type HeadersInput = globalThis.HeadersInit | (() => globalThis.HeadersInit | Promise<globalThis.HeadersInit>);
+
+/** Next.js caching options (fetch's next). */
+export interface NextFetchOptions {
+  revalidate?: number | false;
+  tags?: string[];
+}
+
+/** Client-wide fetch options (init in ClientOptions): every RequestInit field but method, body, headers, signal and window. */
+export interface RequestDefaults extends Omit<globalThis.RequestInit, "method" | "body" | "headers" | "signal" | "window"> {
+  next?: NextFetchOptions;
+}
+
+/** Per-call fetch options, over init and @meta next defaults; headers override the client's. */
+export interface RequestOptions extends RequestDefaults {
+  signal?: AbortSignal;
+  headers?: globalThis.HeadersInit;
+}
+
+/**
+ * `options` without `method`, `body`, `headers` or `window`: `RequestOptions` excludes them at the type level, but a
+ * plain-JS caller (or an `as` cast) can still put them on the object at runtime; stripped before spreading `options`
+ * into fetch's init so they can never override the client's own `method`/`headers`/`body` or leak `window` through.
+ */
+function safeInit(options: RequestOptions): RequestOptions {
+  const rest = { ...options } as Record<string, unknown>;
+  delete rest.method;
+  delete rest.body;
+  delete rest.headers;
+  delete rest.window;
+  return rest as RequestOptions;
+}
+
 <% if (it.usesAuth) { -%>
 /** `Auth`: the client's `<Service>Auth` credential providers. */
 export interface ClientOptions<Auth extends object = object> {
@@ -8,12 +41,14 @@ export interface ClientOptions {
   baseUrl: string;
   /** Custom fetch implementation (defaults to the global fetch). */
   fetch?: typeof fetch;
-  /** Headers sent with every request. */
-  headers?: Record<string, string>;
+  /** Headers sent with every request; may be a function (sync or async), called per request. */
+  headers?: HeadersInput;
+  /** Fetch options for every request (credentials, cache, next, …); per-call options override them. */
+  init?: RequestDefaults;
 <% if (it.usesAuth) { -%>
   /**
    * Credential providers by auth scheme id: an operation's `@useAuth` credentials are sent (after `headers`, so
-   * they win) when its providers return them.
+   * they win; per-call headers win over them) when its providers return them.
    */
   auth?: Auth;
 <% } -%>
@@ -42,6 +77,7 @@ export class <%= e.name %> extends Error {
     this.<%= f.key %> = body?.<%= f.key %>;
 <% } -%>
   }
+<% if (it.features["error-getters"]) { -%>
 
   get isUnauthorized(): boolean {
     return this.status === 401;
@@ -58,6 +94,7 @@ export class <%= e.name %> extends Error {
   get isConflict(): boolean {
     return this.status === 409;
   }
+<% } -%>
 }
 <% for (const c of it.clients) { -%>
 <% if (c.auth) { -%>
@@ -74,15 +111,18 @@ export interface <%= c.auth.name %> {
 export class <%= c.name %> {
   private readonly baseUrl: string;
   private readonly doFetch: typeof fetch;
-  private readonly headers: Record<string, string>;
+  private readonly headers: HeadersInput | undefined;
 <% if (c.auth) { -%>
   private readonly auth: <%= c.auth.name %> | undefined;
 <% } -%>
 
   constructor(options: ClientOptions<% if (c.auth) { %><<%= c.auth.name %>><% } %>) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
-    this.doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
-    this.headers = options.headers ?? {};
+    const doFetch: typeof fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    const defaults = options.init;
+    // Client-wide fetch options sit under each request's own.
+    this.doFetch = defaults === undefined ? doFetch : (input, init) => doFetch(input, { ...defaults, ...init });
+    this.headers = options.headers;
 <% if (c.auth) { -%>
     this.auth = options.auth;
 <% } -%>
@@ -120,10 +160,10 @@ export class <%= c.name %> {
 <% if (c.usesSend) { -%>
 
 <% if (c.auth) { -%>
-  private async send<T>(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }, auth?: readonly (readonly AuthScheme[])[]): Promise<T> {
+  private async send<T>(method: string, path: string, body?: unknown, init?: RequestOptions, auth?: readonly (readonly AuthScheme[])[]): Promise<T> {
     const response = await this.request(method, path, body, init, auth);
 <% } else { -%>
-  private async send<T>(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<T> {
+  private async send<T>(method: string, path: string, body?: unknown, init?: RequestOptions): Promise<T> {
     const response = await this.request(method, path, body, init);
 <% } -%>
     const text = await response.text();
@@ -132,16 +172,25 @@ export class <%= c.name %> {
   }
 <% } -%>
 
-<% const requestInit = it.usesStreams ? "{ signal?: AbortSignal | undefined; accept?: string }" : "{ signal?: AbortSignal }"; -%>
+<% const callOptions = it.usesStreams ? "init: RequestOptions & { accept?: string } = {}" : "options: RequestOptions = {}"; -%>
 <% if (c.auth) { -%>
-  private async request(method: string, path: string, body?: unknown, init?: <%~ requestInit %>, auth?: readonly (readonly AuthScheme[])[]): Promise<Response> {
+  private async request(method: string, path: string, body?: unknown, <%~ callOptions %>, auth?: readonly (readonly AuthScheme[])[]): Promise<Response> {
 <% } else { -%>
-  private async request(method: string, path: string, body?: unknown, init?: <%~ requestInit %>): Promise<Response> {
+  private async request(method: string, path: string, body?: unknown, <%~ callOptions %>): Promise<Response> {
 <% } -%>
-    const headers = new globalThis.Headers(this.headers);
 <% if (it.usesStreams) { -%>
-    // A stream's Accept: text/event-stream, unless the client's headers set one.
-    if (init?.accept !== undefined && !headers.has("accept")) headers.set("accept", init.accept);
+    const { accept, ...options } = init;
+<% } -%>
+    const headers = new globalThis.Headers(typeof this.headers === "function" ? await this.headers() : this.headers);
+<% if (c.auth) { -%>
+    // Credentials override the client's headers; per-call headers override credentials.
+    const credentials = auth ? await resolveAuth(this.auth, auth) : undefined;
+    for (const [name, value] of credentials?.headers ?? []) headers.set(name, value);
+<% } -%>
+    new globalThis.Headers(options.headers).forEach((value, name) => headers.set(name, value));
+<% if (it.usesStreams) { -%>
+    // A stream's Accept: text/event-stream, unless a header sets one.
+    if (accept !== undefined && !headers.has("accept")) headers.set("accept", accept);
 <% } -%>
 <% if (it.usesUploads) { -%>
     const raw = body instanceof RawBody;
@@ -154,29 +203,25 @@ export class <%= c.name %> {
 <% } -%>
 <% if (c.auth) { -%>
     let url = `${this.baseUrl}${path}`;
-    if (auth) {
-      const credentials = await resolveAuth(this.auth, auth);
-      for (const [name, value] of credentials.headers) headers.set(name, value);
-      if (credentials.query.length > 0) {
-        const index = url.indexOf("?");
-        const search = new URLSearchParams(index < 0 ? "" : url.slice(index + 1));
-        for (const [name, value] of credentials.query) search.set(name, value);
-        url = `${index < 0 ? url : url.slice(0, index)}?${search.toString()}`;
-      }
-      if (credentials.cookies.length > 0) {
-        const cookies = credentials.cookies.map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join("; ");
-        const existing = headers.get("cookie");
-        headers.set("cookie", existing ? `${existing}; ${cookies}` : cookies);
-      }
+    if (credentials && credentials.query.length > 0) {
+      const index = url.indexOf("?");
+      const search = new URLSearchParams(index < 0 ? "" : url.slice(index + 1));
+      for (const [name, value] of credentials.query) search.set(name, value);
+      url = `${index < 0 ? url : url.slice(0, index)}?${search.toString()}`;
+    }
+    if (credentials && credentials.cookies.length > 0) {
+      const cookies = credentials.cookies.map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join("; ");
+      const existing = headers.get("cookie");
+      headers.set("cookie", existing ? `${existing}; ${cookies}` : cookies);
     }
     const response = await this.doFetch(url, {
 <% } else { -%>
     const response = await this.doFetch(`${this.baseUrl}${path}`, {
 <% } -%>
+      ...safeInit(options),
       method,
       headers,
       ...(body === undefined ? {} : { body: <%~ it.usesUploads ? "raw ? body.body : JSON.stringify(body)" : "JSON.stringify(body)" %> }),
-      ...(init?.signal === undefined ? {} : { signal: init.signal }),
     });
     if (!response.ok) throw await toError(response);
     return response;

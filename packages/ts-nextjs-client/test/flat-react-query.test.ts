@@ -152,7 +152,7 @@ export * from "./types";
         @post @route("/{id}") put(@path id: string, @body z: Z): void;
       }`;
     const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true, validate: true } }, { ...house, features: { zod: true } }).compile(spec);
-    expect(outputs["client.ts"]).toContain("  async tile(zValue: number, x: number, y: number, query: { format?: string } = {}, init?: { signal?: AbortSignal }): Promise<Tile> {");
+    expect(outputs["client.ts"]).toContain("  async tile(zValue: number, x: number, y: number, query: { format?: string } = {}, init?: RequestOptions): Promise<Tile> {");
     expect(outputs["queries.ts"]).toContain(`export interface TileVars {
   z: number;
   x: number;
@@ -171,7 +171,7 @@ export * from "./types";
     const spec = `@service namespace S; model N { a: string }
       @route("/n/{init}") @get op readN(@path \`init\`: string): N;`;
     const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compile(spec);
-    expect(outputs["client.ts"]).toContain("  readN(init: string, requestInit?: { signal?: AbortSignal }): Promise<N> {");
+    expect(outputs["client.ts"]).toContain("  readN(init: string, requestInit?: RequestOptions): Promise<N> {");
     expect(outputs["queries.ts"]).toContain("export interface ReadNVars {\n  init: string;\n}");
     expect(outputs["queries.ts"]).toContain("queryFn: ({ signal }) => client.readN(vars.init, { signal }),");
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
@@ -209,7 +209,7 @@ export * from "./types";
       @route("/c/{class}") @post op postClass(@path \`class\`: string, @body \`default\`: N): N;`;
     const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compile(spec);
     expect(outputs["client.ts"]).toContain(
-      '  postClass(classValue: string, defaultValue: N, init?: { signal?: AbortSignal }): Promise<N> {\n    return this.send("POST", `/c/${encodeURIComponent(String(classValue))}`, defaultValue, init);',
+      '  postClass(classValue: string, defaultValue: N, init?: RequestOptions): Promise<N> {\n    return this.send("POST", `/c/${encodeURIComponent(String(classValue))}`, defaultValue, init);',
     );
     expect(outputs["queries.ts"]).toContain("export interface PostClassVars {\n  class: string;\n");
     expect(outputs["hooks.ts"]).toContain("mutationFn: (vars: PostClassVars) => client.postClass(vars.class, vars.body)");

@@ -91,19 +91,19 @@ describe("server-sent events (flat client)", () => {
   it("streams through async generator methods taking an abort signal", async () => {
     const { outputs } = await sseNextjs(flat, { layout: "single-file" }).compile(sseSpec);
     const client = outputs["client.ts"];
-    expect(client).toContain(`  async *watch(query: { room: string }, init?: { signal?: AbortSignal }): AsyncIterable<ChannelEvents> {
-    const response = await this.request("GET", \`/feed\${toQuery(query)}\`, undefined, { accept: "text/event-stream", signal: init?.signal });
+    expect(client).toContain(`  async *watch(query: { room: string }, init?: RequestOptions): AsyncIterable<ChannelEvents> {
+    const response = await this.request("GET", \`/feed\${toQuery(query)}\`, undefined, { ...init, accept: "text/event-stream" });
     yield* decodeEvents(response.body, ${EVENTS}) as AsyncIterable<ChannelEvents>;
   }`);
-    expect(client).toContain(`  async *publish(id: string, u: UserConnect, init?: { signal?: AbortSignal }): AsyncIterable<ChannelEvents> {
-    const response = await this.request("POST", \`/feed/\${encodeURIComponent(String(id))}\`, u, { accept: "text/event-stream", signal: init?.signal });`);
+    expect(client).toContain(`  async *publish(id: string, u: UserConnect, init?: RequestOptions): AsyncIterable<ChannelEvents> {
+    const response = await this.request("POST", \`/feed/\${encodeURIComponent(String(id))}\`, u, { ...init, accept: "text/event-stream" });`);
     expect(client).toContain(`    yield* decodeEvents(response.body, undefined) as AsyncIterable<SseMessage>;`);
-    // The flat methods' shared init parameter: request() takes the stream's Accept header next to its signal.
+    // The flat methods' shared init parameter: request() takes the stream's Accept header next to the caller's options.
     expect(client).toContain(
-      "  private async request(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal | undefined; accept?: string }): Promise<Response> {",
+      "  private async request(method: string, path: string, body?: unknown, init: RequestOptions & { accept?: string } = {}): Promise<Response> {\n    const { accept, ...options } = init;\n",
     );
-    expect(client).toContain(`    if (init?.accept !== undefined && !headers.has("accept")) headers.set("accept", init.accept);`);
-    expect(client).toContain("      ...(init?.signal === undefined ? {} : { signal: init.signal }),\n");
+    expect(client).toContain(`    if (accept !== undefined && !headers.has("accept")) headers.set("accept", accept);`);
+    expect(client).toContain("      ...safeInit(options),\n      method,\n");
     // No zod: the flat client does not validate responses.
     expect(client).not.toContain("Schema");
   });
@@ -114,13 +114,13 @@ describe("server-sent events (flat client)", () => {
       @events union E { tick: int32 }
       @route("/{init}") op watch(@path \`init\`: string, @query requestInit?: string): SSEStream<E>;
     `);
-    expect(outputs["client.ts"]).toContain("async *watch(init: string, query: { requestInit?: string } = {}, requestInit?: { signal?: AbortSignal }): AsyncIterable<E> {");
+    expect(outputs["client.ts"]).toContain("async *watch(init: string, query: { requestInit?: string } = {}, requestInit?: RequestOptions): AsyncIterable<E> {");
   });
 
   it("keeps clients without streams unchanged", async () => {
     const { outputs } = await nextjs(flat, { layout: "single-file" }).compile(`@service namespace S; model P { a: string } @post op make(@body p: P): P;`);
     expect(outputs["client.ts"]).toContain(
-      "  private async request(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<Response> {",
+      "  private async request(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<Response> {",
     );
     expect(outputs["client.ts"]).not.toContain("readEvents");
   });

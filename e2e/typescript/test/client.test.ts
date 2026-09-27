@@ -62,24 +62,29 @@ describe("generated Next.js client against a stub server", () => {
     expect(await lenient.pets.get({ petId: 13 })).toEqual({ id: 13, species: "dog" });
   });
 
-  it("passes Next.js fetch options and config headers through to fetch", async () => {
+  it("passes RequestInit options, client-wide init and config headers through to fetch", async () => {
     const seen: RequestInit[] = [];
     const spy = createPetStoreClient({
       baseUrl: process.env.API_BASE_URL!,
       headers: async () => ({ authorization: "Bearer t" }),
+      init: { credentials: "include", cache: "no-store" },
       fetch: (input, init) => {
         seen.push(init ?? {});
         return fetch(input, init);
       },
     });
-    await spy.pets.list({}, { next: { revalidate: 60, tags: ["pets"] }, cache: "force-cache" });
+    await spy.pets.list({}, { next: { revalidate: 60, tags: ["pets"] }, cache: "force-cache", keepalive: true });
     const init = seen[0] as RequestInit & { next?: unknown };
     expect(init.next).toEqual({ revalidate: 60, tags: ["pets"] });
     expect(init.cache).toBe("force-cache");
+    expect(init.credentials).toBe("include");
+    expect(init.keepalive).toBe(true);
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer t");
     await spy.pets.list();
     const defaults = seen[1] as RequestInit & { next?: unknown };
     expect(defaults.next).toEqual({ revalidate: 60, tags: ["pets"] });
+    expect(defaults.cache).toBe("no-store");
+    expect(defaults.credentials).toBe("include");
   });
 
   it("uploads multipart bodies as FormData and file bodies as-is", async () => {

@@ -16,6 +16,8 @@ export function typecheck(outputs: Record<string, string>, extra: Record<string,
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), content);
     }
+    // Next.js declares `server-only` (next/types/global.d.ts); TypeScript 7 rejects unresolved side-effect imports.
+    writeFileSync(join(dir, "server-only.d.ts"), 'declare module "server-only";\n');
     writeFileSync(
       join(dir, "tsconfig.json"),
       JSON.stringify({

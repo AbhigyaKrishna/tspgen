@@ -13,6 +13,7 @@ import {
 } from "@abhigyakrishna/tspgen-typescript";
 import { clientAuth, type ClientAuth } from "./auth.js";
 import { nextExtras, type NextOpExtras } from "./extras.js";
+import type { ReactQueryOutput } from "./flat-react-query.js";
 import { planFlatFiles } from "./flat.js";
 import { nextjsHelpers as h } from "./helpers.js";
 import { names } from "./names.js";
@@ -83,6 +84,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
   const ir: PlanIR = { ...tsIR, modelsPrefix: modelsPrefix(ctx.outputDir, ctx.modelsOutputDir) };
   if (options["client-style"] === "flat") return planFlatFiles(ir, options, ctx);
   reportUnsupportedFeature(ctx.program, ctx.features, "validate", 'client-style "grouped"');
+  reportUnsupportedFeature(ctx.program, ctx.features, "error-getters", 'client-style "grouped"; use the typed error classes');
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const groups = services.flatMap((s) => s.groups);
@@ -99,6 +101,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
     }
   }
   const actions = options.features["server-actions"];
+  if (!actions) reportUnsupportedFeature(ctx.program, ctx.features, "server-only", "`features.server-actions` off");
   // Server Actions validate their input without undefined-valued keys.
   const withoutUndefined = ir.zod && actions && groups.some((g) => actionOps(g).some(h.hasParams));
   // PartSpec, toFormData and the multipart/file request branches only when an operation uploads.
@@ -144,8 +147,12 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
       },
     ),
   );
-  if (options.features["react-query"]) files.push(...reactQueryFiles(ir, services, extras));
-  if (actions) files.push(...actionFiles(ir, services, options, auth));
+  const reactQuery = options.features["react-query"];
+  if (!reactQuery) reportUnsupportedFeature(ctx.program, ctx.features, "hooks", "`features.react-query` off");
+  if (reactQuery) {
+    files.push(...reactQueryFiles(ir, services, extras, { hooks: options.features.hooks, keyPrefix: options["query-key-prefix"] }));
+  }
+  if (actions) files.push(...actionFiles(ir, services, options, auth, options.features["server-only"]));
   return files;
 }
 
@@ -156,7 +163,7 @@ function paramsImports(g: TsGroup, ops: TsOperation[]): TsImport[] {
   return ops.filter(h.hasParams).map((op) => type(names.params(g, op), names.groupFile(g)));
 }
 
-function reactQueryFiles(ir: TsIR, services: TsService[], extras: Record<string, NextOpExtras>): FileSpec[] {
+function reactQueryFiles(ir: TsIR, services: TsService[], extras: Record<string, NextOpExtras>, rq: ReactQueryOutput): FileSpec[] {
   const queryOps = (g: TsGroup) => g.operations.filter((op) => h.isQuery(op) && h.isHookable(op));
   const mutationOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isHookable(op));
   const groups = services.flatMap((s) => s.groups);
@@ -169,7 +176,7 @@ function reactQueryFiles(ir: TsIR, services: TsService[], extras: Record<string,
       ...groups.flatMap((g) => paramsImports(g, queryOps(g))),
     ],
     "ts-nextjs/queries",
-    { services, queryOps, extras },
+    { services, queryOps, extras, keyPrefix: rq.keyPrefix },
   );
   const hooks = file(
     HOOKS,
@@ -192,7 +199,7 @@ function reactQueryFiles(ir: TsIR, services: TsService[], extras: Record<string,
     { services, queryOps, mutationOps },
     "use client",
   );
-  return [queries, hooks];
+  return rq.hooks ? [queries, hooks] : [queries];
 }
 
 const RESULT = "client/actions/result";
@@ -200,20 +207,34 @@ const SERVER_CLIENT = "client/actions/server-client";
 
 const actionOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isHookable(op));
 
-function actionFiles(ir: TsIR, services: TsService[], options: NextClientOptions, auth: Record<string, ClientAuth>): FileSpec[] {
+/** `import "<module>";` lines ahead of a planned file's other imports. */
+function withSideEffectImports(spec: FileSpec, modules: readonly string[]): FileSpec {
+  const imports = spec.data.imports as string[];
+  return { ...spec, data: { ...spec.data, imports: [...modules.map((m) => `import "${m}";`), ...imports] } };
+}
+
+function actionFiles(
+  ir: TsIR,
+  services: TsService[],
+  options: NextClientOptions,
+  auth: Record<string, ClientAuth>,
+  serverOnly: boolean,
+): FileSpec[] {
+  const serverClient = file(
+    SERVER_CLIENT,
+    ir,
+    [
+      type("ClientConfig", CORE),
+      ...services.map((s) => value(names.apiClient(s), "client/index")),
+      ...services.filter((s) => auth[s.id]).map((s) => type(names.auth(s), "client/index")),
+    ],
+    "ts-nextjs/server-client",
+    { services, env: options["base-url-env"], auth },
+  );
+  // Only server-client.ts: the "use server" action files are imported by Client Components on purpose.
   const files: FileSpec[] = [
     file(RESULT, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/action-result"),
-    file(
-      SERVER_CLIENT,
-      ir,
-      [
-        type("ClientConfig", CORE),
-        ...services.map((s) => value(names.apiClient(s), "client/index")),
-        ...services.filter((s) => auth[s.id]).map((s) => type(names.auth(s), "client/index")),
-      ],
-      "ts-nextjs/server-client",
-      { services, env: options["base-url-env"], auth },
-    ),
+    serverOnly ? withSideEffectImports(serverClient, ["server-only"]) : serverClient,
   ];
   for (const s of services) {
     for (const g of s.groups) {

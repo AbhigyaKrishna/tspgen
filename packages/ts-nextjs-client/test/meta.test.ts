@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextjs, petSpec } from "./tester.js";
+import { nextjs, petSpec, sseNextjs } from "./tester.js";
 import { typecheck } from "./typecheck.js";
 
 const withMeta = `using TspGen;\n${petSpec}
@@ -30,5 +30,43 @@ describe("ts-nextjs @meta keys", () => {
         staleTime: 30000,
       }),`);
     expect(typecheck({ ...outputs, "env.d.ts": "declare const process: { env: Record<string, string | undefined> };\n" })).toBe("");
+  });
+});
+
+describe("ts-nextjs @meta keys (flat client)", () => {
+  const flatMeta = `using TspGen;
+    @service namespace Shop;
+    model Item { id: string }
+    @events union Ticks { tick: int32 }
+    @route("/items") interface Items {
+      @get list(): Item[];
+      @get @route("/{id}") read(@path id: string): Item;
+      @get @route("/watch") watch(): SSEStream<Ticks>;
+    }
+    @@meta(Shop.Items.read, "typescript:ts-nextjs-client", #{ next: #{ revalidate: 5, tags: #["item"] } });
+    @@meta(Shop.Items.watch, "typescript:ts-nextjs-client", #{ next: #{ revalidate: 0 } });
+  `;
+
+  it("sends @meta next defaults under the caller's options, once per invalid meta warning", async () => {
+    const [{ outputs }, diagnostics] = await sseNextjs({ "client-style": "flat" }, { layout: "single-file" }).compileAndDiagnose(flatMeta);
+    expect(diagnostics.filter((d) => d.code.startsWith("@abhigyakrishna/"))).toEqual([]);
+    const client = outputs["client.ts"]!;
+    expect(client).toContain(
+      '    return this.send("GET", `/items/${encodeURIComponent(String(id))}`, undefined, { next: {"revalidate":5,"tags":["item"]}, ...init });',
+    );
+    expect(client).toContain('    return this.send("GET", "/items", undefined, init);');
+    expect(client).toContain(
+      '    const response = await this.request("GET", "/items/watch", undefined, { next: {"revalidate":0}, ...init, accept: "text/event-stream" });',
+    );
+    expect(typecheck(outputs)).toBe("");
+  });
+
+  it("reports an invalid next meta once", async () => {
+    const [, diagnostics] = await nextjs({ "client-style": "flat" }).compileAndDiagnose(`using TspGen;
+      @service namespace Shop;
+      @route("/items") interface Items { @get list(): string[]; }
+      @@meta(Shop.Items.list, "typescript:ts-nextjs-client", #{ next: 5 });
+    `);
+    expect(diagnostics.filter((d) => d.code === "@abhigyakrishna/tspgen-core/invalid-meta")).toHaveLength(1);
   });
 });

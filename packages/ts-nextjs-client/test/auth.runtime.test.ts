@@ -131,6 +131,15 @@ describe.each([
     await client(fetch, Object.create({ BearerAuth: () => "inherited" })).list();
     expect(sent(fetch).headers.has("authorization")).toBe(false);
   });
+
+  it("lets per-call headers override credentials, which override config headers", async () => {
+    const client = await load();
+    const fetch = ok();
+    await client(fetch, { BearerAuth: () => "tok" }, { authorization: "config" }).list({}, { headers: { Authorization: "Bearer mine" } });
+    await client(fetch, { BearerAuth: () => "tok" }, { authorization: "config" }).list();
+    expect(sent(fetch, 0).headers.get("authorization")).toBe("Bearer mine");
+    expect(sent(fetch, 1).headers.get("authorization")).toBe("Bearer tok");
+  });
 });
 
 describe("grouped client auth (runtime)", () => {

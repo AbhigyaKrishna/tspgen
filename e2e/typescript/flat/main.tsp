@@ -3,6 +3,7 @@ import "@typespec/events";
 import "@typespec/sse";
 import "@abhigyakrishna/tspgen-typescript";
 
+using TspGen;
 using Http;
 
 /** The pet feed of petstore.tsp for the flat client style (the full pet store needs the grouped style). */
@@ -51,3 +52,10 @@ interface Feed {
     @body body: string;
   };
 }
+
+@route("/pets")
+interface Pets {
+  @get @route("/{petId}") getPet(@path petId: int64): Pet;
+}
+
+@@meta(PetFeed.Pets.getPet, "typescript:ts-nextjs-client", #{ next: #{ revalidate: 30, tags: #["pet"] } });

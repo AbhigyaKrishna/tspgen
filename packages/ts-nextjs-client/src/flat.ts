@@ -15,7 +15,8 @@ import {
 } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
 import { clientAuth, memberType, type AuthMember, type ClientAuth } from "./auth.js";
-import { planFlatReactQuery, REACT_QUERY_INTERNALS, reactQueryNames, varsKeyClash } from "./flat-react-query.js";
+import { nextExtras } from "./extras.js";
+import { HOOKS_INTERNALS, planFlatReactQuery, QUERIES_INTERNALS, reactQueryNames, varsKeyClash } from "./flat-react-query.js";
 import { nextjsHelpers, queryObjectType } from "./helpers.js";
 import type { NextClientOptions } from "./options.js";
 
@@ -26,16 +27,18 @@ const RESERVED_FIELDS = new Set(["status", "message", "name", "stack", "cause", 
 const CLIENT_MEMBERS = new Set(["constructor", "send", "request", "baseUrl", "doFetch", "headers"]);
 /**
  * Globals referenced by templates/ts-nextjs/flat-client.eta (Response, Promise, Record, RequestInit,
- * URLSearchParams, Error, JSON, String, Array, Object, globalThis, encodeURIComponent, fetch, AbortSignal). A generated
- * declaration with one of these names shadows the global via `import type { X } from "./types"` in client.ts
- * even though only type-position uses of the global are actually affected; the list is kept simple rather
- * than narrowed to exactly which of these appear in type position. Headers, Blob, File and FormData are referenced
+ * URLSearchParams, Error, JSON, String, Array, Object, globalThis, encodeURIComponent, fetch, AbortSignal,
+ * Omit (RequestDefaults)). A generated declaration with one of these names shadows the global via
+ * `import type { X } from "./types"` in client.ts even though only type-position uses of the global are actually
+ * affected; the list is kept simple rather than narrowed to exactly which of these appear in type position. Headers,
+ * Blob, File and FormData are referenced
  * through globalThis, so same-named generated types are fine. Clients with uploads also use UPLOAD_GLOBALS.
  */
 const TEMPLATE_GLOBALS = new Set([
   "Response",
   "Promise",
   "Record",
+  "Omit",
   "RequestInit",
   "URLSearchParams",
   "Error",
@@ -71,7 +74,7 @@ const STREAM_GLOBALS = [
 ];
 /** Names tried, in order, for a method's query-object parameter. */
 const QUERY_NAMES = ["query", "queryParams", "params"];
-/** Names tried, in order, for a method's trailing request-init parameter (`{ signal }`). */
+/** Names tried, in order, for a method's trailing request-options parameter (`RequestOptions`). */
 const INIT_NAMES = ["init", "requestInit", "options"];
 const ARRAY_TYPE = /\[\]( \| null)?$|^(readonly )?Array</;
 const Z: TsImport = { name: "z", from: "zod", typeOnly: false, external: true };
@@ -139,7 +142,13 @@ function localNames(op: TsOperation, usesZ: boolean): { path: TsParam[]; body: s
   };
 }
 
-function method(op: TsOperation, validate: boolean, usesZ: boolean, auth: string | undefined): FlatMethod {
+function method(
+  op: TsOperation,
+  validate: boolean,
+  usesZ: boolean,
+  auth: string | undefined,
+  next: Record<string, unknown> | undefined,
+): FlatMethod {
   const { path, body: bodyName } = localNames(op, usesZ);
   const query = op.params.filter((p) => p.location === "query");
   const params = path.map((p) => `${p.name}: ${p.type.text}`);
@@ -157,7 +166,7 @@ function method(op: TsOperation, validate: boolean, usesZ: boolean, auth: string
     taken.add(queryName);
   }
   const initName = pickName(INIT_NAMES, "init", taken);
-  params.push(`${initName}?: { signal?: AbortSignal }`);
+  params.push(`${initName}?: RequestOptions`);
   const stream = op.result.kind === "single" ? op.result.stream : undefined;
   const exploded = query.filter((p) => p.explode && isArray(p)).map((p) => JSON.stringify(p.wireName));
   const queryCall = exploded.length > 0 ? `toQuery(${queryName}, [${exploded.join(", ")}])` : `toQuery(${queryName})`;
@@ -186,12 +195,18 @@ function method(op: TsOperation, validate: boolean, usesZ: boolean, auth: string
       checks.push(query.some((p) => p.type.codec) ? `z.encode(${object}, ${queryName});` : `${object}.parse(${queryName});`);
     }
   }
-  // A stream asks for text/event-stream: request() takes the accept header next to the caller's signal.
+  // @meta next defaults sit under the caller's options; a stream also asks for text/event-stream.
+  const defaults = next ? `next: ${JSON.stringify(next)}, ` : "";
+  const initArg = stream
+    ? `{ ${defaults}...${initName}, accept: "text/event-stream" }`
+    : defaults
+      ? `{ ${defaults}...${initName} }`
+      : initName;
   const args = [
     JSON.stringify(op.verb.toUpperCase()),
     urlExpr,
     bodyName ? bodyArg(op, bodyName) : "undefined",
-    stream ? `{ accept: "text/event-stream", signal: ${initName}?.signal }` : initName,
+    initArg,
     ...(auth ? [auth] : []),
   ];
   const decode = !stream && op.result.type.codec ? op.result.type.schema : undefined;
@@ -274,12 +289,17 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
     return [];
   };
   reportUnsupportedFeature(ctx.program, ctx.features, "server-actions", 'client-style "flat"');
+  reportUnsupportedFeature(ctx.program, ctx.features, "server-only", 'client-style "flat"');
   if (!ir.zod) {
     reportUnsupportedFeature(ctx.program, ctx.features, "validate", "`features.zod` off on @abhigyakrishna/tspgen-typescript");
   }
   const reactQuery = options.features["react-query"];
+  if (!reactQuery) reportUnsupportedFeature(ctx.program, ctx.features, "hooks", "`features.react-query` off");
+  const hooks = reactQuery && options.features.hooks;
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
+  // Per-operation @meta (next, staleTime), read once so an invalid value warns once.
+  const extras = nextExtras(ctx, services.flatMap((s) => s.groups));
   const validate = options.features.validate && ir.zod;
   // Dates decode through zod codecs: results, events and error bodies reference `z` and the schemas.
   const dates = ir.dateType === "date";
@@ -300,11 +320,15 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
     if (found) auths.set(s.id, found);
   }
   const authNames = services.filter((s) => auths.has(s.id)).map((s) => `${s.name}Auth`);
-  const rqNames = reactQuery ? reactQueryNames(services) : [];
+  const rqNames = reactQuery ? reactQueryNames(services, hooks) : [];
   const usesStreams = services.some((s) => s.groups.some((g) => g.operations.some(nextjsHelpers.isStream)));
   const exported = new Set([
     options["error-class"],
     "ClientOptions",
+    "RequestOptions",
+    "RequestDefaults",
+    "NextFetchOptions",
+    "HeadersInput",
     ...clientNames,
     ...authNames,
     ...rqNames.filter((n) => n.exported).map((n) => n.name),
@@ -321,7 +345,9 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
     ...(dates ? ["toText"] : []),
     ...(auths.size > 0 ? AUTH_LOCALS : []),
     // Key paths (`shopKeys.nodes.all`) are not identifiers; they only matter for the duplicate check below.
-    ...(reactQuery ? [...REACT_QUERY_INTERNALS, ...rqNames.filter((n) => !n.exported && !n.name.includes(".")).map((n) => n.name)] : []),
+    ...(reactQuery
+      ? [...QUERIES_INTERNALS, ...(hooks ? HOOKS_INTERNALS : []), ...rqNames.filter((n) => !n.exported && !n.name.includes(".")).map((n) => n.name)]
+      : []),
   ]);
   // index.ts re-exports both the types and client.ts, so any shared name is ambiguous there.
   const clash = ir.declarations.find((d) => exported.has(d.name) || internal.has(d.name));
@@ -350,7 +376,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
           ...(op.body?.type.imports ?? []),
           ...op.result.type.imports,
         );
-        const m = method(op, validate, usesZ, auth?.descriptor(op));
+        const m = method(op, validate, usesZ, auth?.descriptor(op), extras[op.id]?.next);
         if (m.checks.length > 0) {
           imports.push(
             Z,
@@ -429,6 +455,6 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
           .sort(),
       },
     },
-    ...(reactQuery ? planFlatReactQuery(ir, services, ctx) : []),
+    ...(reactQuery ? planFlatReactQuery(ir, services, extras, { hooks, keyPrefix: options["query-key-prefix"] }) : []),
   ];
 }

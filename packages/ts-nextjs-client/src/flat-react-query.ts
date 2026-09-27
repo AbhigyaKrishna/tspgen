@@ -1,15 +1,25 @@
-import type { FileSpec, TargetContext } from "@abhigyakrishna/tspgen-core";
+import type { FileSpec } from "@abhigyakrishna/tspgen-core";
 import { renderImports, type TsImport, type TsIR, type TsOperation, type TsService } from "@abhigyakrishna/tspgen-typescript";
-import { nextExtras } from "./extras.js";
+import type { NextOpExtras } from "./extras.js";
 import { nextjsHelpers as h, queryObjectType } from "./helpers.js";
 import { names } from "./names.js";
 
+/** What the React Query files contain (both client styles); queries.ts is always emitted with react-query. */
+export interface ReactQueryOutput {
+  /** hooks.ts (`features.hooks`). */
+  hooks: boolean;
+  /** `query-key-prefix`: first element of every query key. */
+  keyPrefix: string | undefined;
+}
+
+/** Names queries.ts imports besides generated ones; a generated type with one of these names would clash. */
+export const QUERIES_INTERNALS = ["queryOptions"];
+
 /**
- * Names queries.ts and hooks.ts import or use besides generated ones (TanStack Query, React, the globals the
- * hooks' types use); a generated type with one of these names would clash with them.
+ * Names hooks.ts imports or uses besides generated ones (TanStack Query, React, the globals the hooks' types use);
+ * a generated type with one of these names would clash.
  */
-export const REACT_QUERY_INTERNALS = [
-  "queryOptions",
+export const HOOKS_INTERNALS = [
   "useQuery",
   "useMutation",
   "UseQueryOptions",
@@ -94,28 +104,31 @@ export function varsKeyClash(op: TsOperation): string | undefined {
 
 /**
  * Every name the React Query files declare (exported or module-level) plus the query-key paths
- * (`shopKeys.nodes.all`, `shopKeys.nodes.readNode`), each with the TypeSpec id that produces it.
+ * (`shopKeys.nodes.all`, `shopKeys.nodes.readNode`), each with the TypeSpec id that produces it. Without hooks
+ * (`features.hooks: false`) the provider, context, `use<Service>Client` and hook names are not generated.
  */
-export function reactQueryNames(services: readonly TsService[]): { name: string; owner: string; exported: boolean }[] {
+export function reactQueryNames(services: readonly TsService[], hooks: boolean): { name: string; owner: string; exported: boolean }[] {
   const out: { name: string; owner: string; exported: boolean }[] = [];
   for (const s of services) {
     const keys = names.keys(s);
-    out.push(
-      { name: keys, owner: s.id, exported: true },
-      { name: names.queries(s), owner: s.id, exported: true },
-      { name: names.provider(s), owner: s.id, exported: true },
-      { name: names.useClient(s), owner: s.id, exported: true },
-      { name: names.context(s), owner: s.id, exported: false },
-      { name: `${keys}.all`, owner: s.id, exported: false },
-    );
+    out.push({ name: keys, owner: s.id, exported: true }, { name: names.queries(s), owner: s.id, exported: true });
+    if (hooks) {
+      out.push(
+        { name: names.provider(s), owner: s.id, exported: true },
+        { name: names.useClient(s), owner: s.id, exported: true },
+        { name: names.context(s), owner: s.id, exported: false },
+      );
+    }
+    out.push({ name: `${keys}.all`, owner: s.id, exported: false });
     for (const g of s.groups) {
       const prop = `${keys}.${names.groupProperty(g)}`;
       out.push({ name: prop, owner: g.id, exported: false }, { name: `${prop}.all`, owner: g.id, exported: false });
       for (const op of g.operations.filter(hasReactQuery)) {
         if (hasInputs(op)) out.push({ name: names.flatVars(op), owner: op.id, exported: true });
         if (isFlatQuery(op)) {
-          out.push({ name: names.flatQueryHook(op), owner: op.id, exported: true }, { name: `${prop}.${op.name}`, owner: op.id, exported: false });
-        } else {
+          if (hooks) out.push({ name: names.flatQueryHook(op), owner: op.id, exported: true });
+          out.push({ name: `${prop}.${op.name}`, owner: op.id, exported: false });
+        } else if (hooks) {
           out.push({ name: names.flatMutationHook(op), owner: op.id, exported: true });
         }
       }
@@ -156,13 +169,16 @@ function operation(op: TsOperation, query: boolean, staleTime: number | undefine
 const external = (name: string, from: string, typeOnly: boolean): TsImport => ({ name, from, typeOnly, external: true });
 const local = (name: string, from: string, typeOnly: boolean): TsImport => ({ name, from, typeOnly });
 
-/** queries.ts (server-safe; re-exported by index.ts) and hooks.ts ("use client"; imported as ./hooks). */
+/**
+ * queries.ts (server-safe; re-exported by index.ts) and, with hooks, hooks.ts ("use client"; imported as
+ * ./hooks).
+ */
 export function planFlatReactQuery(
   ir: TsIR & { modelsPrefix?: string },
   services: readonly TsService[],
-  ctx: TargetContext,
+  extras: Record<string, NextOpExtras>,
+  rq: ReactQueryOutput,
 ): FileSpec[] {
-  const extras = nextExtras(ctx, services.flatMap((s) => s.groups));
   const data: FlatRqService[] = services.map((s) => ({
     name: s.name,
     client: `${s.name}Client`,
@@ -203,10 +219,11 @@ export function planFlatReactQuery(
     ...rqOps.flatMap((op) => (op.vars ? [local(op.vars, "queries", true)] : [])),
     ...all.flatMap((op) => op.result.type.imports),
   ];
-  const file = (path: string, imports: TsImport[], body: string, directive?: string): FileSpec => ({
+  const file = (path: string, imports: TsImport[], body: string, directive?: string, extra: Record<string, unknown> = {}): FileSpec => ({
     path: `${path}.ts`,
     template: "ts/file",
-    data: { imports: renderImports(path, imports, ext, prefix), body, services: data, ...(directive ? { directive } : {}) },
+    data: { imports: renderImports(path, imports, ext, prefix), body, services: data, ...(directive ? { directive } : {}), ...extra },
   });
-  return [file("queries", queriesImports, "ts-nextjs/flat-queries"), file("hooks", hooksImports, "ts-nextjs/flat-hooks", "use client")];
+  const queries = file("queries", queriesImports, "ts-nextjs/flat-queries", undefined, { keyPrefix: rq.keyPrefix });
+  return rq.hooks ? [queries, file("hooks", hooksImports, "ts-nextjs/flat-hooks", "use client")] : [queries];
 }

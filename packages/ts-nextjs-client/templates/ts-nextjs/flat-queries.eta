@@ -1,4 +1,4 @@
-<% const str = it.h.str; -%>
+<% const str = it.h.str; const key = (...parts) => [...(!it.keyPrefix ? [] : [it.keyPrefix]), ...parts].map((p) => str(p)).join(", "); -%>
 <% for (const s of it.services) { for (const g of s.groups) { for (const op of [...g.queries, ...g.mutations]) { if (!op.vars) continue; -%>
 export interface <%= op.vars %> {
 <% for (const f of op.fields) { -%>
@@ -12,12 +12,12 @@ export interface <%= op.vars %> {
 
 <% } -%>
 export const <%= s.keys %> = {
-  all: [<%~ str(s.name) %>] as const,
+  all: [<%~ key(s.name) %>] as const,
 <% for (const g of s.groups) { -%>
   <%= g.prop %>: {
-    all: [<%~ str(s.name) %>, <%~ str(g.prop) %>] as const,
+    all: [<%~ key(s.name, g.prop) %>] as const,
 <% for (const op of g.queries) { -%>
-<%~ it.h.jsdoc(undefined, "    ", op.deprecated) %>    <%= op.name %>: (<%~ op.varsDecl %>) => [<%~ str(s.name) %>, <%~ str(g.prop) %>, <%~ str(op.name) %><%= op.vars ? ", vars" : "" %>] as const,
+<%~ it.h.jsdoc(undefined, "    ", op.deprecated) %>    <%= op.name %>: (<%~ op.varsDecl %>) => [<%~ key(s.name, g.prop, op.name) %><%= op.vars ? ", vars" : "" %>] as const,
 <% } -%>
   },
 <% } -%>

@@ -184,4 +184,24 @@ export function createPetStoreClient(config: ClientConfig): PetStoreApiClient {
       expect(typecheck({ ...outputs, ...env }, { exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true })).toBe("");
     }
   });
+
+  it("types RequestOptions over RequestDefaults and spreads init and the call's options into fetch", async () => {
+    const { outputs } = await nextjs(fetchOnly).compile(petSpec);
+    const core = outputs["client/core.ts"]!;
+    expect(core).toContain(`  /** Fetch options for every request (credentials, cache, next, …); per-call RequestOptions override them. */
+  init?: RequestDefaults;
+`);
+    expect(core).toContain(`export interface RequestDefaults extends Omit<RequestInit, "method" | "body" | "headers" | "signal" | "window"> {
+  next?: NextFetchOptions;
+}`);
+    expect(core).toContain(`export interface RequestOptions extends RequestDefaults {
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+}`);
+    expect(core).toContain(
+      "  const init: RequestInit & { next?: NextFetchOptions } = { ...config.init, ...safeInit(options), method: spec.method, headers };\n",
+    );
+    expect(core).not.toContain("init.cache");
+    expect(typecheck(outputs, { exactOptionalPropertyTypes: true })).toBe("");
+  });
 });

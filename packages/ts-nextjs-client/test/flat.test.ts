@@ -74,17 +74,69 @@ describe("flat client", () => {
     expect(withExt["index.ts"]).toContain(`export * from "./models/api-version.js";`);
   });
 
+  it("reports generated types named like the request option types it exports, or Omit", async () => {
+    for (const name of ["RequestOptions", "RequestDefaults", "NextFetchOptions", "HeadersInput"]) {
+      const [, diagnostics] = await nextjs(flat, house).compileAndDiagnose(`${shopSpec}\nmodel ${name} { x: string }`);
+      expectDiagnostics(diagnostics, {
+        code: "@abhigyakrishna/tspgen-typescript/flat-client-name-clash",
+        message: `Generated type '${name}' clashes with the flat client's own export; rename it with @TS.name or set error-class.`,
+      });
+    }
+    const [, diagnostics] = await nextjs({ ...flat, features: { "react-query": false } }, house).compileAndDiagnose(
+      `${shopSpec}\nmodel Omit { x: string }\n@route("/omit") op readOmit(): Omit;`,
+    );
+    expectDiagnostics(diagnostics, {
+      code: "@abhigyakrishna/tspgen-typescript/flat-client-name-clash",
+      message: "Generated type 'Omit' clashes with a name the flat client uses internally ('Omit'); rename it with @TS.name.",
+    });
+  });
+
   it("emits one class with a method per operation and an ApiError from the error model", async () => {
     const { outputs } = await nextjs({ ...flat, features: { "react-query": false } }, house).compile(shopSpec);
     expect(outputs["client.ts"]).toBe(`${HEADER}
 import type { CreateNodeRequest, ErrorResponse, Kind, Node } from "./types";
 
+export type HeadersInput = globalThis.HeadersInit | (() => globalThis.HeadersInit | Promise<globalThis.HeadersInit>);
+
+/** Next.js caching options (fetch's next). */
+export interface NextFetchOptions {
+  revalidate?: number | false;
+  tags?: string[];
+}
+
+/** Client-wide fetch options (init in ClientOptions): every RequestInit field but method, body, headers, signal and window. */
+export interface RequestDefaults extends Omit<globalThis.RequestInit, "method" | "body" | "headers" | "signal" | "window"> {
+  next?: NextFetchOptions;
+}
+
+/** Per-call fetch options, over init and @meta next defaults; headers override the client's. */
+export interface RequestOptions extends RequestDefaults {
+  signal?: AbortSignal;
+  headers?: globalThis.HeadersInit;
+}
+
+/**
+ * \`options\` without \`method\`, \`body\`, \`headers\` or \`window\`: \`RequestOptions\` excludes them at the type level, but a
+ * plain-JS caller (or an \`as\` cast) can still put them on the object at runtime; stripped before spreading \`options\`
+ * into fetch's init so they can never override the client's own \`method\`/\`headers\`/\`body\` or leak \`window\` through.
+ */
+function safeInit(options: RequestOptions): RequestOptions {
+  const rest = { ...options } as Record<string, unknown>;
+  delete rest.method;
+  delete rest.body;
+  delete rest.headers;
+  delete rest.window;
+  return rest as RequestOptions;
+}
+
 export interface ClientOptions {
   baseUrl: string;
   /** Custom fetch implementation (defaults to the global fetch). */
   fetch?: typeof fetch;
-  /** Headers sent with every request. */
-  headers?: Record<string, string>;
+  /** Headers sent with every request; may be a function (sync or async), called per request. */
+  headers?: HeadersInput;
+  /** Fetch options for every request (credentials, cache, next, …); per-call options override them. */
+  init?: RequestDefaults;
 }
 
 /** Thrown for every non-2xx response. */
@@ -124,47 +176,51 @@ export class ApiError extends Error {
 export class ShopClient {
   private readonly baseUrl: string;
   private readonly doFetch: typeof fetch;
-  private readonly headers: Record<string, string>;
+  private readonly headers: HeadersInput | undefined;
 
   constructor(options: ClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\\/$/, "");
-    this.doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
-    this.headers = options.headers ?? {};
+    const doFetch: typeof fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    const defaults = options.init;
+    // Client-wide fetch options sit under each request's own.
+    this.doFetch = defaults === undefined ? doFetch : (input, init) => doFetch(input, { ...defaults, ...init });
+    this.headers = options.headers;
   }
 
 ${banner("Nodes", "  ")}
 
-  listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}, init?: { signal?: AbortSignal }): Promise<Node[]> {
+  listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}, init?: RequestOptions): Promise<Node[]> {
     return this.send("GET", \`/graph/nodes\${toQuery(query)}\`, undefined, init);
   }
 
-  readNode(id: string, init?: { signal?: AbortSignal }): Promise<Node> {
+  readNode(id: string, init?: RequestOptions): Promise<Node> {
     return this.send("GET", \`/graph/nodes/\${encodeURIComponent(String(id))}\`, undefined, init);
   }
 
-  createNode(request: CreateNodeRequest, init?: { signal?: AbortSignal }): Promise<Node> {
+  createNode(request: CreateNodeRequest, init?: RequestOptions): Promise<Node> {
     return this.send("POST", "/graph/nodes", request, init);
   }
 
-  async deleteNode(id: string, init?: { signal?: AbortSignal }): Promise<void> {
+  async deleteNode(id: string, init?: RequestOptions): Promise<void> {
     await this.request("DELETE", \`/graph/nodes/\${encodeURIComponent(String(id))}\`, undefined, init);
   }
 
-  private async send<T>(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<T> {
+  private async send<T>(method: string, path: string, body?: unknown, init?: RequestOptions): Promise<T> {
     const response = await this.request(method, path, body, init);
     const text = await response.text();
     // An empty body (204 and the like) decodes to undefined.
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
-  private async request(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<Response> {
-    const headers = new globalThis.Headers(this.headers);
+  private async request(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<Response> {
+    const headers = new globalThis.Headers(typeof this.headers === "function" ? await this.headers() : this.headers);
+    new globalThis.Headers(options.headers).forEach((value, name) => headers.set(name, value));
     if (body !== undefined) headers.set("content-type", "application/json");
     const response = await this.doFetch(\`\${this.baseUrl}\${path}\`, {
+      ...safeInit(options),
       method,
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      ...(init?.signal === undefined ? {} : { signal: init.signal }),
     });
     if (!response.ok) throw await toError(response);
     return response;
@@ -285,7 +341,9 @@ export * from "./types";
     const spec = `${shopSpec}\nmodel Headers { a: string }\n@route("/headers") op readHeaders(): Headers;`;
     const [result, diagnostics] = await nextjs(flat, house).compileAndDiagnose(spec);
     expect(diagnostics).toEqual([]);
-    expect(result.outputs["client.ts"]).toContain("    const headers = new globalThis.Headers(this.headers);");
+    expect(result.outputs["client.ts"]).toContain(
+      '    const headers = new globalThis.Headers(typeof this.headers === "function" ? await this.headers() : this.headers);',
+    );
     expect(typecheck(result.outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
@@ -308,7 +366,7 @@ export * from "./types";
     const { outputs } = await nextjs(flat, house).compile(spec);
     const client = outputs["client.ts"];
     expect(client).toContain(
-      '  tagged(query: { tags?: string[]; labels?: string[]; limit?: number } = {}, init?: { signal?: AbortSignal }): Promise<Node[]> {\n    return this.send("GET", `/graph/nodes/tagged${toQuery(query, ["labels"])}`, undefined, init);',
+      '  tagged(query: { tags?: string[]; labels?: string[]; limit?: number } = {}, init?: RequestOptions): Promise<Node[]> {\n    return this.send("GET", `/graph/nodes/tagged${toQuery(query, ["labels"])}`, undefined, init);',
     );
     expect(client).toContain('    return this.send("GET", `/graph/nodes${toQuery(query)}`, undefined, init);');
     expect(client).toContain("function toQuery(params: Record<string, unknown>, explode: readonly string[] = []): string {");
@@ -332,7 +390,7 @@ export * from "./types";
       }`;
     const { outputs } = await nextjs(flat, house).compile(spec);
     expect(outputs["client.ts"]).toContain(
-      '  search(query: SearchRequest, queryParams: { limit?: number } = {}, init?: { signal?: AbortSignal }): Promise<Node[]> {\n    return this.send("POST", `/search${toQuery(queryParams)}`, query, init);',
+      '  search(query: SearchRequest, queryParams: { limit?: number } = {}, init?: RequestOptions): Promise<Node[]> {\n    return this.send("POST", `/search${toQuery(queryParams)}`, query, init);',
     );
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
@@ -347,10 +405,10 @@ export * from "./types";
     const { outputs } = await nextjs(flat, house).compile(spec);
     const client = outputs["client.ts"];
     expect(client).toContain(
-      '  readInit(init: string, requestInit?: { signal?: AbortSignal }): Promise<Node> {\n    return this.send("GET", `/inits/${encodeURIComponent(String(init))}`, undefined, requestInit);',
+      '  readInit(init: string, requestInit?: RequestOptions): Promise<Node> {\n    return this.send("GET", `/inits/${encodeURIComponent(String(init))}`, undefined, requestInit);',
     );
     expect(client).toContain(
-      "  async postInit(init: string, requestInit: string, options: Payload, query: { limit?: number } = {}, init2?: { signal?: AbortSignal }): Promise<void> {\n",
+      "  async postInit(init: string, requestInit: string, options: Payload, query: { limit?: number } = {}, init2?: RequestOptions): Promise<void> {\n",
     );
     expect(client).toContain("${toQuery(query)}`, options, init2);");
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
@@ -364,7 +422,7 @@ export * from "./types";
       }`;
     const { outputs } = await nextjs(flat, house).compile(spec);
     expect(outputs["client.ts"]).toContain(
-      "  async put(classValue2: string, classValue: string, defaultValue: Payload, query: { new?: boolean } = {}, init?: { signal?: AbortSignal }): Promise<void> {\n" +
+      "  async put(classValue2: string, classValue: string, defaultValue: Payload, query: { new?: boolean } = {}, init?: RequestOptions): Promise<void> {\n" +
         '    await this.request("PUT", `/kw/${encodeURIComponent(String(classValue2))}/${encodeURIComponent(String(classValue))}${toQuery(query)}`, defaultValue, init);',
     );
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
@@ -380,22 +438,22 @@ export * from "./types";
     expect(client).toContain(`import { z } from "zod";`);
     expect(client).toContain(`import { CreateNodeRequestSchema, KindSchema } from "./types";`);
     expect(client).toContain(
-      `  async listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}, init?: { signal?: AbortSignal }): Promise<Node[]> {\n` +
+      `  async listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}, init?: RequestOptions): Promise<Node[]> {\n` +
         `    z.object({ kind: z.lazy(() => KindSchema).optional(), offset: z.number().int().optional(), limit: z.number().int().optional() }).parse(query);\n`,
     );
     expect(client).toContain(
-      `  async createNode(request: CreateNodeRequest, init?: { signal?: AbortSignal }): Promise<Node> {\n    z.lazy(() => CreateNodeRequestSchema).parse(withoutUndefined(request));\n`,
+      `  async createNode(request: CreateNodeRequest, init?: RequestOptions): Promise<Node> {\n    z.lazy(() => CreateNodeRequestSchema).parse(withoutUndefined(request));\n`,
     );
     // path params without constraints are not re-checked
-    expect(client).toContain(`  readNode(id: string, init?: { signal?: AbortSignal }): Promise<Node> {\n    return this.send(`);
+    expect(client).toContain(`  readNode(id: string, init?: RequestOptions): Promise<Node> {\n    return this.send(`);
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
   it("makes checked methods async so validation errors reject", async () => {
     const { outputs } = await nextjs({ ...flat, features: { validate: true } }, { ...house, features: { zod: true } }).compile(validatedSpec);
-    expect(outputs["client.ts"]).toContain(`  async createNode(request: CreateNodeRequest, init?: { signal?: AbortSignal }): Promise<Node> {\n`);
+    expect(outputs["client.ts"]).toContain(`  async createNode(request: CreateNodeRequest, init?: RequestOptions): Promise<Node> {\n`);
     // no checks: stays a plain method returning the promise
-    expect(outputs["client.ts"]).toContain(`  readNode(id: string, init?: { signal?: AbortSignal }): Promise<Node> {\n`);
+    expect(outputs["client.ts"]).toContain(`  readNode(id: string, init?: RequestOptions): Promise<Node> {\n`);
   });
 
   it("checks constrained path parameters, constrained bodies and optional bodies", async () => {
@@ -407,10 +465,10 @@ export * from "./types";
       }`;
     const { outputs } = await nextjs({ ...flat, features: { validate: true } }, { ...house, features: { zod: true } }).compile(spec);
     const client = outputs["client.ts"];
-    expect(client).toContain(`  async readCode(id: string, init?: { signal?: AbortSignal }): Promise<Node> {\n    z.string().min(3).parse(id);\n    return this.send(`);
-    expect(client).toContain(`  async tag(items: string[], init?: { signal?: AbortSignal }): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
+    expect(client).toContain(`  async readCode(id: string, init?: RequestOptions): Promise<Node> {\n    z.string().min(3).parse(id);\n    return this.send(`);
+    expect(client).toContain(`  async tag(items: string[], init?: RequestOptions): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
     expect(client).toContain(
-      `  async upsert(id: string, body?: CreateNodeRequest, init?: { signal?: AbortSignal }): Promise<Node> {\n` +
+      `  async upsert(id: string, body?: CreateNodeRequest, init?: RequestOptions): Promise<Node> {\n` +
         `    if (body !== undefined) z.lazy(() => CreateNodeRequestSchema).parse(withoutUndefined(body));\n    return this.send(`,
     );
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
@@ -420,7 +478,7 @@ export * from "./types";
     const spec = `${validatedSpec}
       @route("/labels") op label(@bodyRoot @maxItems(2) items: string[]): void;`;
     const { outputs } = await nextjs({ ...flat, features: { validate: true } }, { ...house, features: { zod: true } }).compile(spec);
-    expect(outputs["client.ts"]).toContain(`  async label(items: string[], init?: { signal?: AbortSignal }): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
+    expect(outputs["client.ts"]).toContain(`  async label(items: string[], init?: RequestOptions): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
@@ -466,10 +524,10 @@ function withoutUndefined(value: unknown): unknown {
     const client = outputs["client.ts"];
     expect(client).not.toContain("z: number");
     expect(client).toContain(
-      "  async tile(zValue: number, x: number, y: number, query: { format?: string } = {}, init?: { signal?: AbortSignal }): Promise<Tile> {\n",
+      "  async tile(zValue: number, x: number, y: number, query: { format?: string } = {}, init?: RequestOptions): Promise<Tile> {\n",
     );
     expect(client).toContain("`/tiles/${encodeURIComponent(String(zValue))}/");
-    expect(client).toContain("  async put(zValue: string, zValue2: Z, init?: { signal?: AbortSignal }): Promise<void> {\n    z.lazy(() => ZSchema).parse(withoutUndefined(zValue2));\n");
+    expect(client).toContain("  async put(zValue: string, zValue2: Z, init?: RequestOptions): Promise<void> {\n    z.lazy(() => ZSchema).parse(withoutUndefined(zValue2));\n");
     expect(client).toContain(", zValue2, init);\n");
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
     // without validate there is no zod import to shadow

@@ -22,6 +22,8 @@ export interface ClientConfig {
   fetch?: typeof fetch;
   /** Headers sent with every request; may be async (e.g. auth read from cookies()). */
   headers?: HeadersInput;
+  /** Fetch options for every request (credentials, cache, next, …); per-call RequestOptions override them. */
+  init?: RequestDefaults;
 <% if (it.auth) { -%>
   /**
    * Credential providers by auth scheme id: an operation's `@useAuth` credentials are sent when its providers
@@ -37,10 +39,19 @@ export interface ClientConfig {
   validate?: boolean;
 }
 
-/** Per-call options passed through to fetch, including Next.js caching. */
-export interface RequestOptions {
-  next?: { revalidate?: number | false; tags?: string[] };
-  cache?: RequestCache;
+/** Next.js caching options (fetch's next). */
+export interface NextFetchOptions {
+  revalidate?: number | false;
+  tags?: string[];
+}
+
+/** Client-wide fetch options (init in ClientConfig): every RequestInit field but method, body, headers, signal and window. */
+export interface RequestDefaults extends Omit<RequestInit, "method" | "body" | "headers" | "signal" | "window"> {
+  next?: NextFetchOptions;
+}
+
+/** Per-call fetch options, over init and @meta next defaults; headers override the client's. */
+export interface RequestOptions extends RequestDefaults {
   signal?: AbortSignal;
   headers?: HeadersInit;
 }
@@ -143,6 +154,20 @@ function resolveUrl(baseUrl: string, path: string): URL {
   return new URL(baseUrl.replace(/\/+$/, "") + path, origin);
 }
 
+/**
+ * `options` without `method`, `body`, `headers` or `window`: `RequestOptions` excludes them at the type level, but a
+ * plain-JS caller (or an `as` cast) can still put them on the object at runtime; stripped before spreading `options`
+ * into fetch's init so they can never override the client's own `method`/`headers`/`body` or leak `window` through.
+ */
+function safeInit(options: RequestOptions): RequestOptions {
+  const rest = { ...options } as Record<string, unknown>;
+  delete rest.method;
+  delete rest.body;
+  delete rest.headers;
+  delete rest.window;
+  return rest as RequestOptions;
+}
+
 export async function request(config: ClientConfig, spec: RequestSpec, options: RequestOptions = {}): Promise<Response> {
   const url = resolveUrl(config.baseUrl, spec.path);
   for (const [name, value, explode] of spec.query ?? []) {
@@ -197,11 +222,9 @@ export async function request(config: ClientConfig, spec: RequestSpec, options: 
     headers.set("content-type", contentType);
     body = contentType.includes("json") || typeof spec.body !== "string" ? JSON.stringify(spec.body) : spec.body;
   }
-  const init: RequestInit & { next?: RequestOptions["next"] } = { method: spec.method, headers };
+  // Client-wide init, then the call's options (@meta next defaults included); method, headers and body are the client's.
+  const init: RequestInit & { next?: NextFetchOptions } = { ...config.init, ...safeInit(options), method: spec.method, headers };
   if (body !== undefined) init.body = body;
-  if (options.cache !== undefined) init.cache = options.cache;
-  if (options.signal !== undefined) init.signal = options.signal;
-  if (options.next !== undefined) init.next = options.next;
   return (config.fetch ?? fetch)(url, init);
 }
 

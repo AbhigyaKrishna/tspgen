@@ -32,9 +32,22 @@ Generated output changes for existing specs are listed in the README under
 - `@encode(string)` on integers is honoured (JSON string in both languages); other encodings warn
   `unsupported-encoding`.
 - TypeScript `decimal` zod schemas check the number format.
+- ts-nextjs-client (grouped): `client/actions/server-client.ts` imports `server-only`; alias it in vitest/jest if
+  tests call Server Actions (`features.server-only: false` restores 0.1.x behaviour).
+- ts-nextjs-client (flat): methods' trailing parameter is `RequestOptions`; `ClientOptions.headers` is
+  `HeadersInput`; `client.ts` exports `RequestOptions`, `RequestDefaults`, `NextFetchOptions`, `HeadersInput`
+  and uses `Omit` (generated types with those names now clash); operations with `@meta` `next` now send it.
 
 ### Added
 
+- **Next.js client features**: `features.server-only` (grouped; `import "server-only"` in the Server Actions'
+  server client, default on), `features.hooks` (both styles; `false` keeps only `queries.ts`),
+  `features.error-getters` (flat; the error class's status getters), and `query-key-prefix` (both styles; first
+  element of every generated query key).
+- **Next.js request options**: per-call `RequestOptions` take every `RequestInit` field but method/body/window,
+  plus `headers` and `next`, in both styles; `init` in `ClientConfig`/`ClientOptions` sets client-wide defaults;
+  flat `headers` may be a (sync or async) function and per-call `headers` are sent; flat operations honour
+  `@meta` `next` like grouped ones. Middleware stays a `fetch` wrapper (README recipe).
 - `features:` for every emitter and target, `@meta(scope, #{ features: #{ … } })` per declaration for `docs` and
   `generics`, plugin features (`TspGenPlugin.features`), target features (`Target.features`), `it.features` in
   every template, `features` in plugin, language and target contexts.

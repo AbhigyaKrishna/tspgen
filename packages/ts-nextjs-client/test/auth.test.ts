@@ -205,7 +205,7 @@ export interface ClientOptions<Auth extends object = object> {`);
 export class ShopClient {
   private readonly baseUrl: string;
   private readonly doFetch: typeof fetch;
-  private readonly headers: Record<string, string>;
+  private readonly headers: HeadersInput | undefined;
   private readonly auth: ShopAuth | undefined;
 
   constructor(options: ClientOptions<ShopAuth>) {`);
