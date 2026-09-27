@@ -5,7 +5,7 @@
 <% } -%>
 <%~ it.h.jsdoc(op.docs) %>export async function <%= n.names.action(g, op) %>(<%= has ? "params: " + params : "" %>): Promise<ActionResult<<%= op.result.type.text %>>> {
 <% if (has && it.zod) { -%>
-  const parsed = <%= params %>Schema.safeParse(params);
+  const parsed = <%= params %>Schema.safeParse(withoutUndefined(params));
   if (!parsed.success) return { ok: false, status: 400, error: { issues: parsed.error.issues } };
   return runAction(() => <%= server %>().<%= prop %>.<%= op.name %>(parsed.data));
 <% } else { -%>

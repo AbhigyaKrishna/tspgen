@@ -51,7 +51,9 @@ function statusCondition(codes: StatusCodes): string {
 function variantExpr(v: TsResultVariant, zod: boolean): string {
   const parts = [`status: ${v.status ?? "res.status"}`];
   if (v.body) parts.push(`body: await ${parseExpr(v.body, zod)}`);
-  if (v.headers.length > 0) parts.push(`headers: { ${v.headers.map((h) => `${key(h.name)}: ${headerExpr(h)}`).join(", ")} }`);
+  // Optional headers are spread only when present so the object fits `name?: T` under exactOptionalPropertyTypes.
+  const header = (h: TsHeader) => (h.optional ? `...optionalEntry(${str(h.name)}, ${headerExpr(h)})` : `${key(h.name)}: ${headerExpr(h)}`);
+  if (v.headers.length > 0) parts.push(`headers: { ${v.headers.map(header).join(", ")} }`);
   return `{ ${parts.join(", ")} }`;
 }
 

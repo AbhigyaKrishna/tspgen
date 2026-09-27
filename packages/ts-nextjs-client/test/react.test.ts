@@ -50,10 +50,12 @@ describe("next.js react-query and server actions", () => {
     const actions = outputs["client/actions/pets.ts"];
     expect(actions.split("\n")[1]).toBe(`"use server";`);
     expect(actions).toContain(`export async function petsCreateAction(params: PetsCreateParams): Promise<ActionResult<CreateResult>> {
-  const parsed = PetsCreateParamsSchema.safeParse(params);
+  const parsed = PetsCreateParamsSchema.safeParse(withoutUndefined(params));
   if (!parsed.success) return { ok: false, status: 400, error: { issues: parsed.error.issues } };
   return runAction(() => petStoreServerClient().pets.create(parsed.data));
 }`);
+    expect(actions).toContain(`import { withoutUndefined } from "../core";`);
+    expect(outputs["client/core.ts"]).toContain("export function withoutUndefined(value: unknown): unknown {");
     expect(actions).not.toContain("petsGetAction");
     expect(outputs["client/actions/petStore.ts"]).toBeUndefined();
     expect(outputs["client/actions/server-client.ts"]).toContain("const baseUrl = overrides.baseUrl ?? process.env.API_BASE_URL;");

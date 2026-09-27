@@ -9,7 +9,7 @@ export interface <%= name %> {
 
 export const <%= name %>Schema: z.ZodType<<%= name %>> = z.object({
 <% for (const f of n.fields(op)) { -%>
-  <%= f.key %>: <%= f.type.schema %><%= f.optional ? ".optional()" : "" %>,
+  <%= f.key %>: <%= f.type.schema %><%= f.optional ? ".exactOptional()" : "" %>,
 <% } -%>
 });
 <% } -%>

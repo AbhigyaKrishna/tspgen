@@ -7,6 +7,8 @@ export interface NextClientOptions {
   "client-style": "grouped" | "flat";
   "error-class": string;
   "error-model"?: string;
+  /** Flat style only: validate request bodies, query objects and constrained path params with zod before fetch. */
+  validate?: boolean;
 }
 
 export const nextClientOptionsSchema = {
@@ -30,6 +32,10 @@ export const nextClientOptionsSchema = {
     "error-model": {
       type: "string",
       description: "Model (TypeScript name or TypeSpec id) whose fields the flat client's error class exposes.",
+    },
+    validate: {
+      type: "boolean",
+      description: "Flat style: validate requests with the zod schemas before fetch (needs zod: true; default false).",
     },
   },
 };

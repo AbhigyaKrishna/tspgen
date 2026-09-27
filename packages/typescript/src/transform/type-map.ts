@@ -141,7 +141,7 @@ export function objectUse(fields: ObjectField[]): TsTypeUse {
   return {
     text: `{ ${fields.map((f) => `${f.key}${f.optional ? "?" : ""}: ${f.type.text}`).join("; ")} }`,
     imports: fields.flatMap((f) => f.type.imports),
-    schema: `z.object({ ${fields.map((f) => `${f.key}: ${f.type.schema}${f.optional ? ".optional()" : ""}`).join(", ")} })`,
+    schema: `z.object({ ${fields.map((f) => `${f.key}: ${f.type.schema}${f.optional ? ".exactOptional()" : ""}`).join(", ")} })`,
     schemaImports: fields.flatMap((f) => f.type.schemaImports),
   };
 }

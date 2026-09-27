@@ -57,7 +57,7 @@ function groupImports(ir: TsIR, g: TsGroup): TsImport[] {
     value("toError", CORE),
     ...(bodies.length > 0 ? [value("parse", CORE)] : []),
     ...(headers.some((x) => !x.optional) ? [value("requireHeader", CORE)] : []),
-    ...(headers.some((x) => x.optional) ? [value("optionalHeader", CORE)] : []),
+    ...(headers.some((x) => x.optional) ? [value("optionalHeader", CORE), value("optionalEntry", CORE)] : []),
     ...ops.flatMap((op) => op.errors.flatMap((e) => [...e.errorClass.imports, ...(e.body?.imports ?? [])])),
     ...results.flatMap((r) => r.type.imports),
     ...headers.flatMap((x) => x.type.imports),
@@ -88,6 +88,7 @@ function nextExtras(ctx: TargetContext, groups: TsGroup[]): Record<string, NextO
 export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
   const ir: PlanIR = { ...tsIR, modelsPrefix: modelsPrefix(ctx.outputDir, ctx.modelsOutputDir) };
   if (options["client-style"] === "flat") return planFlatFiles(ir, options, ctx);
+  if (options.validate === true) reportDiagnostic(ctx.program, { code: "validate-flat-only", target: NoTarget });
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const groups = services.flatMap((s) => s.groups);
@@ -103,7 +104,10 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
       }
     }
   }
-  const files: FileSpec[] = [file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core")];
+  const actions = options["server-actions"] ?? true;
+  // Server Actions validate their input without undefined-valued keys.
+  const withoutUndefined = ir.zod && actions && groups.some((g) => actionOps(g).some(h.hasParams));
+  const files: FileSpec[] = [file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", { withoutUndefined })];
   for (const g of groups) {
     files.push(file(names.groupFile(g), ir, groupImports(ir, g), "ts-nextjs/group", { group: g, extras }));
   }
@@ -117,7 +121,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
     ),
   );
   if (options["react-query"] ?? true) files.push(...reactQueryFiles(ir, services, extras));
-  if (options["server-actions"] ?? true) files.push(...actionFiles(ir, services, options));
+  if (actions) files.push(...actionFiles(ir, services, options));
   return files;
 }
 
@@ -170,8 +174,9 @@ function reactQueryFiles(ir: TsIR, services: TsService[], extras: Record<string,
 const RESULT = "client/actions/result";
 const SERVER_CLIENT = "client/actions/server-client";
 
+const actionOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isJson(op));
+
 function actionFiles(ir: TsIR, services: TsService[], options: NextClientOptions): FileSpec[] {
-  const actionOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isJson(op));
   const files: FileSpec[] = [
     file(RESULT, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/action-result"),
     file(
@@ -196,6 +201,7 @@ function actionFiles(ir: TsIR, services: TsService[], options: NextClientOptions
             type("ActionResult", RESULT),
             ...paramsImports(g, ops),
             ...(ir.zod ? ops.filter(h.hasParams).map((op) => value(`${names.params(g, op)}Schema`, names.groupFile(g))) : []),
+            ...(ir.zod && ops.some(h.hasParams) ? [value("withoutUndefined", CORE)] : []),
             ...ops.flatMap((op) => op.result.type.imports),
           ],
           "ts-nextjs/actions",

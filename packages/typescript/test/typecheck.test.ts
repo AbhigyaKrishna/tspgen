@@ -12,7 +12,7 @@ afterAll(() => {
 });
 
 /** Writes generated files into a temp dir inside this package (so `zod` resolves) and runs tsc. */
-function typecheck(outputs: Record<string, string>): string {
+function typecheck(outputs: Record<string, string>, extra: Record<string, unknown> = {}): string {
   const dir = mkdtempSync(join(resolve(import.meta.dirname, ".."), ".tmp-tsc-"));
   dirs.push(dir);
   for (const [path, content] of Object.entries(outputs)) {
@@ -31,6 +31,7 @@ function typecheck(outputs: Record<string, string>): string {
         moduleResolution: "bundler",
         verbatimModuleSyntax: true,
         skipLibCheck: true,
+        ...extra,
       },
       include: ["**/*.ts"],
     }),
@@ -74,6 +75,17 @@ describe("generated TypeScript", () => {
     expect(typecheck(outputs)).toBe("");
   });
 
+  it("type-checks constrained zod schemas", async () => {
+    const { outputs } = await emitter({ zod: true }).compile(`
+      using TspGen;
+      @service namespace S;
+      model Req { @minLength(1) @pattern("^a") name: string; @maxValue(3) n?: int32 | null; @maxItems(2) xs: string[] }
+      @@meta(Req.name, "*", #{ notBlank: true });
+      @route("/r") op create(@body req: Req): Req;
+    `);
+    expect(typecheck(outputs)).toBe("");
+  });
+
   it("type-checks generic models and their zod schema functions", async () => {
     for (const layout of ["per-type", "single-file"]) {
       const { outputs } = await emitter({ zod: true, layout }).compile(`
@@ -88,5 +100,15 @@ describe("generated TypeScript", () => {
       `);
       expect(typecheck(outputs)).toBe("");
     }
+  });
+
+  it("type-checks zod schemas of optional properties under exactOptionalPropertyTypes", async () => {
+    const { outputs } = await emitter({ zod: true }).compile(`
+      @service namespace S;
+      model Inner { a?: string }
+      model Req { note?: string; inner?: Inner; inline?: { b?: int32 } }
+      @route("/r") op create(@body req: Req): Req;
+    `);
+    expect(typecheck(outputs, { exactOptionalPropertyTypes: true })).toBe("");
   });
 });

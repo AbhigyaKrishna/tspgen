@@ -9,7 +9,7 @@
 export function <%= d.name %>Schema<%= tp %>(<%= tps.map((t) => t + "Schema: z.ZodType<" + t + ">").join(", ") %>): z.ZodType<<%= d.name %><%= tp %>> {
   return z.object({
 <% for (const p of d.properties) { -%>
-    <%= p.key %>: <%= p.type.schema %><%= p.optional ? ".optional()" : "" %>,
+    <%= p.key %>: <%= p.type.schema %><%= p.optional ? ".exactOptional()" : "" %>,
 <% } -%>
   })<%= ext ? ".loose()" : "" %> as unknown as z.ZodType<<%= d.name %><%= tp %>>;
 }
@@ -17,7 +17,7 @@ export function <%= d.name %>Schema<%= tp %>(<%= tps.map((t) => t + "Schema: z.Z
 
 export const <%= d.name %>Schema<%= ext ? "" : ": z.ZodType<" + d.name + ">" %> = z.object({
 <% for (const p of d.properties) { -%>
-  <%= p.key %>: <%= p.type.schema %><%= p.optional ? ".optional()" : "" %>,
+  <%= p.key %>: <%= p.type.schema %><%= p.optional ? ".exactOptional()" : "" %>,
 <% } -%>
 })<%= ext ? ".loose() as unknown as z.ZodType<" + d.name + ">" : "" %>;
 <% } -%>

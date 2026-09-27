@@ -64,7 +64,10 @@ export class <%= c.name %> {
 <%~ it.h.banner(g.title, "  ") %>
 <% for (const m of g.methods) { -%>
 
-<%~ it.h.jsdoc(m.docs, "  ", m.deprecated) %>  <% if (m.void) { %>async <% } %><%= m.name %>(<%~ m.params %>): Promise<<%~ m.returnType %>> {
+<%~ it.h.jsdoc(m.docs, "  ", m.deprecated) %>  <% if (m.void || m.checks.length > 0) { %>async <% } %><%= m.name %>(<%~ m.params %>): Promise<<%~ m.returnType %>> {
+<% for (const check of m.checks) { -%>
+    <%~ check %>
+<% } -%>
 <% if (m.void) { -%>
     await this.request(<%~ m.args %>);
 <% } else { -%>
@@ -138,4 +141,8 @@ function toQuery(params: Record<string, unknown>): string {
   const rendered = search.toString();
   return rendered ? `?${rendered}` : "";
 }
+<% } -%>
+<% if (it.usesWithoutUndefined) { -%>
+
+<%~ include("ts-nextjs/without-undefined", { exported: false }) %>
 <% } -%>

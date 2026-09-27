@@ -303,6 +303,132 @@ export * from "./types";
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
+  const validatedSpec = "using TspGen;\n" + shopSpec
+    .replace("model CreateNodeRequest { name: string }", "model CreateNodeRequest { @maxLength(64) name: string }")
+    + `@@meta(Shop.Graph.CreateNodeRequest.name, "*", #{ notBlank: true });`;
+
+  it("validates body and query with zod before fetch when validate is on", async () => {
+    const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(validatedSpec);
+    const client = outputs["client.ts"];
+    expect(client).toContain(`import { z } from "zod";`);
+    expect(client).toContain(`import { CreateNodeRequestSchema, KindSchema } from "./types";`);
+    expect(client).toContain(
+      `  async listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}): Promise<Node[]> {\n` +
+        `    z.object({ kind: z.lazy(() => KindSchema).optional(), offset: z.number().int().optional(), limit: z.number().int().optional() }).parse(query);\n`,
+    );
+    expect(client).toContain(
+      `  async createNode(request: CreateNodeRequest): Promise<Node> {\n    z.lazy(() => CreateNodeRequestSchema).parse(withoutUndefined(request));\n`,
+    );
+    // path params without constraints are not re-checked
+    expect(client).toContain(`  readNode(id: string): Promise<Node> {\n    return this.send(`);
+    expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
+  });
+
+  it("makes checked methods async so validation errors reject", async () => {
+    const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(validatedSpec);
+    expect(outputs["client.ts"]).toContain(`  async createNode(request: CreateNodeRequest): Promise<Node> {\n`);
+    // no checks: stays a plain method returning the promise
+    expect(outputs["client.ts"]).toContain(`  readNode(id: string): Promise<Node> {\n`);
+  });
+
+  it("checks constrained path parameters, constrained bodies and optional bodies", async () => {
+    const spec = `${validatedSpec}
+      @route("/v") interface V {
+        @get @route("/codes/{id}") readCode(@path @minLength(3) id: string): Graph.Node;
+        @post @route("/tags") tag(@body @maxItems(2) items: string[]): void;
+        @put @route("/nodes/{id}") upsert(@path id: string, @body body?: Graph.CreateNodeRequest): Graph.Node;
+      }`;
+    const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(spec);
+    const client = outputs["client.ts"];
+    expect(client).toContain(`  async readCode(id: string): Promise<Node> {\n    z.string().min(3).parse(id);\n    return this.send(`);
+    expect(client).toContain(`  async tag(items: string[]): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
+    expect(client).toContain(
+      `  async upsert(id: string, body?: CreateNodeRequest): Promise<Node> {\n` +
+        `    if (body !== undefined) z.lazy(() => CreateNodeRequestSchema).parse(withoutUndefined(body));\n    return this.send(`,
+    );
+    expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
+  });
+
+  it("checks a @bodyRoot array body against its constraints", async () => {
+    const spec = `${validatedSpec}
+      @route("/labels") op label(@bodyRoot @maxItems(2) items: string[]): void;`;
+    const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(spec);
+    expect(outputs["client.ts"]).toContain(`  async label(items: string[]): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
+    expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
+  });
+
+  it("validates bodies without their undefined-valued keys, emitting the helper only when used", async () => {
+    const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(validatedSpec);
+    expect(outputs["client.ts"]).toContain(`
+
+/** A copy without \`undefined\`-valued keys (as JSON would send it), for validation only. */
+function withoutUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutUndefined);
+  if (value === null || typeof value !== "object") return value;
+  const proto: unknown = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [key, withoutUndefined(entry)]),
+  );
+}
+`);
+    expect(typecheck(outputs, { ...SHIPYARD_FLAGS, noUnusedLocals: true })).toBe("");
+    // only query checks: no body to strip
+    const queryOnly = `using TspGen;
+      @service namespace Q;
+      @route("/q") op find(@query @maxValue(5) limit?: int32): void;`;
+    const plain = await nextjs({ "client-style": "flat", validate: true }, { ...house, zod: true }).compile(queryOnly);
+    expect(plain.outputs["client.ts"]).toContain(".parse(query);");
+    expect(plain.outputs["client.ts"]).not.toContain("withoutUndefined");
+    expect((await nextjs(flat, { ...house, zod: true }).compile(validatedSpec)).outputs["client.ts"]).not.toContain("withoutUndefined");
+  });
+
+  it("renames method identifiers named z so they do not shadow the zod import", async () => {
+    const spec = `${validatedSpec}
+      model Tile { data: string }
+      model Z { v: string }
+      @route("/tiles") interface Tiles {
+        @get @route("/{z}/{x}/{y}") tile(@path z: int32, @path x: int32, @path y: int32, @query format?: string): Tile;
+        @post @route("/{zValue}") put(@path zValue: string, @body z: Z): void;
+      }`;
+    const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(spec);
+    const client = outputs["client.ts"];
+    expect(client).not.toContain("z: number");
+    expect(client).toContain(
+      "  async tile(zValue: number, x: number, y: number, query: { format?: string } = {}): Promise<Tile> {\n",
+    );
+    expect(client).toContain("`/tiles/${encodeURIComponent(String(zValue))}/");
+    expect(client).toContain("  async put(zValue: string, zValue2: Z): Promise<void> {\n    z.lazy(() => ZSchema).parse(withoutUndefined(zValue2));\n");
+    expect(client).toContain(", zValue2);\n");
+    expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
+    // without validate there is no zod import to shadow
+    const plain = (await nextjs(flat, { ...house, zod: true }).compile(spec)).outputs["client.ts"];
+    expect(plain).toContain("  tile(z: number, x: number, y: number,");
+  });
+
+  it("reports a generated type named z when validate is on", async () => {
+    const spec = `${validatedSpec}
+      @TS.name("z") model Zed { v: string }
+      @route("/zed") op zed(): Zed;`;
+    const diagnostics = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).diagnose(spec);
+    expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-typescript/flat-client-name-clash" });
+  });
+
+  it("emits no validation without the validate option", async () => {
+    const { outputs } = await nextjs(flat, { ...house, zod: true }).compile(validatedSpec);
+    // Matches the validation check calls (z.object(...).parse(...) / z.lazy(...).parse(...)) without
+    // false-positiving on the unrelated `JSON.parse(text)` in the client's private send() helper.
+    expect(outputs["client.ts"]).not.toMatch(/z\.(object|lazy)\(/);
+    expect(outputs["client.ts"]).not.toContain(`from "zod"`);
+  });
+
+  it("requires zod for validate", async () => {
+    const diagnostics = await nextjs({ ...flat, validate: true }, house).diagnose(validatedSpec);
+    expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-typescript/validate-requires-zod" });
+  });
+
   it("reports operations the flat client cannot express", async () => {
     const cases: [string, string][] = [
       [`@route("/text") op text(): { @header contentType: "text/plain"; @body body: string };`, "a non-JSON response"],

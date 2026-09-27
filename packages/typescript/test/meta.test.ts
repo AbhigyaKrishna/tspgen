@@ -36,7 +36,7 @@ export interface Pet extends Owner {
     const { outputs } = await emitter({ zod: true }).compile(spec);
     expect(outputs["models/Pet.ts"]).toContain(`export const PetSchema = z.object({
   id: z.number().int(),
-  note: z.string().optional(),
+  note: z.string().exactOptional(),
 }).loose() as unknown as z.ZodType<Pet>;`);
     const dir = mkdtempSync(join(resolve(import.meta.dirname, ".."), ".tmp-tsc-"));
     try {

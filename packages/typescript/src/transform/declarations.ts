@@ -19,6 +19,7 @@ import {
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "../lib.js";
 import { memberName, propertyKey, typeName } from "../naming.js";
+import { constrain } from "./constraints.js";
 import type { TsDecl, TsEnumMember, TsProperty, TsTypeUse } from "./model.js";
 import {
   arrayOf,
@@ -97,6 +98,8 @@ export function typeOverride(decorators: DecoratorData | undefined): TsTypeUse |
 
 export interface DeclarationOptions {
   layout?: "per-type" | "single-file";
+  /** zod schemas are emitted; unparsable `@pattern`s are only reported then. */
+  zod?: boolean;
 }
 
 /** Builds TS declarations for every IR type and resolves TypeRefs to TS type uses. */
@@ -320,7 +323,12 @@ export class DeclarationBuilder {
     return {
       key: propertyKey(p.wireName),
       wireName: p.wireName,
-      type: typeOverride(p.decorators) ?? this.typeUse(p.type),
+      type: constrain(
+        typeOverride(p.decorators) ?? this.typeUse(p.type),
+        p.constraints,
+        metaBoolean(this.program, meta, "notBlank", where) === true,
+        (pattern) => this.invalidPattern(pattern, where),
+      ),
       optional: p.optional,
       readonly: metaBoolean(this.program, meta, "readonly", where) ?? modelReadonly,
       jsdoc: metaStrings(this.program, meta, "jsdoc", where),
@@ -329,6 +337,12 @@ export class DeclarationBuilder {
       ...(p.deprecated ? { deprecated: p.deprecated } : {}),
       ...(p.default !== undefined ? { defaultDoc: JSON.stringify(p.default) } : {}),
     };
+  }
+
+  /** Warns that a `@pattern` is not a JavaScript regular expression (so zod does not check it). */
+  invalidPattern(pattern: string, where: string): void {
+    if (!this.options.zod) return;
+    reportDiagnostic(this.program, { code: "invalid-pattern", format: { pattern, where }, target: NoTarget });
   }
 
   private checkDuplicates(): void {

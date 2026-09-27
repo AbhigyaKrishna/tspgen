@@ -24,7 +24,7 @@ export function resolveTsOptions(options: Record<string, unknown>): TsTransformO
 
 export function transformToTs(program: Program, api: ApiIR, options: TsTransformOptions): TsIR {
   const layout = options.layout ?? "per-type";
-  const builder = new DeclarationBuilder(program, api, { layout });
+  const builder = new DeclarationBuilder(program, api, { layout, zod: options.zod });
   const declarations = builder.build();
   const apiBuilder = new ApiBuilder(builder, { errors: options.errors ?? "typed" });
   const services = apiBuilder.services(api);

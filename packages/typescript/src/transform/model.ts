@@ -71,6 +71,8 @@ export interface TsParam {
   wireName: string;
   location: "path" | "query" | "header" | "cookie";
   type: TsTypeUse;
+  /** True when constraint decorators refined `type.schema`. */
+  constrained: boolean;
   optional: boolean;
   explode: boolean;
   docs?: string;

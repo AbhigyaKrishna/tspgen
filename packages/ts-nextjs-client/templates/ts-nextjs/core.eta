@@ -78,14 +78,11 @@ export async function request(config: ClientConfig, spec: RequestSpec, options: 
     headers.set("content-type", contentType);
     body = contentType.includes("json") || typeof spec.body !== "string" ? JSON.stringify(spec.body) : spec.body;
   }
-  const init: RequestInit & { next?: RequestOptions["next"] } = {
-    method: spec.method,
-    headers,
-    body,
-    cache: options.cache,
-    signal: options.signal,
-    next: options.next,
-  };
+  const init: RequestInit & { next?: RequestOptions["next"] } = { method: spec.method, headers };
+  if (body !== undefined) init.body = body;
+  if (options.cache !== undefined) init.cache = options.cache;
+  if (options.signal !== undefined) init.signal = options.signal;
+  if (options.next !== undefined) init.next = options.next;
   return (config.fetch ?? fetch)(url, init);
 }
 
@@ -119,3 +116,12 @@ export function optionalHeader<T = string>(res: Response, name: string, map?: (v
   if (headerValue === null) return undefined;
   return map ? map(headerValue) : (headerValue as T);
 }
+
+/** `{ [key]: value }`, or `{}` when value is undefined: fills an optional property under exactOptionalPropertyTypes. */
+export function optionalEntry<K extends string, T>(key: K, value: T | undefined): { [P in K]?: T } {
+  return (value === undefined ? {} : { [key]: value }) as { [P in K]?: T };
+}
+<% if (it.withoutUndefined) { -%>
+
+<%~ include("ts-nextjs/without-undefined", { exported: true }) %>
+<% } -%>

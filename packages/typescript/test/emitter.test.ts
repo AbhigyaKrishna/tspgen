@@ -1,3 +1,4 @@
+import { expectDiagnostics } from "@typespec/compiler/testing";
 import { describe, expect, it } from "vitest";
 import { modelsPrefix, renderImports } from "../src/imports.js";
 import { emitter, HEADER } from "./tester.js";
@@ -147,13 +148,13 @@ import type { Species } from "./Species.js";
     expect(outputs["models/Pet.ts"]).toContain(`
 export const PetSchema: z.ZodType<Pet> = z.object({
   id: z.number().int(),
-  name: z.string().optional(),
+  name: z.string().exactOptional(),
   tags: z.array(z.string()),
   born_at: z.iso.datetime({ offset: true }),
   species: z.lazy(() => SpeciesSchema),
-  weight: z.number().optional(),
+  weight: z.number().exactOptional(),
   owner: z.lazy(() => OwnerSchema).nullable(),
-  "x-meta": z.record(z.string(), z.unknown()).optional(),
+  "x-meta": z.record(z.string(), z.unknown()).exactOptional(),
 });
 `);
     expect(outputs["models/Species.ts"]).toContain(
@@ -220,6 +221,68 @@ export * from "./results";
   it("emits no api files without operations", async () => {
     const { outputs } = await emitter().compile(`model Lonely { x: int32 }`);
     expect(Object.keys(outputs).some((k) => k.startsWith("api/"))).toBe(false);
+  });
+
+  it("adds constraint decorators and notBlank to zod schemas", async () => {
+    const { outputs } = await emitter({ zod: true, layout: "single-file" }).compile(`
+      using TspGen;
+      @service namespace S;
+      @maxLength(8) scalar Code extends string;
+      model Req {
+        @minLength(1) @maxLength(64) name: string;
+        @pattern("^[a-z]+$") slug?: string;
+        code: Code;
+        @minValue(0) @maxValue(10) score: int32;
+        @minItems(1) tags: string[];
+        note: string | null;
+        @TS.type("Date") at: string;
+        plain: string;
+      }
+      @@meta(Req.name, "*", #{ notBlank: true });
+      @@meta(Req.note, "typescript", #{ notBlank: true });
+      @@meta(Req.plain, "kotlin", #{ notBlank: true });
+      @route("/r") op create(@body req: Req, @query @maxValue(50) limit?: int32): void;
+    `);
+    const types = outputs["types.ts"];
+    expect(types).toContain(`  name: z.string().regex(/\\S/, "must not be blank").min(1).max(64),\n`);
+    expect(types).toContain(`  slug: z.string().regex(new RegExp("^[a-z]+$", "u")).exactOptional(),\n`);
+    expect(types).toContain(`  code: z.string().max(8),\n`);
+    expect(types).toContain(`  score: z.number().int().gte(0).lte(10),\n`);
+    expect(types).toContain(`  tags: z.array(z.string()).min(1),\n`);
+    expect(types).toContain(`  note: z.string().regex(/\\S/, "must not be blank").nullable(),\n`);
+    expect(types).toContain(`  at: z.custom<Date>(),\n`);
+    expect(types).toContain(`  plain: z.string(),\n`);
+  });
+
+  it("skips a @pattern JavaScript cannot parse and warns", async () => {
+    const [{ outputs }, diagnostics] = await emitter({ zod: true, layout: "single-file" }).compileAndDiagnose(`
+      @service namespace S;
+      model Req { @pattern("(?i)abc") a: string; @pattern("^\\\\p{L}+$") b: string }
+      @route("/r") op create(@body req: Req, @query @pattern("(?i)x") q: string): void;
+    `);
+    expect(outputs["types.ts"]).toContain(`  a: z.string(),\n`);
+    expect(outputs["types.ts"]).toContain(`  b: z.string().regex(new RegExp("^\\\\p{L}+$", "u")),\n`);
+    // TypeSpec's own invalid-pattern-regex warning fires too; only ours is checked here.
+    expectDiagnostics(diagnostics.filter((d) => d.code.startsWith("@abhigyakrishna/")), [
+      {
+        code: "@abhigyakrishna/tspgen-typescript/invalid-pattern",
+        severity: "warning",
+        message: "@pattern '(?i)abc' on 'S.Req.a' is not a valid JavaScript regular expression; it is not validated.",
+      },
+      {
+        code: "@abhigyakrishna/tspgen-typescript/invalid-pattern",
+        message: "@pattern '(?i)x' on 'S.create.q' is not a valid JavaScript regular expression; it is not validated.",
+      },
+    ]);
+  });
+
+  it("does not warn about unparsable patterns without zod (patterns are not emitted)", async () => {
+    const [, diagnostics] = await emitter({ layout: "single-file" }).compileAndDiagnose(`
+      @service namespace S;
+      model Req { @pattern("(?i)abc") a: string }
+      @route("/r") op create(@body req: Req, @query @pattern("(?i)x") q: string): void;
+    `);
+    expect(diagnostics.filter((d) => d.code.startsWith("@abhigyakrishna/"))).toEqual([]);
   });
 });
 

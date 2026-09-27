@@ -1,6 +1,7 @@
 import type { ApiIR, OperationIR, StatusCodes } from "@abhigyakrishna/tspgen-core";
 import { decoratorArg, mergeScopes, metaScopes, type MetaScopes } from "@abhigyakrishna/tspgen-core";
 import { camel, typeName } from "../naming.js";
+import { constrain } from "./constraints.js";
 import type { DeclarationBuilder } from "./declarations.js";
 import type {
   TsError,
@@ -69,15 +70,20 @@ export class ApiBuilder {
   }
 
   private operation(op: OperationIR, groupName: string, groupScopes: MetaScopes): TsOperation {
-    const params: TsParam[] = op.params.map((p) => ({
-      name: camel(p.name),
-      wireName: p.wireName,
-      location: p.location,
-      type: this.types.typeUse(p.type),
-      optional: p.optional,
-      explode: p.explode,
-      ...(p.docs ? { docs: p.docs } : {}),
-    }));
+    const params: TsParam[] = op.params.map((p) => {
+      const plain = this.types.typeUse(p.type);
+      const type = constrain(plain, p.constraints, false, (pattern) => this.types.invalidPattern(pattern, `${op.id}.${p.name}`));
+      return {
+        name: camel(p.name),
+        wireName: p.wireName,
+        location: p.location,
+        type,
+        constrained: type !== plain,
+        optional: p.optional,
+        explode: p.explode,
+        ...(p.docs ? { docs: p.docs } : {}),
+      };
+    });
     const responses: Response[] = op.responses.map((r) => ({
       statusCodes: r.statusCodes,
       isError: r.isError,
@@ -106,7 +112,9 @@ export class ApiBuilder {
       const preferred = camel(op.body.name ?? "body");
       result.body = {
         name: params.some((p) => p.name === preferred) ? "requestBody" : preferred,
-        type: this.types.typeUse(op.body.type),
+        type: constrain(this.types.typeUse(op.body.type), op.body.constraints, false, (pattern) =>
+          this.types.invalidPattern(pattern, `${op.id}.${op.body?.name ?? "body"}`),
+        ),
         contentType: op.body.contentTypes[0] ?? "application/json",
         optional: op.body.optional,
       };

@@ -34,7 +34,13 @@
   },
   "peerDependencies": {
     "@typespec/compiler": "^1.16.0",
-    "@typespec/http": "^1.16.0"
+    "@typespec/http": "^1.16.0",
+    "zod": ">=4.3.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@tanstack/react-query": "^5.100.0",

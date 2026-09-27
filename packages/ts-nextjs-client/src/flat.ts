@@ -44,6 +44,7 @@ const TEMPLATE_GLOBALS = new Set([
 /** Names tried, in order, for a method's query-object parameter. */
 const QUERY_NAMES = ["query", "queryParams", "params"];
 const ARRAY_TYPE = /\[\]( \| null)?$|^(readonly )?Array</;
+const Z: TsImport = { name: "z", from: "zod", typeOnly: false, external: true };
 
 export interface FlatMethod {
   name: string;
@@ -53,6 +54,8 @@ export interface FlatMethod {
   args: string;
   /** Void result: the method awaits `this.request(…)` and never reads the body. */
   void: boolean;
+  /** zod `.parse(…)` statements run before the request (validate option). */
+  checks: string[];
   docs?: string;
   deprecated?: string;
 }
@@ -77,18 +80,37 @@ function unsupported(op: TsOperation): string | undefined {
   return undefined;
 }
 
-function method(op: TsOperation): FlatMethod {
+/**
+ * With validate, method bodies reference the zod import `z`, so a path parameter or body named `z` is renamed
+ * (`zValue`, `zValue2`, …) avoiding the method's other names. Parameters are positional; callers are unaffected.
+ */
+function localNames(op: TsOperation, validate: boolean): { path: TsParam[]; body: string | undefined } {
   const path = op.params.filter((p) => p.location === "path");
+  const names = [...path.map((p) => p.name), ...(op.body ? [op.body.name] : [])];
+  if (validate && names.includes("z")) {
+    let replacement = "zValue";
+    for (let i = 2; names.includes(replacement); i++) replacement = `zValue${i}`;
+    const renamed = names.map((n) => (n === "z" ? replacement : n));
+    return {
+      path: path.map((p, i) => ({ ...p, name: renamed[i] })),
+      body: op.body ? renamed[path.length] : undefined,
+    };
+  }
+  return { path, body: op.body?.name };
+}
+
+function method(op: TsOperation, validate: boolean): FlatMethod {
+  const { path, body: bodyName } = localNames(op, validate);
   const query = op.params.filter((p) => p.location === "query");
   const params = path.map((p) => `${p.name}: ${p.type.text}`);
   const queryRequired = query.some((p) => !p.optional);
   if (op.body) {
     const optionalTail = op.body.optional && !queryRequired;
     params.push(
-      optionalTail ? `${op.body.name}?: ${op.body.type.text}` : `${op.body.name}: ${op.body.type.text}${op.body.optional ? " | undefined" : ""}`,
+      optionalTail ? `${bodyName}?: ${op.body.type.text}` : `${bodyName}: ${op.body.type.text}${op.body.optional ? " | undefined" : ""}`,
     );
   }
-  const taken = new Set([...path.map((p) => p.name), ...(op.body ? [op.body.name] : [])]);
+  const taken = new Set([...path.map((p) => p.name), ...(bodyName ? [bodyName] : [])]);
   let queryName = QUERY_NAMES.find((n) => !taken.has(n));
   for (let i = 2; !queryName; i++) if (!taken.has(`params${i}`)) queryName = `params${i}`;
   if (query.length > 0) {
@@ -103,12 +125,26 @@ function method(op: TsOperation): FlatMethod {
   });
   const dynamic = url !== op.path || query.length > 0;
   const urlExpr = dynamic ? `\`${url}${query.length > 0 ? `\${${queryCall}}` : ""}\`` : JSON.stringify(op.path);
+  const checks: string[] = [];
+  if (validate) {
+    for (const p of path.filter((x) => x.constrained)) checks.push(`${p.type.schema}.parse(${p.name});`);
+    if (op.body) {
+      // undefined-valued keys are dropped first, as JSON.stringify drops them from what is sent
+      const parse = `${op.body.type.schema}.parse(withoutUndefined(${bodyName}));`;
+      checks.push(op.body.optional ? `if (${bodyName} !== undefined) ${parse}` : parse);
+    }
+    if (query.length > 0) {
+      const fields = query.map((p) => `${propertyKey(p.wireName)}: ${p.type.schema}${p.optional ? ".optional()" : ""}`);
+      checks.push(`z.object({ ${fields.join(", ")} }).parse(${queryName});`);
+    }
+  }
   return {
     name: op.name,
     params: params.join(", "),
     returnType: op.result.type.text,
     void: op.result.type.text === "void",
-    args: [JSON.stringify(op.verb.toUpperCase()), urlExpr, ...(op.body ? [op.body.name] : [])].join(", "),
+    args: [JSON.stringify(op.verb.toUpperCase()), urlExpr, ...(bodyName ? [bodyName] : [])].join(", "),
+    checks,
     ...(op.docs ? { docs: op.docs } : {}),
     ...(op.deprecated ? { deprecated: op.deprecated } : {}),
   };
@@ -143,6 +179,8 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   }
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
+  const validate = options.validate === true;
+  if (validate && !ir.zod) return fail("validate-requires-zod", {});
 
   let model: TsInterface | undefined;
   if (options["error-model"]) {
@@ -152,7 +190,8 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   }
 
   const clientNames = services.map((s) => `${s.name}Client`);
-  const exported = new Set([options["error-class"], "ClientOptions", ...clientNames, ...TEMPLATE_GLOBALS]);
+  // With validate, client.ts imports zod's `z`, which a generated type named z would clash with.
+  const exported = new Set([options["error-class"], "ClientOptions", ...clientNames, ...TEMPLATE_GLOBALS, ...(validate ? ["z"] : [])]);
   // index.ts re-exports both the types and client.ts, so any shared name is ambiguous there.
   const clash = ir.declarations.find((d) => exported.has(d.name));
   if (clash) return fail("flat-client-name-clash", { name: clash.name });
@@ -175,7 +214,15 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
           ...(op.body?.type.imports ?? []),
           ...op.result.type.imports,
         );
-        methods.push(method(op));
+        const m = method(op, validate);
+        if (m.checks.length > 0) {
+          imports.push(
+            Z,
+            ...op.params.filter((p) => p.location === "query" || p.constrained).flatMap((p) => p.type.schemaImports),
+            ...(op.body?.type.schemaImports ?? []),
+          );
+        }
+        methods.push(m);
       }
       groups.push({ title: group.name, methods });
     }
@@ -202,6 +249,8 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         usesQuery: queryParams.length > 0,
         /** toQuery comma-joins arrays and takes the list of exploded keys. */
         usesArrays: queryParams.some(isArray),
+        /** Body checks validate a copy without undefined-valued keys. */
+        usesWithoutUndefined: validate && ops.some((op) => op.body !== undefined),
       },
     },
     {

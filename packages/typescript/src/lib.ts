@@ -91,6 +91,25 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`TypeScript type '${"name"}' is generated from both '${"first"}' and '${"second"}'. Use @TS.name to disambiguate.`,
       },
     },
+    "invalid-pattern": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`@pattern '${"pattern"}' on '${"where"}' is not a valid JavaScript regular expression; it is not validated.`,
+      },
+    },
+    "validate-requires-zod": {
+      severity: "error",
+      messages: {
+        default: "Option 'validate' needs zod schemas; set zod: true on @abhigyakrishna/tspgen-typescript.",
+      },
+    },
+    "validate-flat-only": {
+      severity: "warning",
+      messages: {
+        default:
+          "Option 'validate' only applies to client-style \"flat\"; the grouped client validates responses and Server Action input already.",
+      },
+    },
   },
   emitter: { options: optionsSchema as unknown as JSONSchemaType<TypeScriptEmitterOptions> },
 });
