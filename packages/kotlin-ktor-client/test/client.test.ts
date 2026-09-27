@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { client, HEADER } from "./tester.js";
+import { client, HEADER, Tester, TARGET } from "./tester.js";
 
 const DIR = "client/com/acme/client";
 
@@ -150,5 +150,21 @@ fun HttpClientConfig<*>.petStoreDefaults(format: Json = Json) {
   it("honours the package option", async () => {
     const { outputs } = await client({ package: "com.acme.sdk" }).compile(spec);
     expect(outputs["client/com/acme/sdk/PetsClient.kt"]).toContain("package com.acme.sdk\n");
+  });
+
+  it("marks generated declarations internal with the emitter's visibility: internal", async () => {
+    const { outputs } = await Tester.emit("@abhigyakrishna/tspgen-kotlin", {
+      package: "com.acme",
+      visibility: "internal",
+      targets: [{ [TARGET]: {} }],
+    }).compile(`
+      @service namespace PetStore;
+      model Pet { id: int64 }
+      @route("/pets") interface Pets { @get list(): Pet[]; }
+    `);
+    expect(outputs[`${DIR}/PetsClient.kt`]).toContain("\ninternal class PetsClient(");
+    const api = outputs[`${DIR}/PetStoreApiClient.kt`];
+    expect(api).toContain("\ninternal class PetStoreApiClient(http: HttpClient, baseUrl: String) {");
+    expect(api).toMatch(/\ninternal fun HttpClientConfig<\*>\.\w+\(/);
   });
 });

@@ -47,7 +47,7 @@ async function write(sub: string, outputs: Record<string, string>): Promise<(fil
 let loaded: Promise<{ client: any; queries: any; hooks: any }> | undefined;
 function load() {
   loaded ??= (async () => {
-    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, { layout: "single-file" }).compile(spec);
+    const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, { layout: "single-file" }).compile(spec);
     const importFile = await write("flat", outputs);
     return { client: await importFile("client.ts"), queries: await importFile("queries.ts"), hooks: await importFile("hooks.ts") };
   })();
@@ -153,7 +153,7 @@ describe("flat client react-query (runtime)", () => {
         @get @route("/{id}") read(@path id: string, @query expand?: boolean): Node;
         @put @route("/{id}") @useAuth(NoAuth) update(@path id: string, @body body: Node): Node;
       }`;
-    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, { layout: "single-file" }).compile(authSpec);
+    const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, { layout: "single-file" }).compile(authSpec);
     const importFile = await write("flat-auth", outputs);
     const [{ ShopClient }, hooks] = await Promise.all([importFile("client.ts"), importFile("hooks.ts")]);
     const fetch = vi.fn(async () => json(node));
@@ -177,7 +177,7 @@ describe("flat client react-query (runtime)", () => {
 
 describe("grouped client react-query (runtime)", () => {
   it("resolves a void HEAD query to null", async () => {
-    const { outputs } = await nextjs({ "server-actions": false }, { layout: "single-file" }).compile(spec);
+    const { outputs } = await nextjs({ features: { "server-actions": false } }, { layout: "single-file" }).compile(spec);
     const importFile = await write("grouped", outputs);
     const { createShopClient } = await importFile("client/index.ts");
     const { shopQueries } = await importFile("client/react-query/queries.ts");

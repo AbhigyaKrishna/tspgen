@@ -33,7 +33,7 @@ const EVENTS =
 
 describe("server-sent events (grouped client)", () => {
   it("generates async generator methods that stream after the usual request and error handling", async () => {
-    const { outputs } = await sseNextjs({}, { zod: true }).compile(sseSpec);
+    const { outputs } = await sseNextjs({}, { features: { zod: true } }).compile(sseSpec);
     const feed = outputs["client/feed.ts"];
     expect(feed).toContain(`  async *watch(params: FeedWatchParams, options?: RequestOptions): AsyncIterable<ChannelEvents> {
     const res = await request(
@@ -61,7 +61,7 @@ describe("server-sent events (grouped client)", () => {
   });
 
   it("skips streaming operations in hooks and Server Actions", async () => {
-    const [{ outputs }, diagnostics] = await sseNextjs({}, { zod: true }).compileAndDiagnose(sseSpec);
+    const [{ outputs }, diagnostics] = await sseNextjs({}, { features: { zod: true } }).compileAndDiagnose(sseSpec);
     expectDiagnostics(diagnostics, []);
     const hooks = outputs["client/react-query/hooks.ts"];
     expect(hooks).toContain("useFeedLastQuery");
@@ -70,17 +70,17 @@ describe("server-sent events (grouped client)", () => {
   });
 
   it("keeps the core runtime unchanged without streams", async () => {
-    const { outputs } = await nextjs({}, { zod: true }).compile(`@service namespace S; @route("/p") op ping(): string;`);
+    const { outputs } = await nextjs({}, { features: { zod: true } }).compile(`@service namespace S; @route("/p") op ping(): string;`);
     expect(outputs["client/core.ts"]).not.toContain("accept");
     expect(outputs["client/core.ts"]).not.toContain("readEvents");
   });
 
   it("type-checks under shipyard's compiler flags", async () => {
     for (const layout of ["per-type", "single-file"]) {
-      const { outputs } = await sseNextjs({ "server-actions": false }, { zod: true, layout }).compile(sseSpec);
+      const { outputs } = await sseNextjs({ features: { "server-actions": false } }, { features: { zod: true }, layout }).compile(sseSpec);
       expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
     }
-    const { outputs } = await sseNextjs({ "server-actions": false }).compile(sseSpec);
+    const { outputs } = await sseNextjs({ features: { "server-actions": false } }).compile(sseSpec);
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 });
@@ -140,7 +140,7 @@ describe("server-sent events (flat client)", () => {
   );
 
   it("leaves streaming operations out of the flat React Query hooks", async () => {
-    const { outputs } = await sseNextjs({ ...flat, "react-query": true }, { layout: "single-file" }).compile(sseSpec);
+    const { outputs } = await sseNextjs({ ...flat, features: { "react-query": true } }, { layout: "single-file" }).compile(sseSpec);
     const generated = outputs["queries.ts"]! + outputs["hooks.ts"]!;
     expect(generated).toContain("    last: () => [\"Chat\", \"feed\", \"last\"] as const,\n");
     expect(generated).toContain("export function useLastQuery(");
@@ -149,7 +149,7 @@ describe("server-sent events (flat client)", () => {
     }
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
     // With @useAuth too; a stream op whose Vars keys would clash is skipped silently (it has no hooks anyway).
-    const [secure, diagnostics] = await sseNextjs({ ...flat, "react-query": true }, { layout: "single-file" }).compileAndDiagnose(
+    const [secure, diagnostics] = await sseNextjs({ ...flat, features: { "react-query": true } }, { layout: "single-file" }).compileAndDiagnose(
       sseSpec.replace("@service namespace Chat;", "@service @useAuth(BearerAuth) namespace Chat;").replace(
         '@get @route("/raw") raw()',
         '@post @route("/raw/{body}") raw(@path body: string, @body b: UserConnect)',
@@ -161,8 +161,8 @@ describe("server-sent events (flat client)", () => {
   });
 
   it("type-checks under shipyard's compiler flags, with and without validate", async () => {
-    for (const options of [flat, { ...flat, validate: true }]) {
-      const { outputs } = await sseNextjs(options, { layout: "single-file", zod: true }).compile(sseSpec);
+    for (const options of [{ ...flat, features: { validate: false } }, { ...flat, features: { validate: true } }]) {
+      const { outputs } = await sseNextjs(options, { layout: "single-file", features: { zod: true } }).compile(sseSpec);
       expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
     }
   });

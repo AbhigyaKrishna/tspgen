@@ -32,7 +32,7 @@ describe("next.js react-query and server actions", () => {
       @route("/n") interface Ns {
         @head @route("/{id}") exists(@path id: string): void;
       }`;
-    const { outputs } = await nextjs({ "server-actions": false }).compile(spec);
+    const { outputs } = await nextjs({ features: { "server-actions": false } }).compile(spec);
     expect(outputs["client/react-query/queries.ts"]).toContain(`    exists: (client: SApiClient, params: NsExistsParams) =>
       queryOptions({
         queryKey: sKeys.ns.exists(params),
@@ -66,7 +66,7 @@ describe("next.js react-query and server actions", () => {
   });
 
   it("emits server actions for mutations only", async () => {
-    const { outputs } = await nextjs({}, { zod: true }).compile(petSpec);
+    const { outputs } = await nextjs({}, { features: { zod: true } }).compile(petSpec);
     const actions = outputs["client/actions/pets.ts"];
     expect(actions.split("\n")[1]).toBe(`"use server";`);
     expect(actions).toContain(`export async function petsCreateAction(params: PetsCreateParams): Promise<ActionResult<CreateResult>> {
@@ -82,7 +82,7 @@ describe("next.js react-query and server actions", () => {
   });
 
   it("respects feature toggles and base-url-env", async () => {
-    const { outputs } = await nextjs({ "react-query": false, "base-url-env": "PETS_URL" }).compile(petSpec);
+    const { outputs } = await nextjs({ features: { "react-query": false }, "base-url-env": "PETS_URL" }).compile(petSpec);
     expect(Object.keys(outputs).some((k) => k.includes("react-query"))).toBe(false);
     expect(outputs["client/actions/server-client.ts"]).toContain("process.env.PETS_URL");
   });
@@ -99,7 +99,7 @@ describe("next.js react-query and server actions", () => {
 
   it("type-checks with react-query and server actions, with and without zod", async () => {
     for (const zod of [false, true]) {
-      const { outputs } = await nextjs({}, { zod }).compile(petSpec);
+      const { outputs } = await nextjs({}, { features: { zod } }).compile(petSpec);
       expect(typecheck({ ...outputs, "env.d.ts": "declare const process: { env: Record<string, string | undefined> };\n" })).toBe("");
     }
   });

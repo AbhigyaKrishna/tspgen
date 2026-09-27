@@ -249,7 +249,7 @@ function describeAuth(auth: AuthRequirementIR): string {
  * mentioned (`strategy = Required`).
  */
 function generatedAuth(program: Program, op: ServerOperation, options: KtorServerOptions): AuthWrapper | undefined {
-  if (options["generate-auth"] === false || !op.auth) return undefined;
+  if (!options.features.auth || !op.auth) return undefined;
   const alternatives = op.auth.options.map((option) => [...new Set(option)]);
   const required = alternatives.filter((option) => option.length > 0);
   if (required.length === 0) return undefined;
@@ -369,7 +369,7 @@ function checkAuthProviders(program: Program, ir: KotlinIR, options: KtorServerO
 function checkDslOnly(options: KtorServerOptions, units: ServerUnit[], extras: Record<string, ServerOpExtras>): void {
   if (options["routing-style"] === "dsl") return;
   const used =
-    options["nest-routes"] ||
+    options.features["nest-routes"] ||
     units.some((u) =>
       u.operations.some((op) => {
         const e = extras[op.id];
@@ -398,7 +398,7 @@ function routeFunctions(
   }
   if (sets.size === 0) return [{ name: unit.routesFn, nodes: [] }];
   return [...sets].map(([set, ops]) => {
-    const prefix = options["nest-routes"] ? commonPrefix(ops.map((op) => op.path)) : "";
+    const prefix = options.features["nest-routes"] ? commonPrefix(ops.map((op) => op.path)) : "";
     return {
       name: set ? `${camel(unit.name)}${set}Routes` : unit.routesFn,
       ...(prefix ? { prefix } : {}),
@@ -479,7 +479,14 @@ export function planServerFiles(
     files.push({
       path: `${dirOf(supportPkg)}/${part.name}.kt`,
       template: "kotlin/file",
-      data: { package: supportPkg, imports: organizeImports(part.imports, supportPkg), body: "ktor-server/part-class", decl: part.lines.join("\n") },
+      data: {
+        package: supportPkg,
+        imports: organizeImports(part.imports, supportPkg),
+        body: "ktor-server/part-class",
+        partName: part.name,
+        doc: part.doc.join("\n"),
+        classBody: part.body.join("\n"),
+      },
     });
   }
   for (const [index, service] of ir.services.entries()) {
@@ -496,7 +503,7 @@ export function planServerFiles(
         routesFile(unit, pkg, dirOf(pkg), options, style, extras, support, functions.get(unit)!),
       );
     }
-    if (options.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style, sse?.json ?? false));
+    if (options.features.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style, sse?.json ?? false));
   }
   return files;
 }
@@ -510,7 +517,7 @@ function serviceFile(
 ): FileSpec {
   const imports = [
     ...typeImports(unit.operations),
-    ...(options["call-access"] ? ["io.ktor.server.application.ApplicationCall"] : []),
+    ...(options.features["call-access"] ? ["io.ktor.server.application.ApplicationCall"] : []),
   ];
   return {
     path: `${dir}/${unit.serviceName}.kt`,

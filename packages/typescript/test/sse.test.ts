@@ -28,7 +28,7 @@ function tsIR(program: Parameters<typeof buildApiIR>[0]) {
 
 describe("typescript server-sent events", () => {
   it("emits an @events union as { event, data } variants with a discriminated zod union", async () => {
-    const { outputs } = await SseTester.emit("@abhigyakrishna/tspgen-typescript", { zod: true }).compile(spec);
+    const { outputs } = await SseTester.emit("@abhigyakrishna/tspgen-typescript", { features: { zod: true } }).compile(spec);
     expect(outputs["models/ChannelEvents.ts"]).toBe(`${HEADER}
 import { z } from "zod";
 import { UserConnectSchema } from "./UserConnect";
@@ -65,7 +65,7 @@ export const ChannelEventsSchema: z.ZodType<ChannelEvents> = z.discriminatedUnio
   });
 
   it("uses a plain zod union when event names repeat", async () => {
-    const { outputs } = await SseTester.emit("@abhigyakrishna/tspgen-typescript", { zod: true, layout: "single-file" }).compile(`
+    const { outputs } = await SseTester.emit("@abhigyakrishna/tspgen-typescript", { features: { zod: true }, layout: "single-file" }).compile(`
       @service namespace S;
       @events union Ticks { int32, @Events.contentType("text/plain") @terminalEvent "[DONE]" }
       @route("/t") op ticks(): SSEStream<Ticks>;
@@ -82,7 +82,7 @@ export const ChannelEventsSchema: z.ZodType<ChannelEvents> = z.discriminatedUnio
   });
 
   it("emits SseMessage for untyped streams", async () => {
-    const { outputs } = await emitter({ zod: true }).compile(`
+    const { outputs } = await emitter({ features: { zod: true } }).compile(`
       @service namespace S;
       @route("/a") op a(): { @header contentType: "text/event-stream"; @body body: string };
     `);

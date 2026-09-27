@@ -1,5 +1,5 @@
 <% const d = it.decl; -%>
-<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>sealed interface <%= d.name %> {
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><%= it.h.visibility(it) %>sealed interface <%= d.name %> {
 <% for (const v of d.variants) { const fields = it.h.resultFields(v); -%>
 <% if (fields.length) { -%>
     data class <%= v.name %>(<%= fields.join(", ") %>) : <%= d.name %>

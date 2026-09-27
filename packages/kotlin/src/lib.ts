@@ -1,7 +1,30 @@
-import { coreEmitterOptionsSchemaProperties, type CoreEmitterOptions, type TargetSpec } from "@abhigyakrishna/tspgen-core";
+import {
+  coreEmitterOptionsSchemaProperties,
+  coreFeatures,
+  defaultHeaderText,
+  defineFeatures,
+  movedOptionSchemas,
+  type CoreEmitterOptions,
+  type MovedOptions,
+  type TargetSpec,
+} from "@abhigyakrishna/tspgen-core";
 import { createTypeSpecLibrary, paramMessage, type JSONSchemaType } from "@typespec/compiler";
 
 export type EnumMemberNaming = "UPPER_SNAKE" | "PascalCase";
+
+export const KOTLIN_EMITTER = "@abhigyakrishna/tspgen-kotlin";
+
+export const kotlinFeatures = defineFeatures({
+  ...coreFeatures,
+  validation: {
+    default: true,
+    description:
+      "Constraint decorators (@minLength, @maxLength, @pattern, @minItems, @maxItems, @minValue, @maxValue) as init { require(...) } checks.",
+  },
+});
+
+/** Kotlin emitter option keys moved in 0.2.0. */
+export const kotlinMovedOptions: MovedOptions = { validation: "features.validation" };
 
 export interface KotlinEmitterOptions extends CoreEmitterOptions {
   package?: string;
@@ -9,7 +32,10 @@ export interface KotlinEmitterOptions extends CoreEmitterOptions {
   naming?: { "enum-members"?: EnumMemberNaming };
   packages?: { namespace: string; package: string }[];
   errors?: "typed" | "thrown";
-  validation?: boolean;
+  /** Moved to `features.validation` in 0.2.0. */
+  validation?: unknown;
+  visibility?: "public" | "internal";
+  "file-annotations"?: string[];
   "date-time"?: "java.time" | "kotlin.time";
   "union-variants"?: "nested" | "top-level";
 }
@@ -19,7 +45,17 @@ const optionsSchema = {
   additionalProperties: false,
   properties: {
     ...coreEmitterOptionsSchemaProperties,
-    package: { type: "string", nullable: true, description: 'Base Kotlin package (default "generated").' },
+    "header-text": {
+      ...coreEmitterOptionsSchemaProperties["header-text"],
+      default: defaultHeaderText(KOTLIN_EMITTER),
+    },
+    features: kotlinFeatures.openSchema,
+    package: {
+      type: "string",
+      nullable: true,
+      default: "generated",
+      description: 'Base Kotlin package (default "generated").',
+    },
     targets: {
       type: "array",
       nullable: true,
@@ -35,8 +71,14 @@ const optionsSchema = {
       type: "object",
       nullable: true,
       additionalProperties: false,
+      description: "Naming conventions for generated Kotlin identifiers.",
       properties: {
-        "enum-members": { type: "string", enum: ["UPPER_SNAKE", "PascalCase"], nullable: true },
+        "enum-members": {
+          type: "string",
+          enum: ["UPPER_SNAKE", "PascalCase"],
+          nullable: true,
+          description: "Casing of generated enum constant names (default UPPER_SNAKE).",
+        },
       },
     },
     packages: {
@@ -55,17 +97,14 @@ const optionsSchema = {
       type: "string",
       enum: ["typed", "thrown"],
       nullable: true,
+      default: "typed",
       description: "typed (default): …Exception per error body; thrown: error responses are documentation only.",
-    },
-    validation: {
-      type: "boolean",
-      nullable: true,
-      description: "Render constraint decorators as init { require(...) } checks (default false).",
     },
     "date-time": {
       type: "string",
       enum: ["java.time", "kotlin.time"],
       nullable: true,
+      default: "java.time",
       description:
         "java.time (default): Instant, OffsetDateTime, LocalDate, LocalTime, Duration from java.time with generated " +
         "ISO-8601 serializers; kotlin.time: kotlin.time.Instant/Duration and kotlinx.datetime dates.",
@@ -74,10 +113,32 @@ const optionsSchema = {
       type: "string",
       enum: ["nested", "top-level"],
       nullable: true,
+      default: "nested",
       description:
         "nested (default): variant models only a sealed union references are declared inside it, named after the " +
         "variant key (NodeSource.Catalog); top-level: every variant is its own file.",
     },
+    visibility: {
+      type: "string",
+      enum: ["public", "internal"],
+      nullable: true,
+      default: "public",
+      description:
+        "Modifier on every generated top-level declaration, targets' included; public renders none. internal " +
+        "requires all generated code (models and every target's output) to compile in ONE Gradle module: it " +
+        "breaks layouts where models-output-dir / a target's output-dir point at different modules.",
+    },
+    "file-annotations": {
+      type: "array",
+      items: { type: "string" },
+      nullable: true,
+      default: [],
+      description:
+        'Extra @file: annotations, e.g. Suppress("unused") or @file:Suppress("unused") (a leading "@file:" is ' +
+        "stripped). Applies to every generated Kotlin file, targets included, after UseSerializers; must not " +
+        "repeat it.",
+    },
+    ...movedOptionSchemas(kotlinMovedOptions),
   },
   required: [],
 } as const;

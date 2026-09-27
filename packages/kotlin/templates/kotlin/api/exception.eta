@@ -1,5 +1,5 @@
 <% const d = it.decl; -%>
-<%~ it.h.annotations(d.annotations) %>class <%= d.name %>(
+<%~ it.h.annotations(d.annotations) %><%= it.h.visibility(it) %>class <%= d.name %>(
     val error: <%= d.body.text %>,
     status: Int<%= d.defaultStatus !== undefined ? " = " + d.defaultStatus : "" %>,
 ) : ApiException(status)

@@ -414,6 +414,9 @@ importers:
       '@typespec/streams':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+      '@typespec/versioning':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       react:
         specifier: ^19.3.0
         version: 19.3.0

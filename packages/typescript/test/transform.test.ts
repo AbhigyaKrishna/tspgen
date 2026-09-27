@@ -160,4 +160,21 @@ describe("transformToTs", () => {
     expect(ir.results.map((r) => r.name)).toEqual(["CreateResult"]);
     expect(ir.apiActive).toBe(true);
   });
+
+  it("inherits @meta from every enclosing namespace onto a group and its operations (matching Kotlin)", async () => {
+    const ir = await transform(`
+      using TspGen;
+      @service namespace S {
+        @meta("*", #{ owner: "team-a" })
+        namespace Sub {
+          @route("/pets") interface Pets {
+            @meta("*", #{ tag: "op" }) @get list(): void;
+          }
+        }
+      }
+    `);
+    const group = ir.services[0].groups[0];
+    expect(group.meta["*"]).toMatchObject({ owner: "team-a" });
+    expect(group.operations[0].meta["*"]).toMatchObject({ owner: "team-a", tag: "op" });
+  });
 });

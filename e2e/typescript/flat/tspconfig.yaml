@@ -4,8 +4,10 @@ options:
   "@abhigyakrishna/tspgen-typescript":
     emitter-output-dir: "{project-root}/../generated/flat"
     layout: single-file
-    zod: true
+    features:
+      zod: true
     targets:
       - "@abhigyakrishna/tspgen-ts-nextjs-client":
           client-style: flat
-          validate: true
+          features:
+            validate: true

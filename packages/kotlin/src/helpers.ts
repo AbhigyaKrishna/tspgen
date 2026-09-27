@@ -1,9 +1,14 @@
+import { lineComments } from "@abhigyakrishna/tspgen-core";
 import { kotlinString } from "./kotlin-string.js";
 import { needsSerialName } from "./serialization/kotlinx.js";
 import type { KtEvent, KtResultVariant } from "./transform/model.js";
 
 /** Helpers exposed to templates as `it.h`. */
 export const kotlinHelpers = {
+  /** `text` as `//` line comments (header text). */
+  lineComment(text: string): string {
+    return lineComments(text, "//");
+  },
   kdoc(docs: string | undefined, indent = ""): string {
     if (!docs) return "";
     const lines = docs.replace(/\*\//g, "* /").split("\n");
@@ -46,4 +51,11 @@ export const kotlinHelpers = {
   },
   needsSerialName,
   str: kotlinString,
+  /**
+   * `"internal "` for a top-level declaration when the emitter's `visibility` is internal; `""` otherwise and for
+   * declarations nested in another (`it.nested`).
+   */
+  visibility(it: { ctx?: { options?: Record<string, unknown> }; nested?: boolean }): string {
+    return !it.nested && it.ctx?.options?.visibility === "internal" ? "internal " : "";
+  },
 };

@@ -33,7 +33,7 @@ export interface Pet extends Owner {
   });
 
   it("casts the zod schema of extended interfaces and type-checks", async () => {
-    const { outputs } = await emitter({ zod: true }).compile(spec);
+    const { outputs } = await emitter({ features: { zod: true } }).compile(spec);
     expect(outputs["models/Pet.ts"]).toContain(`export const PetSchema = z.object({
   id: z.number().int(),
   note: z.string().exactOptional(),

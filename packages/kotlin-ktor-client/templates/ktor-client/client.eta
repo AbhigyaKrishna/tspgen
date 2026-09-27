@@ -1,5 +1,5 @@
 <% const g = it.group; const c = it.h.ktorClient; -%>
-<%~ it.h.kdoc(g.docs) %>class <%= g.name %>Client(
+<%~ it.h.kdoc(g.docs) %><%= it.h.visibility(it) %>class <%= g.name %>Client(
     private val http: HttpClient,
     private val baseUrl: String,
 ) {

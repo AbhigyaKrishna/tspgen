@@ -1,5 +1,5 @@
 import type { ApiIR, OperationIR, StatusCodes } from "@abhigyakrishna/tspgen-core";
-import { decoratorArg, mergeScopes, metaScopes, type MetaScopes } from "@abhigyakrishna/tspgen-core";
+import { declarationScopes, decoratorArg, mergeScopes, metaScopes, type MetaScopes } from "@abhigyakrishna/tspgen-core";
 import { camel, typeName } from "../naming.js";
 import { constrain } from "./constraints.js";
 import type { DeclarationBuilder } from "./declarations.js";
@@ -56,7 +56,7 @@ export class ApiBuilder {
       auth: s.auth,
       groups: s.groups.map((g) => {
         const name = decoratorArg(g.decorators, "TS.name") ?? typeName(g.name);
-        const groupScopes = metaScopes(g.decorators);
+        const groupScopes = declarationScopes(g.decorators, g.namespaceDecorators);
         return {
           id: g.id,
           name,

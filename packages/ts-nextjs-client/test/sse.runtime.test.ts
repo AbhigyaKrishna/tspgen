@@ -34,7 +34,7 @@ async function write(sub: string, outputs: Record<string, string>): Promise<stri
 }
 
 async function loadGrouped() {
-  const { outputs } = await sseNextjs({ "react-query": false, "server-actions": false }, { zod: true }).compile(spec);
+  const { outputs } = await sseNextjs({ features: { "react-query": false, "server-actions": false } }, { features: { zod: true } }).compile(spec);
   return import(pathToFileURL(join(await write("grouped", outputs), "client/index.ts")).href);
 }
 
@@ -261,7 +261,7 @@ describe("streams with @useAuth credentials (runtime)", () => {
   };
 
   it("sends the operation's credentials with grouped stream requests", async () => {
-    const { outputs } = await sseNextjs({ "react-query": false, "server-actions": false }).compile(secureSpec);
+    const { outputs } = await sseNextjs({ features: { "react-query": false, "server-actions": false } }).compile(secureSpec);
     const { createSecureClient } = await import(pathToFileURL(join(await write("grouped-auth", outputs), "client/index.ts")).href);
     const fetch = vi.fn(async () => stream(body(TICKS, 4)));
     const api = createSecureClient({ baseUrl: "http://x", fetch, auth });

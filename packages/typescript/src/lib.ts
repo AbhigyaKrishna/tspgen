@@ -1,37 +1,68 @@
-import { coreEmitterOptionsSchemaProperties, type LanguageEmitterOptions } from "@abhigyakrishna/tspgen-core";
+import {
+  coreEmitterOptionsSchemaProperties,
+  coreFeatures,
+  defaultHeaderText,
+  defineFeatures,
+  movedOptionSchemas,
+  type LanguageEmitterOptions,
+  type MovedOptions,
+} from "@abhigyakrishna/tspgen-core";
 import { createTypeSpecLibrary, paramMessage, type JSONSchemaType } from "@typespec/compiler";
 
 export interface TypeScriptEmitterOptions extends LanguageEmitterOptions {
-  zod?: boolean;
+  /** Moved to `features.zod` in 0.2.0. */
+  zod?: unknown;
   "import-extension"?: "none" | ".js";
   layout?: "per-type" | "single-file";
   errors?: "typed" | "thrown";
 }
+
+export const TYPESCRIPT_EMITTER = "@abhigyakrishna/tspgen-typescript";
+
+export const typescriptFeatures = defineFeatures({
+  ...coreFeatures,
+  zod: {
+    default: false,
+    description: "zod schemas (<Name>Schema) next to the types, constraint decorators as refinements; needs zod >= 4.3.",
+  },
+  barrel: { default: true, description: "models/index.ts re-exporting every model (per-type layout)." },
+});
+
+/** TypeScript emitter option keys moved in 0.2.0. */
+export const typescriptMovedOptions: MovedOptions = { zod: "features.zod" };
 
 const optionsSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
     ...coreEmitterOptionsSchemaProperties,
-    zod: { type: "boolean", nullable: true, description: "Emit zod schemas next to the types (default false)." },
+    "header-text": {
+      ...coreEmitterOptionsSchemaProperties["header-text"],
+      default: defaultHeaderText(TYPESCRIPT_EMITTER),
+    },
+    features: typescriptFeatures.openSchema,
     "import-extension": {
       type: "string",
       enum: ["none", ".js"],
       nullable: true,
+      default: "none",
       description: 'Suffix for relative imports: "none" for bundlers/Next.js (default), ".js" for Node ESM.',
     },
     layout: {
       type: "string",
       enum: ["per-type", "single-file"],
       nullable: true,
+      default: "per-type",
       description: "per-type (default): models/<Name>.ts + barrel; single-file: every model in types.ts.",
     },
     errors: {
       type: "string",
       enum: ["typed", "thrown"],
       nullable: true,
+      default: "typed",
       description: "typed (default): <Body>Error classes; thrown: error responses are documentation only.",
     },
+    ...movedOptionSchemas(typescriptMovedOptions),
     targets: {
       type: "array",
       nullable: true,
@@ -59,12 +90,6 @@ export const $lib = createTypeSpecLibrary({
       severity: "error",
       messages: {
         default: paramMessage`Operations '${"first"}' and '${"second"}' are both named '${"name"}' in the flat client; rename one (e.g. @TS.name).`,
-      },
-    },
-    "unsupported-in-flat-style": {
-      severity: "error",
-      messages: {
-        default: paramMessage`Option '${"option"}' is not supported with client-style "flat".`,
       },
     },
     "flat-client-unsupported": {
@@ -126,19 +151,6 @@ export const $lib = createTypeSpecLibrary({
       severity: "warning",
       messages: {
         default: paramMessage`@pattern '${"pattern"}' on '${"where"}' is not a valid JavaScript regular expression; it is not validated.`,
-      },
-    },
-    "validate-requires-zod": {
-      severity: "error",
-      messages: {
-        default: "Option 'validate' needs zod schemas; set zod: true on @abhigyakrishna/tspgen-typescript.",
-      },
-    },
-    "validate-flat-only": {
-      severity: "warning",
-      messages: {
-        default:
-          "Option 'validate' only applies to client-style \"flat\"; the grouped client validates responses and Server Action input already.",
       },
     },
   },

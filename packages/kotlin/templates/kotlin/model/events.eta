@@ -1,5 +1,5 @@
 <% const d = it.decl; -%>
-<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>sealed interface <%= d.name %><% if (d.events.length) { %> {
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><%= it.h.visibility(it) %>sealed interface <%= d.name %><% if (d.events.length) { %> {
 <% d.events.forEach((e, i) => { -%>
 <% if (i > 0) { -%>
 

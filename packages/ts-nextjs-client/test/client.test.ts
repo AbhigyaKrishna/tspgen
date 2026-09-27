@@ -3,9 +3,21 @@ import { describe, expect, it } from "vitest";
 import { nextjs, petSpec } from "./tester.js";
 import { typecheck } from "./typecheck.js";
 
-const fetchOnly = { "react-query": false, "server-actions": false };
+const fetchOnly = { features: { "react-query": false, "server-actions": false } };
 
 describe("next.js fetch client", () => {
+  it.each([
+    ["react-query", "features.react-query"],
+    ["server-actions", "features.server-actions"],
+    ["validate", "features.validate"],
+  ])("rejects the moved option %s", async (key, to) => {
+    const diagnostics = await nextjs({ [key]: true }).diagnose(petSpec);
+    expectDiagnostics(diagnostics, {
+      code: "@abhigyakrishna/tspgen-core/option-moved",
+      message: `\`${key}\` moved to \`${to}\` in 0.2.0.`,
+    });
+  });
+
   it("emits params interfaces and a client class per group", async () => {
     const { outputs } = await nextjs(fetchOnly).compile(petSpec);
     const pets = outputs["client/pets.ts"];
@@ -54,7 +66,7 @@ describe("next.js fetch client", () => {
   });
 
   it("validates with zod schemas when enabled", async () => {
-    const { outputs } = await nextjs(fetchOnly, { zod: true }).compile(petSpec);
+    const { outputs } = await nextjs(fetchOnly, { features: { zod: true } }).compile(petSpec);
     const pets = outputs["client/pets.ts"];
     expect(pets).toContain(`export const PetsGetParamsSchema: z.ZodType<PetsGetParams> = z.object({
   petId: z.number().int(),
@@ -97,7 +109,7 @@ export function createPetStoreClient(config: ClientConfig): PetStoreApiClient {
   it("imports the models from their own output dir when the client writes elsewhere", async () => {
     const { outputs } = await nextjs(
       { ...fetchOnly, "output-dir": "{emitter-output-dir}/web/src" },
-      { zod: true, "models-output-dir": "{emitter-output-dir}/shared" },
+      { features: { zod: true }, "models-output-dir": "{emitter-output-dir}/shared" },
     ).compile(petSpec);
     expect(outputs["web/src/client/pets.ts"]).toContain(`import type { Pet } from "../../../shared/models/Pet";`);
     expect(outputs["web/src/client/core.ts"]).toContain(`import { HttpError } from "../../../shared/api/errors";`);
@@ -117,7 +129,7 @@ export function createPetStoreClient(config: ClientConfig): PetStoreApiClient {
     `;
     for (const zod of [false, true]) {
       for (const style of [fetchOnly, { "client-style": "flat" }] as Record<string, unknown>[]) {
-        const { outputs } = await nextjs(style, { zod }).compile(spec);
+        const { outputs } = await nextjs(style, { features: { zod } }).compile(spec);
         const client = outputs["client/pets.ts"] ?? outputs["client.ts"];
         expect(client).toContain("Page<Pet>");
         expect(typecheck(outputs)).toBe("");
@@ -127,13 +139,13 @@ export function createPetStoreClient(config: ClientConfig): PetStoreApiClient {
 
   it("type-checks without and with zod", async () => {
     for (const zod of [false, true]) {
-      const { outputs } = await nextjs(fetchOnly, { zod }).compile(petSpec);
+      const { outputs } = await nextjs(fetchOnly, { features: { zod } }).compile(petSpec);
       expect(typecheck(outputs)).toBe("");
     }
   });
 
   it("applies parameter constraints to the params schema", async () => {
-    const { outputs } = await nextjs({}, { zod: true }).compile(`
+    const { outputs } = await nextjs({}, { features: { zod: true } }).compile(`
       @service namespace S;
       @route("/items") interface Items { @get list(@query @maxValue(100) limit?: int32): void; }
     `);
@@ -141,26 +153,34 @@ export function createPetStoreClient(config: ClientConfig): PetStoreApiClient {
   });
 
   it("type-checks grouped client params schemas of optional query params under exactOptionalPropertyTypes", async () => {
-    const { outputs } = await nextjs(fetchOnly, { zod: true }).compile(`
+    const { outputs } = await nextjs(fetchOnly, { features: { zod: true } }).compile(`
       @service namespace S;
       @route("/items") interface Items { @get list(@query limit?: int32): void; }
     `);
     expect(typecheck(outputs, { exactOptionalPropertyTypes: true })).toBe("");
   });
 
-  it("warns that validate only applies to the flat client style", async () => {
-    const [{ outputs }, diagnostics] = await nextjs({ ...fetchOnly, validate: true }, { zod: true }).compileAndDiagnose(petSpec);
+  it("warns that features.validate has no effect with the grouped style, only when set explicitly", async () => {
+    const [{ outputs }, diagnostics] = await nextjs({ features: { ...fetchOnly.features, validate: true } }, { features: { zod: true } }).compileAndDiagnose(
+      petSpec,
+    );
     expectDiagnostics(
       diagnostics.filter((d) => d.code.startsWith("@abhigyakrishna/")),
-      { code: "@abhigyakrishna/tspgen-typescript/validate-flat-only", severity: "warning" },
+      {
+        code: "@abhigyakrishna/tspgen-core/unsupported-feature",
+        severity: "warning",
+        message: '`features.validate` has no effect with client-style "grouped".',
+      },
     );
     expect(outputs["client/pets.ts"]).toBeDefined();
+    const [, byDefault] = await nextjs(fetchOnly, { features: { zod: true } }).compileAndDiagnose(petSpec);
+    expect(byDefault.filter((d) => d.code.endsWith("unsupported-feature"))).toEqual([]);
   });
 
   it("type-checks the full grouped client under exactOptionalPropertyTypes and noUncheckedIndexedAccess", async () => {
     const env = { "env.d.ts": "declare const process: { env: Record<string, string | undefined> };\n" };
     for (const zod of [false, true]) {
-      const { outputs } = await nextjs({}, { zod }).compile(petSpec);
+      const { outputs } = await nextjs({}, { features: { zod } }).compile(petSpec);
       expect(typecheck({ ...outputs, ...env }, { exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true })).toBe("");
     }
   });

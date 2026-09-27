@@ -1,5 +1,6 @@
-import type { FileSpec, TargetContext } from "@abhigyakrishna/tspgen-core";
+import { reportUnsupportedFeature, type FileSpec, type TargetContext } from "@abhigyakrishna/tspgen-core";
 import {
+  API_VERSION_FILE,
   propertyKey,
   rebase,
   relativeSpecifier,
@@ -251,12 +252,14 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
     reportDiagnostic(ctx.program, { code, format, target: NoTarget, ...(messageId ? { messageId } : {}) } as Parameters<typeof reportDiagnostic>[1]);
     return [];
   };
-  if (options["server-actions"] === true) return fail("unsupported-in-flat-style", { option: "server-actions" });
-  const reactQuery = options["react-query"] === true;
+  reportUnsupportedFeature(ctx.program, ctx.features, "server-actions", 'client-style "flat"');
+  if (!ir.zod) {
+    reportUnsupportedFeature(ctx.program, ctx.features, "validate", "`features.zod` off on @abhigyakrishna/tspgen-typescript");
+  }
+  const reactQuery = options.features["react-query"];
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
-  const validate = options.validate === true;
-  if (validate && !ir.zod) return fail("validate-requires-zod", {});
+  const validate = options.features.validate && ir.zod;
 
   let model: TsInterface | undefined;
   if (options["error-model"]) {
@@ -357,7 +360,13 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   const queryParams = ops.flatMap((op) => op.params.filter((p) => p.location === "query"));
   const ext = ir.importExtension;
   const prefix = ir.modelsPrefix ?? "";
-  const typesFile = rebase(ir.layout === "single-file" ? "types" : "models/index", prefix);
+  const typeFiles = (
+    ir.layout === "single-file"
+      ? ["types"]
+      : ir.barrel
+        ? ["models/index"]
+        : [...ir.declarations.map((d) => d.file), ...(ir.apiVersions.length > 0 ? [API_VERSION_FILE] : [])]
+  ).map((f) => rebase(f, prefix));
   return [
     {
       path: "client.ts",
@@ -383,7 +392,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
       data: {
         imports: [],
         body: "ts/barrel",
-        exports: [...(ir.declarations.length > 0 ? [typesFile] : []), "client", ...(reactQuery ? ["queries"] : [])]
+        exports: [...(ir.declarations.length > 0 ? typeFiles : []), "client", ...(reactQuery ? ["queries"] : [])]
           .map((f) => relativeSpecifier("index", f, ext))
           .sort(),
       },

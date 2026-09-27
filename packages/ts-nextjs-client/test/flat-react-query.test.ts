@@ -41,7 +41,7 @@ export const rqSpec = `
   @@meta(Shop.Graph.Nodes.readNode, "typescript:ts-nextjs-client", #{ staleTime: 30000 });
 `;
 
-const flat = { "client-style": "flat", "error-model": "ErrorResponse", "react-query": true };
+const flat = { "client-style": "flat", "error-model": "ErrorResponse", features: { "react-query": true } };
 const house = { layout: "single-file", errors: "thrown" };
 
 /** A consumer of the generated hooks, type-checked with them (exercises Vars under exactOptionalPropertyTypes). */
@@ -94,24 +94,27 @@ export * from "./types";
 `);
   });
 
-  it("is off by default for the flat client", async () => {
-    for (const options of [{ "client-style": "flat" }, { "client-style": "flat", "react-query": false }]) {
-      const [result, diagnostics] = await nextjs(options, house).compileAndDiagnose(rqSpec);
-      expect(diagnostics).toEqual([]);
-      expect(Object.keys(result.outputs).filter((k) => k.includes("queries") || k.includes("hooks"))).toEqual([]);
-      expect(result.outputs["index.ts"]).not.toContain("queries");
-    }
+  it("is on by default for the flat client and off with features.react-query false", async () => {
+    const [on, onDiagnostics] = await nextjs({ "client-style": "flat" }, house).compileAndDiagnose(rqSpec);
+    expect(onDiagnostics).toEqual([]);
+    expect(on.outputs["queries.ts"]).toBeDefined();
+    expect(on.outputs["hooks.ts"]).toBeDefined();
+    expect(on.outputs["index.ts"]).toContain(`export * from "./queries";`);
+    const [off, offDiagnostics] = await nextjs({ "client-style": "flat", features: { "react-query": false } }, house).compileAndDiagnose(rqSpec);
+    expect(offDiagnostics).toEqual([]);
+    expect(Object.keys(off.outputs).filter((k) => k.includes("queries") || k.includes("hooks"))).toEqual([]);
+    expect(off.outputs["index.ts"]).not.toContain("queries");
   });
 
   it("type-checks with a consumer under shipyard's flags, per-type, single-file, with and without validate", async () => {
     const combos: [Record<string, unknown>, boolean][] = [
       [house, false],
       [{}, false],
-      [{ ...house, zod: true }, true],
-      [{ zod: true }, true],
+      [{ ...house, features: { zod: true } }, true],
+      [{ features: { zod: true } }, true],
     ];
     for (const [emitterOptions, validate] of combos) {
-      const { outputs } = await nextjs({ ...flat, validate }, emitterOptions).compile(rqSpec);
+      const { outputs } = await nextjs({ ...flat, features: { ...flat.features, validate } }, emitterOptions).compile(rqSpec);
       expect(typecheck({ ...outputs, "usage.ts": usage }, SHIPYARD_FLAGS)).toBe("");
     }
   });
@@ -127,11 +130,11 @@ export * from "./types";
     const spec = `
       @service namespace Reads { model R { a: string } @route("/r") op read(): R; }
     `;
-    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, house).compile(spec);
+    const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compile(spec);
     expect(outputs["hooks.ts"]).not.toContain("useMutation");
     expect(typecheck(outputs, { ...SHIPYARD_FLAGS, noUnusedLocals: true })).toBe("");
     const writes = `@service namespace Writes { @route("/w") @post op write(@query force?: boolean): void; }`;
-    const w = await nextjs({ "client-style": "flat", "react-query": true }, house).compile(writes);
+    const w = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compile(writes);
     expect(w.outputs["queries.ts"]).not.toContain("queryOptions");
     expect(w.outputs["queries.ts"]).toContain(`export const writesQueries = {\n};`);
     expect(w.outputs["hooks.ts"]).not.toContain("useQuery");
@@ -148,7 +151,7 @@ export * from "./types";
         @get @route("/{z}/{x}/{y}") tile(@path z: int32, @path x: int32, @path y: int32, @query format?: string): Tile;
         @post @route("/{id}") put(@path id: string, @body z: Z): void;
       }`;
-    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true, validate: true }, { ...house, zod: true }).compile(spec);
+    const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true, validate: true } }, { ...house, features: { zod: true } }).compile(spec);
     expect(outputs["client.ts"]).toContain("  async tile(zValue: number, x: number, y: number, query: { format?: string } = {}, init?: { signal?: AbortSignal }): Promise<Tile> {");
     expect(outputs["queries.ts"]).toContain(`export interface TileVars {
   z: number;
@@ -167,7 +170,7 @@ export * from "./types";
   it("keeps a path parameter named init as a Vars key (the method's init parameter is renamed)", async () => {
     const spec = `@service namespace S; model N { a: string }
       @route("/n/{init}") @get op readN(@path \`init\`: string): N;`;
-    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, house).compile(spec);
+    const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compile(spec);
     expect(outputs["client.ts"]).toContain("  readN(init: string, requestInit?: { signal?: AbortSignal }): Promise<N> {");
     expect(outputs["queries.ts"]).toContain("export interface ReadNVars {\n  init: string;\n}");
     expect(outputs["queries.ts"]).toContain("queryFn: ({ signal }) => client.readN(vars.init, { signal }),");
@@ -181,7 +184,7 @@ export * from "./types";
     ];
     for (const [op, id, key] of cases) {
       const spec = `@service namespace S; model N { a: string }\n@route("/n") op readN(): N;\n${op}`;
-      const [result, diagnostics] = await nextjs({ "client-style": "flat", "react-query": true }, house).compileAndDiagnose(spec);
+      const [result, diagnostics] = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compileAndDiagnose(spec);
       expectDiagnostics(diagnostics, {
         code: "@abhigyakrishna/tspgen-typescript/flat-react-query-skipped",
         severity: "warning",
@@ -196,7 +199,7 @@ export * from "./types";
       expect(result.outputs["queries.ts"]).not.toContain(`${name}:`);
       expect(typecheck(result.outputs, { ...SHIPYARD_FLAGS, noUnusedLocals: true })).toBe("");
       // without react-query there is nothing to skip
-      const [, plain] = await nextjs({ "client-style": "flat" }, house).compileAndDiagnose(spec);
+      const [, plain] = await nextjs({ "client-style": "flat", features: { "react-query": false } }, house).compileAndDiagnose(spec);
       expect(plain).toEqual([]);
     }
   });
@@ -204,7 +207,7 @@ export * from "./types";
   it("keys Vars by the public name of a path parameter or body named like a reserved word", async () => {
     const spec = `@service namespace S; model N { a: string }
       @route("/c/{class}") @post op postClass(@path \`class\`: string, @body \`default\`: N): N;`;
-    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, house).compile(spec);
+    const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compile(spec);
     expect(outputs["client.ts"]).toContain(
       '  postClass(classValue: string, defaultValue: N, init?: { signal?: AbortSignal }): Promise<N> {\n    return this.send("POST", `/c/${encodeURIComponent(String(classValue))}`, defaultValue, init);',
     );
@@ -225,7 +228,7 @@ export * from "./types";
           @query dryRun?: boolean,
         ): N;
       }`;
-    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, house).compile(spec);
+    const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compile(spec);
     expect(outputs["queries.ts"]).toContain(`export interface CreateVars {
   /**
    * The node to create.
@@ -257,7 +260,7 @@ export function useOldNQuery(`);
       @route("/n") interface Ns {
         @head @route("/{id}") exists(@path id: string): void;
       }`;
-    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, house).compile(spec);
+    const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compile(spec);
     expect(outputs["queries.ts"]).toContain(`    exists: (client: SClient, vars: ExistsVars) =>
       queryOptions({
         queryKey: sKeys.ns.exists(vars),
@@ -300,7 +303,7 @@ export function Component(): void {
 }
 `;
     for (const emitterOptions of [house, {}]) {
-      const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, emitterOptions).compile(spec);
+      const { outputs } = await nextjs({ "client-style": "flat", features: { "react-query": true } }, emitterOptions).compile(spec);
       expect(outputs["client.ts"]).toContain("export interface ShopAuth {");
       expect(typecheck({ ...outputs, "usage.ts": consumer }, SHIPYARD_FLAGS)).toBe("");
     }
@@ -324,7 +327,7 @@ export function Component(): void {
       [`@service namespace A { @route("/a") interface All { @get list(): void; } }`, "A", "A.All", "aKeys.all"],
     ];
     for (const [spec, first, second, name] of cases) {
-      const [result, diagnostics] = await nextjs({ "client-style": "flat", "react-query": true }, house).compileAndDiagnose(spec);
+      const [result, diagnostics] = await nextjs({ "client-style": "flat", features: { "react-query": true } }, house).compileAndDiagnose(spec);
       expectDiagnostics(diagnostics, {
         code: "@abhigyakrishna/tspgen-typescript/flat-react-query-name-clash",
         message: `'${first}' and '${second}' both generate '${name}' in the flat client's React Query code; rename one (e.g. @TS.name).`,
@@ -355,16 +358,16 @@ export function Component(): void {
       });
       expect(result.outputs["client.ts"]).toBeUndefined();
       // these names are free without react-query
-      const [, plain] = await nextjs({ ...flat, "react-query": false }, house).compileAndDiagnose(spec);
+      const [, plain] = await nextjs({ ...flat, features: { "react-query": false } }, house).compileAndDiagnose(spec);
       expect(plain).toEqual([]);
     }
   });
 
-  it("still rejects server-actions for the flat client", async () => {
-    const diagnostics = await nextjs({ ...flat, "server-actions": true }, house).diagnose(rqSpec);
+  it("ignores server-actions for the flat client with a warning", async () => {
+    const diagnostics = await nextjs({ ...flat, features: { ...flat.features, "server-actions": true } }, house).diagnose(rqSpec);
     expectDiagnostics(diagnostics, {
-      code: "@abhigyakrishna/tspgen-typescript/unsupported-in-flat-style",
-      message: `Option 'server-actions' is not supported with client-style "flat".`,
+      code: "@abhigyakrishna/tspgen-core/unsupported-feature",
+      message: '`features.server-actions` has no effect with client-style "flat".',
     });
   });
 });

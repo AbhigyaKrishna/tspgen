@@ -30,7 +30,10 @@ export interface ServerUpload {
 /** A streaming multipart part class: `sealed class <Model>Part`, declared once per model in the server package. */
 export interface PartClass {
   name: string;
-  lines: string[];
+  /** KDoc comment lines, before the `sealed class` line (which the template renders with the visibility prefix). */
+  doc: string[];
+  /** Subclass lines and the closing brace, after the `sealed class <name> {` line. */
+  body: string[];
   imports: string[];
 }
 
@@ -296,7 +299,7 @@ function partClass(name: string, model: string, parts: KtPart[]): PartClass {
     ...parts.filter((p) => p.kind !== "file").flatMap((p) => p.type.imports),
     ...(parts.some((p) => p.kind === "file") ? [CHANNEL] : []),
   ].filter((fqn) => !shadowed.has(fqn.slice(fqn.lastIndexOf(".") + 1)));
-  const lines = [
+  const doc = [
     "/**",
     ` * One part of ${/^[AEIOU]/.test(model) ? "an" : "a"} \`${model}\` multipart request. The service's \`Flow\` reads the request while it is collected: collect`,
     ...(parts.some((p) => p.kind === "file")
@@ -306,7 +309,8 @@ function partClass(name: string, model: string, parts: KtPart[]): PartClass {
         ]
       : [" * it once (a second collection throws IllegalStateException)."]),
     " */",
-    `sealed class ${name} {`,
+  ];
+  const body = [
     ...parts.map((p) =>
       p.kind === "file"
         ? `    class ${variantName(p)}(val filename: ${unshadow(nullableString, shadowed)}, val contentType: ${unshadow(nullableString, shadowed)}, val channel: ${unshadow(use("ByteReadChannel", [CHANNEL]), shadowed)}) : ${name}()`
@@ -314,5 +318,5 @@ function partClass(name: string, model: string, parts: KtPart[]): PartClass {
     ),
     "}",
   ];
-  return { name, lines, imports };
+  return { name, doc, body, imports };
 }

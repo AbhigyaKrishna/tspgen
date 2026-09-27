@@ -4,6 +4,7 @@ options:
   "@abhigyakrishna/tspgen-typescript":
     emitter-output-dir: "{project-root}/generated/v2"
     # no version: the latest (v2)
-    zod: true
+    features:
+      zod: true
     targets:
       - "@abhigyakrishna/tspgen-ts-nextjs-client": {}

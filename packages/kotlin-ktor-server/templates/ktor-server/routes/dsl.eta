@@ -3,7 +3,7 @@
 <% if (i > 0) { -%>
 
 <% } -%>
-fun Route.<%= fn.name %>(service: <%= u.serviceName %>) {
+<%= it.h.visibility(it) %>fun Route.<%= fn.name %>(service: <%= u.serviceName %>) {
 <% if (fn.prefix) { -%>
     route(<%~ it.h.str(fn.prefix) %>) {
 <%~ it.h.indent(body, "    ") %>

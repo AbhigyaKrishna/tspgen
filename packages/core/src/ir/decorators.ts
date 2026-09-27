@@ -1,4 +1,4 @@
-import { getNamespaceFullName, getTypeName, type Type } from "@typespec/compiler";
+import { getNamespaceFullName, getTypeName, type Namespace, type Type } from "@typespec/compiler";
 import type { DecoratorData } from "./types.js";
 
 /** Collect non-TypeSpec decorator applications as plain JSON-like data. */
@@ -51,4 +51,34 @@ export function decoratorArg(data: DecoratorData | undefined, key: string): stri
 /** First argument of every application of `key` that is a string. */
 export function decoratorArgs(data: DecoratorData | undefined, key: string): string[] {
   return (data?.[key] ?? []).map((args) => args[0]).filter((v): v is string => typeof v === "string");
+}
+
+// Memoized per namespace (not per type): `chainCache.get(ns)` is the decorators of `ns` and everything enclosing
+// it, outermost first. Every call site (types, operation groups) shares this cache, so a namespace's chain is
+// collected once no matter how many declarations reuse it.
+const chainCache = new WeakMap<Namespace, DecoratorData[]>();
+
+function namespaceChain(ns: Namespace): DecoratorData[] {
+  const cached = chainCache.get(ns);
+  if (cached) return cached;
+  const outer = ns.namespace && ns.namespace.name !== "" ? namespaceChain(ns.namespace) : [];
+  const chain = [...outer, collectDecorators(ns)];
+  chainCache.set(ns, chain);
+  return chain;
+}
+
+/**
+ * Decorators of the namespaces enclosing `type`, outermost first (the global namespace excluded). A fresh copy of
+ * the (memoized, shared) chain every time, so a caller mutating the returned array in place — a transform or
+ * plugin — cannot corrupt another IR node's `namespaceDecorators`.
+ */
+export function enclosingNamespaceDecorators(type: Type): DecoratorData[] {
+  const ns = "namespace" in type ? (type.namespace as Namespace | undefined) : undefined;
+  return ns && ns.name !== "" ? [...namespaceChain(ns)] : [];
+}
+
+/** `{ namespaceDecorators }` for a named type's IR, or `{}` when no enclosing namespace has decorators. */
+export function namespaceDecoratorsField(type: Type): { namespaceDecorators?: DecoratorData[] } {
+  const chain = enclosingNamespaceDecorators(type);
+  return chain.some((d) => Object.keys(d).length > 0) ? { namespaceDecorators: chain } : {};
 }

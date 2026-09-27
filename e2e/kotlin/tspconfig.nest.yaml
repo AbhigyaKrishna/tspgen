@@ -6,6 +6,7 @@ options:
     package: "com.example.secure.nest"
     targets:
       - "@abhigyakrishna/tspgen-kotlin-ktor-server":
-          nest-routes: true
+          features:
+            nest-routes: true
           auth-providers:
             PartnerKey: com.example.petstore.PARTNER_PROVIDER

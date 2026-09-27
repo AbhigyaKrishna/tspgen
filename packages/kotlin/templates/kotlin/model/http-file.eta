@@ -1,7 +1,7 @@
 /**
  * A file sent as an HTTP body or a multipart part: its bytes plus the optional filename and content type.
  */
-class HttpFile(
+<%= it.h.visibility(it) %>class HttpFile(
     val filename: String?,
     val contentType: String?,
     val bytes: ByteArray,

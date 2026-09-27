@@ -10,7 +10,7 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("generated zod schemas (runtime)", () => {
   it("use .exactOptional(): an optional key may be absent but not present with value undefined", async () => {
-    const { outputs } = await emitter({ zod: true, layout: "single-file" }).compile(`
+    const { outputs } = await emitter({ features: { zod: true }, layout: "single-file" }).compile(`
       @service namespace S;
       model Req { name: string; note?: string }
     `);

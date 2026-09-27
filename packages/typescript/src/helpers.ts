@@ -1,7 +1,12 @@
+import { lineComments } from "@abhigyakrishna/tspgen-core";
 import type { TsEnum, TsResultVariant } from "./transform/model.js";
 
 /** Helpers exposed to templates as `it.h`. */
 export const tsHelpers = {
+  /** `text` as `//` line comments (header text). */
+  lineComment(text: string): string {
+    return lineComments(text, "//");
+  },
   /** JSDoc block (with trailing newline) or "" when there is nothing to document. */
   jsdoc(docs?: string, indent = "", deprecated?: string, defaultDoc?: string, extra: readonly string[] = []): string {
     const lines = [

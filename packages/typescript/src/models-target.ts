@@ -1,8 +1,11 @@
-import type { ApiVersionConstant, FileSpec, Target } from "@abhigyakrishna/tspgen-core";
+import { reportUnsupportedFeature, type ApiVersionConstant, type FileSpec, type Target } from "@abhigyakrishna/tspgen-core";
 import { relativeSpecifier, renderImports, type TsImport } from "./imports.js";
 import type { TsDecl, TsIR } from "./transform/model.js";
 
 const Z: TsImport = { name: "z", from: "zod", typeOnly: false, external: true };
+
+/** File of the API version constants without a models barrel (`features.barrel: false`). */
+export const API_VERSION_FILE = "models/api-version";
 
 function declImports(decl: TsDecl, zod: boolean): TsImport[] {
   const uses =
@@ -46,10 +49,11 @@ export const tsModelsTarget: Target<TsIR> = {
   name: "typescript-models",
   kind: "models",
   language: "typescript",
-  files: (ir) => {
+  files: (ir, ctx) => {
     const ext = ir.importExtension;
     const files: FileSpec[] = [];
     if (ir.layout === "single-file") {
+      reportUnsupportedFeature(ctx.program, ctx.features, "barrel", 'layout "single-file"');
       if (ir.declarations.length > 0 || ir.apiVersions.length > 0) {
         files.push({
           path: "types.ts",
@@ -76,7 +80,15 @@ export const tsModelsTarget: Target<TsIR> = {
           },
         });
       }
-      if (ir.declarations.length > 0 || ir.apiVersions.length > 0) {
+      if (!ir.barrel) {
+        if (ir.apiVersions.length > 0) {
+          files.push({
+            path: `${API_VERSION_FILE}.ts`,
+            template: "ts/file",
+            data: { imports: [], body: "ts/api-version", constants: ir.apiVersions },
+          });
+        }
+      } else if (ir.declarations.length > 0 || ir.apiVersions.length > 0) {
         files.push(barrel("models/index", ir.declarations.map((d) => d.file), ext, ir.apiVersions));
       }
     }

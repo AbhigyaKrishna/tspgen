@@ -1,7 +1,7 @@
 <% it.classes.forEach((c, i) => { %><% if (i > 0) { %>
 
 <% } %>/** Writes `<%= c.name %>` as its ISO-8601 string (`toString()` / `<%= c.name %>.parse`). */
-object <%= c.name %>Serializer : KSerializer<<%= c.name %>> {
+<%= it.h.visibility(it) %>object <%= c.name %>Serializer : KSerializer<<%= c.name %>> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(<%~ it.h.str(c.fqn) %>, PrimitiveKind.STRING)
 
     override fun serialize(encoder: Encoder, value: <%= c.name %>) = encoder.encodeString(value.toString())
@@ -13,6 +13,6 @@ object <%= c.name %>Serializer : KSerializer<<%= c.name %>> {
  * Registers the serializers above as contextual, for java.time values outside the models (e.g. a
  * `List<Instant>` request body): `Json { serializersModule = javaTimeSerializersModule }`.
  */
-val javaTimeSerializersModule: SerializersModule = SerializersModule {
+<%= it.h.visibility(it) %>val javaTimeSerializersModule: SerializersModule = SerializersModule {
 <% for (const c of it.classes) { %>    contextual(<%= c.name %>::class, <%= c.name %>Serializer)
 <% } %>}

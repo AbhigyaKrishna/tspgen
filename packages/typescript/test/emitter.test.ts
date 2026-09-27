@@ -36,7 +36,7 @@ const apiSpec = `
 
 describe("@abhigyakrishna/tspgen-typescript", () => {
   it("emits template models once as generic interfaces with schema functions", async () => {
-    const { outputs } = await emitter({ zod: true }).compile(`
+    const { outputs } = await emitter({ features: { zod: true } }).compile(`
       @service namespace Shop;
       model Page<T> { items: T[]; total: int64 }
       model Pet { id: int64 }
@@ -137,7 +137,7 @@ export * from "./Toy";
   });
 
   it("emits zod schemas when enabled", async () => {
-    const { outputs } = await emitter({ zod: true, "import-extension": ".js" }).compile(spec);
+    const { outputs } = await emitter({ features: { zod: true }, "import-extension": ".js" }).compile(spec);
     expect(outputs["models/Pet.ts"]).toContain(`${HEADER}
 import { z } from "zod";
 import { OwnerSchema } from "./Owner.js";
@@ -224,7 +224,7 @@ export * from "./results";
   });
 
   it("adds constraint decorators and notBlank to zod schemas", async () => {
-    const { outputs } = await emitter({ zod: true, layout: "single-file" }).compile(`
+    const { outputs } = await emitter({ features: { zod: true }, layout: "single-file" }).compile(`
       using TspGen;
       @service namespace S;
       @maxLength(8) scalar Code extends string;
@@ -255,7 +255,7 @@ export * from "./results";
   });
 
   it("skips a @pattern JavaScript cannot parse and warns", async () => {
-    const [{ outputs }, diagnostics] = await emitter({ zod: true, layout: "single-file" }).compileAndDiagnose(`
+    const [{ outputs }, diagnostics] = await emitter({ features: { zod: true }, layout: "single-file" }).compileAndDiagnose(`
       @service namespace S;
       model Req { @pattern("(?i)abc") a: string; @pattern("^\\\\p{L}+$") b: string }
       @route("/r") op create(@body req: Req, @query @pattern("(?i)x") q: string): void;

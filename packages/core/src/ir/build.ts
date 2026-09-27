@@ -1,4 +1,4 @@
-import type { Program } from "@typespec/compiler";
+import type { Model, Program } from "@typespec/compiler";
 import { buildServices } from "./services.js";
 import type { SseLibraries } from "./sse.js";
 import { TypeCollector } from "./type-collector.js";
@@ -6,8 +6,11 @@ import type { ApiIR } from "./types.js";
 import { resolveServices, type ResolvedService, type VersioningApi } from "./versioning.js";
 
 export interface BuildOptions {
-  /** Collect expressible template models once as generic models (default true). */
-  generics?: boolean;
+  /**
+   * Collect expressible template models once as generic models (default true); a function decides per template
+   * declaration (false: one model per instance).
+   */
+  generics?: boolean | ((declaration: Model) => boolean);
   /**
    * `@typespec/versioning` (see `loadVersioning`). Without it, versioned services are built unmutated
    * (every type, property and operation of every version).

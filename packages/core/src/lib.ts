@@ -94,6 +94,30 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Metadata key '${"key"}' on '${"where"}' must be ${"expected"}; it is ignored.`,
       },
     },
+    "unknown-feature": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Unknown feature '${"key"}' for ${"emitter"}; known: ${"known"}.`,
+      },
+    },
+    "duplicate-feature": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Feature '${"key"}' is declared by both ${"first"} and ${"second"}.`,
+      },
+    },
+    "unsupported-feature": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`\`features.${"key"}\` has no effect with ${"reason"}.`,
+      },
+    },
+    "option-moved": {
+      severity: "error",
+      messages: {
+        default: paramMessage`\`${"key"}\` moved to \`${"to"}\` in 0.2.0.`,
+      },
+    },
     "unsupported-auth-combination": {
       severity: "error",
       messages: {

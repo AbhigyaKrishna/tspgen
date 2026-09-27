@@ -20,7 +20,7 @@ const dir = mkdtempSync(join(resolve(import.meta.dirname, ".."), ".tmp-run-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 async function load() {
-  const { outputs } = await nextjs({ "client-style": "flat", validate: true }, { zod: true, layout: "single-file" }).compile(spec);
+  const { outputs } = await nextjs({ "client-style": "flat", features: { validate: true } }, { features: { zod: true }, layout: "single-file" }).compile(spec);
   for (const [path, content] of Object.entries(outputs)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), content);

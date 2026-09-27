@@ -5,5 +5,5 @@
 /**
  * Version of the <%= c.serviceId %> API this code was generated for.
  */
-const val <%= c.name %>: String = <%~ it.h.str(c.value) %>
+<%= it.h.visibility(it) %>const val <%= c.name %>: String = <%~ it.h.str(c.value) %>
 <% }) -%>

@@ -31,7 +31,7 @@ export const uploadSpec = `
 
 describe("uploads (grouped client)", () => {
   it("describes multipart parts and file bodies in the request spec", async () => {
-    const { outputs } = await nextjs({}, { zod: true }).compile(uploadSpec);
+    const { outputs } = await nextjs({}, { features: { zod: true } }).compile(uploadSpec);
     const group = outputs["client/uploads.ts"];
     expect(group).toContain(`        body: params.body,
         multipart: [{ name: "name", kind: "text", multi: false }, { name: "count", kind: "text", multi: false }, { name: "meta", kind: "json", multi: false }, { name: "avatar", kind: "file", multi: false }, { name: "photos", kind: "file", multi: true, contentType: "image/png" }, { name: "label", key: "display_name", kind: "text", multi: false }],
@@ -54,7 +54,7 @@ describe("uploads (grouped client)", () => {
   model Receipt`,
     );
     const expected = `[{ name: "vendor", kind: "json", multi: false, contentType: "application/vnd.meta+json" }, { name: "plain", kind: "json", multi: false }]`;
-    const grouped = await nextjs({ "react-query": false, "server-actions": false }, { zod: true }).compile(spec);
+    const grouped = await nextjs({ features: { "react-query": false, "server-actions": false } }, { features: { zod: true } }).compile(spec);
     expect(grouped.outputs["client/media.ts"]).toContain(`multipart: ${expected},`);
     expect(grouped.outputs["client/core.ts"]).toContain(`new Blob([JSON.stringify(item)], { type: part.contentType ?? "application/json" })`);
     const flat = await nextjs({ "client-style": "flat" }, { layout: "single-file" }).compile(spec);
@@ -63,7 +63,7 @@ describe("uploads (grouped client)", () => {
   });
 
   it("does not warn about upload bodies and still skips them in hooks and actions", async () => {
-    const [result, diagnostics] = await nextjs({}, { zod: true }).compileAndDiagnose(uploadSpec);
+    const [result, diagnostics] = await nextjs({}, { features: { zod: true } }).compileAndDiagnose(uploadSpec);
     expectDiagnostics(diagnostics, []);
     expect(result.outputs["client/react-query/hooks.ts"]).not.toContain("upload");
     expect(result.outputs["client/actions/uploads.ts"]).toBeUndefined();
@@ -75,7 +75,7 @@ describe("uploads (grouped client)", () => {
         @put importDoc(@bodyRoot file: File<"application/json">): void;
         @post create(@body doc: { title: string }): void;
       }`;
-    const [result, diagnostics] = await nextjs({}, { zod: true }).compileAndDiagnose(spec);
+    const [result, diagnostics] = await nextjs({}, { features: { zod: true } }).compileAndDiagnose(spec);
     expectDiagnostics(diagnostics, []);
     expect(result.outputs["client/docs.ts"]).toContain("file: true,");
     expect(result.outputs["client/react-query/hooks.ts"]).toContain("create");
@@ -87,14 +87,14 @@ describe("uploads (grouped client)", () => {
   it("keeps file fields DOM Blobs next to a generated type named Blob", async () => {
     const spec = `${uploadSpec}\nmodel Blob { id: string }\n@get @route("/blob") op blob(): Blob;`;
     for (const layout of ["single-file", "per-type"]) {
-      const { outputs } = await nextjs({ "server-actions": false }, { zod: true, layout }).compile(spec);
+      const { outputs } = await nextjs({ features: { "server-actions": false } }, { features: { zod: true }, layout }).compile(spec);
       expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
     }
   });
 
   it("type-checks under shipyard's compiler flags", async () => {
     // Without the Server Actions (they read process.env, which needs @types/node).
-    const { outputs } = await nextjs({ "server-actions": false }, { zod: true }).compile(uploadSpec);
+    const { outputs } = await nextjs({ features: { "server-actions": false } }, { features: { zod: true } }).compile(uploadSpec);
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 });
@@ -116,15 +116,15 @@ describe("uploads (flat client)", () => {
   });
 
   it("type-checks under shipyard's compiler flags, with and without validate", async () => {
-    for (const options of [flat, { ...flat, validate: true }]) {
-      const { outputs } = await nextjs(options, { layout: "single-file", zod: true }).compile(uploadSpec);
+    for (const options of [{ ...flat, features: { validate: false } }, { ...flat, features: { validate: true } }]) {
+      const { outputs } = await nextjs(options, { layout: "single-file", features: { zod: true } }).compile(uploadSpec);
       expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
     }
   });
 
   it.each(["Blob", "FormData"])("works with a generated type named %s (globals are read through globalThis)", async (name) => {
     const spec = `${uploadSpec}\nmodel ${name} { x: string }\n@route("/named") @get op readNamed(): ${name};`;
-    const { outputs } = await nextjs(flat, { layout: "single-file", zod: true }).compile(spec);
+    const { outputs } = await nextjs(flat, { layout: "single-file", features: { zod: true } }).compile(spec);
     expect(outputs["client.ts"]).toContain(`import type { ${name}, `);
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });

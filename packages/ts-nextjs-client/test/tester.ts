@@ -47,3 +47,14 @@ export const SseTester = createTester(resolvePath(import.meta.dirname, ".."), {
 export function sseNextjs(targetOptions: Record<string, unknown> = {}, emitterOptions: Record<string, unknown> = {}) {
   return SseTester.emit("@abhigyakrishna/tspgen-typescript", { targets: [{ [TARGET]: targetOptions }], ...emitterOptions });
 }
+
+/** Tester with the optional `@typespec/versioning` library. */
+export const VersionedTester = createTester(resolvePath(import.meta.dirname, ".."), {
+  libraries: ["@typespec/http", "@typespec/versioning", "@abhigyakrishna/tspgen-core", "@abhigyakrishna/tspgen-typescript"],
+})
+  .importLibraries()
+  .using("Http", "Versioning");
+
+export function versionedNextjs(targetOptions: Record<string, unknown> = {}, emitterOptions: Record<string, unknown> = {}) {
+  return VersionedTester.emit("@abhigyakrishna/tspgen-typescript", { targets: [{ [TARGET]: targetOptions }], ...emitterOptions });
+}

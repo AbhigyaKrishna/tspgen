@@ -38,7 +38,7 @@ const sent = (fetch: ReturnType<typeof vi.fn>, i = 0) => {
 };
 
 async function grouped() {
-  const { outputs } = await nextjs({ "react-query": false, "server-actions": false }).compile(spec);
+  const { outputs } = await nextjs({ features: { "react-query": false, "server-actions": false } }).compile(spec);
   const mod = await import(pathToFileURL(join(write("grouped", outputs), "client/index.ts")).href);
   return (fetch: typeof globalThis.fetch, auth?: object, headers?: Record<string, string>) =>
     mod.createShopClient({ baseUrl: "http://x", fetch, auth, headers }).items;

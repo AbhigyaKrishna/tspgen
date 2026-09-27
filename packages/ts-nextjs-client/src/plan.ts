@@ -1,4 +1,4 @@
-import type { FileSpec, TargetContext } from "@abhigyakrishna/tspgen-core";
+import { reportUnsupportedFeature, type FileSpec, type TargetContext } from "@abhigyakrishna/tspgen-core";
 import { reportDiagnostic } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
 import {
@@ -81,7 +81,7 @@ function groupImports(ir: TsIR, g: TsGroup): TsImport[] {
 export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
   const ir: PlanIR = { ...tsIR, modelsPrefix: modelsPrefix(ctx.outputDir, ctx.modelsOutputDir) };
   if (options["client-style"] === "flat") return planFlatFiles(ir, options, ctx);
-  if (options.validate === true) reportDiagnostic(ctx.program, { code: "validate-flat-only", target: NoTarget });
+  reportUnsupportedFeature(ctx.program, ctx.features, "validate", 'client-style "grouped"');
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const groups = services.flatMap((s) => s.groups);
@@ -97,7 +97,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
       }
     }
   }
-  const actions = options["server-actions"] ?? true;
+  const actions = options.features["server-actions"];
   // Server Actions validate their input without undefined-valued keys.
   const withoutUndefined = ir.zod && actions && groups.some((g) => actionOps(g).some(h.hasParams));
   // PartSpec, toFormData and the multipart/file request branches only when an operation uploads.
@@ -137,7 +137,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
       },
     ),
   );
-  if (options["react-query"] ?? true) files.push(...reactQueryFiles(ir, services, extras));
+  if (options.features["react-query"]) files.push(...reactQueryFiles(ir, services, extras));
   if (actions) files.push(...actionFiles(ir, services, options, auth));
   return files;
 }

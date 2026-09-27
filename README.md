@@ -30,34 +30,20 @@ options:
     packages:                           # TypeSpec namespace → Kotlin package (longest prefix wins)
       - { namespace: "PetStore.Admin", package: "com.acme.admin" }
     errors: typed                       # typed | thrown (error responses documented only; you throw your own)
-    validation: false                   # true: @minLength/@maxLength/@pattern/@minItems/@maxItems/@minValue/@maxValue → init { require(...) }
-    date-time: java.time                # java.time (Instant, LocalDate… + generated serializers) | kotlin.time (kotlin.time / kotlinx.datetime)
-    union-variants: nested              # nested: single-use variants of a sealed union are declared inside it | top-level
-    generics: true                      # false: one model per template instance (PagePet) instead of Page<T>
-    models-output-dir: ./gen/contract   # optional: write models/ elsewhere (relative to the project root)
-    version: "2024-06-01"               # @versioned services: version to generate, by name or value (default: the latest; see Versioning)
+    features:                           # on/off gates; every key with its default: Options reference
+      validation: true                  # constraint decorators → init { require(...) } (default true)
     targets:
       - "@abhigyakrishna/tspgen-kotlin-ktor-server":
           output-dir: ./gen/server      # optional, any target: write its files elsewhere
           routing-style: dsl            # dsl | resources | <plugin-registered>
-          grouping: per-interface       # per-interface | per-namespace | single-file
-          handler-shape: params         # params | request-object
-          call-access: false            # pass ApplicationCall to handlers
-          service-suffix: Service       # interface name suffix, e.g. Api → PetsApi
-          module: true                  # false: no <Service>Module.kt (you install ContentNegotiation/StatusPages, and Resources if routing-style: resources)
-          nest-routes: false            # true: route("/common/prefix") { get { } get("/{id}") { } } (dsl style)
-          multipart: buffered           # buffered | streaming | raw — how multipart/file bodies reach the service (see Uploads)
-          max-upload-size: 52428800     # bytes per multipart part, per buffered request / file body; larger → 413 (see Uploads)
-          generate-auth: true           # wrap routes in authenticate(...) per @useAuth (see Authentication)
-          auth-providers:               # auth scheme id → Kotlin expression naming the Ktor provider (default: the id as a string)
+          auth-providers:               # auth scheme id → Kotlin expression naming the Ktor provider
             BearerAuth: JWT_AUTH
-          sse: text-writer              # text-writer | plugin (ktor-server-sse) — how event streams are written (see Server-sent events)
+          features:
+            module: true                # false: no <Service>Module.kt
       - "@abhigyakrishna/tspgen-kotlin-ktor-client": {}
-    naming:
-      enum-members: UPPER_SNAKE         # UPPER_SNAKE | PascalCase
-    template-dir: ./tspgen-templates   # optional template overrides
-    plugins: [./tspgen/audit.js]       # optional plugins, applied in order
 ```
+
+All options, with kinds and defaults, are listed in [Options reference](#options-reference).
 
 `packages` is a list, not a map (TypeSpec rejects dots in `tspconfig` option keys): the longest matching
 namespace prefix wins, `@Kotlin.packageName` on a type wins over `packages`, and anonymous inline types
@@ -92,7 +78,7 @@ elsewhere (other TypeScript targets: see `TargetContext.modelsOutputDir`).
 template that needs per-instance models — a base model or `@discriminator`, HTTP metadata, `...T` spreads,
 `@friendlyName`, or a type parameter inside an inline model or union (`meta: { first: T }`, `T | string`) —
 still gets one model per instance (`PagePet`), as does a template used directly as a variant of a
-discriminated union, and everything with `generics: false`.
+discriminated union, and everything with `features.generics: false` (per template: `@meta("kotlin", #{ features: #{ generics: false } })`).
 
 **Date and time.** With `date-time: java.time` (the default) `utcDateTime`, `offsetDateTime`, `plainDate`,
 `plainTime` and `duration` map to `java.time.Instant`, `OffsetDateTime`, `LocalDate`, `LocalTime` and
@@ -101,7 +87,7 @@ holds ISO-8601 serializers for the ones in use (a java.time class is written qua
 `java.time.Duration`, when a generated type has the same name) and each model file using them declares
 `@file:UseSerializers(...)`; Ktor parameters and headers of these types use `X.parse` / `toString()`. The
 same file declares `javaTimeSerializersModule`, which the generated server module and client defaults put in
-their `Json` so bodies that are java.time values themselves (`List<Instant>`) work; with `module: false`, use
+their `Json` so bodies that are java.time values themselves (`List<Instant>`) work; with `features.module: false`, use
 `json(Json { serializersModule = javaTimeSerializersModule })` in your own `ContentNegotiation`.
 
 **Sealed unions.** A `@discriminated(#{ envelope: "none" })` union of models becomes a sealed interface. A
@@ -129,6 +115,99 @@ val pet = api.pets.get(petId = 1)                             // typed errors ar
 Authentication is configured on your `HttpClient` (Ktor `Auth` plugin or `defaultRequest`); the generated
 client does not read `@useAuth`.
 
+## Options reference
+
+Every on/off gate lives under `features:` (per language emitter and per target); every value choice is a flat
+kebab-case key. Features marked with an `@meta` override can also be set per declaration, at one of three
+levels — `declaration`: namespaces, interfaces, operations, models, enums and unions; `operation`: namespaces,
+interfaces and operations; `model`: namespaces and models only (a namespace's value carries down to the models
+it encloses; an enum, union, interface or operation may not override a `model`-level feature) — with
+`@meta("<language>", #{ features: #{ <key>: false } })` (see Language-specific metadata). Plugins can declare
+their own features (`TspGenPlugin.features`), set in the language emitter's `features:` block. These tables are
+generated by `pnpm docs:options`.
+
+<!-- options:start -->
+
+### `@abhigyakrishna/tspgen-kotlin`
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `template-dir` | string | — | — | Directory with template overrides; takes precedence over plugin, target and language templates. |
+| `plugins` | string[] | — | — | Plugin modules (relative paths or package names) applied in order. |
+| `models-output-dir` | string | — | — | Output directory of the built-in models (default: emitter-output-dir). Relative to the project root; {project-root} and {emitter-output-dir} are interpolated. Targets take `output-dir` in their options. |
+| `version` | string | — | — | Version of @versioned services to generate: a version enum member's name or value (default: the latest). |
+| `header-text` | string | `Code generated by @abhigyakrishna/tspgen-kotlin. DO NOT EDIT.` | — | Banner at the top of every generated file, without comment syntax (each line becomes a line comment; multi-line allowed). Needs features.header. |
+| `package` | string | `generated` | — | Base Kotlin package (default "generated"). |
+| `naming` | object | — | — | Naming conventions for generated Kotlin identifiers. |
+| `packages` | list | — | — | TypeSpec namespace → Kotlin package, e.g. [{ namespace: "Shop.Graph", package: "com.acme.graph" }]; longest prefix wins. |
+| `errors` | `typed` \| `thrown` | `typed` | — | typed (default): …Exception per error body; thrown: error responses are documentation only. |
+| `date-time` | `java.time` \| `kotlin.time` | `java.time` | — | java.time (default): Instant, OffsetDateTime, LocalDate, LocalTime, Duration from java.time with generated ISO-8601 serializers; kotlin.time: kotlin.time.Instant/Duration and kotlinx.datetime dates. |
+| `union-variants` | `nested` \| `top-level` | `nested` | — | nested (default): variant models only a sealed union references are declared inside it, named after the variant key (NodeSource.Catalog); top-level: every variant is its own file. |
+| `visibility` | `public` \| `internal` | `public` | — | Modifier on every generated top-level declaration, targets' included; public renders none. internal requires all generated code (models and every target's output) to compile in ONE Gradle module: it breaks layouts where models-output-dir / a target's output-dir point at different modules. |
+| `file-annotations` | string[] | `[]` | — | Extra @file: annotations, e.g. Suppress("unused") or @file:Suppress("unused") (a leading "@file:" is stripped). Applies to every generated Kotlin file, targets included, after UseSerializers; must not repeat it. |
+| `features.header` | feature | `true` | — | Banner comment at the top of every generated file (text: header-text). |
+| `features.docs` | feature | `true` | declaration | KDoc/JSDoc from @doc and doc comments. |
+| `features.api-version` | feature | `true` | — | Version constant (API_VERSION) for @versioned services; unversioned services never get one. |
+| `features.generics` | feature | `true` | model | Template models once as generic types (Page<T>); false: one model per instance (PagePet). |
+| `features.validation` | feature | `true` | — | Constraint decorators (@minLength, @maxLength, @pattern, @minItems, @maxItems, @minValue, @maxValue) as init { require(...) } checks. |
+
+### `@abhigyakrishna/tspgen-kotlin-ktor-server` (target)
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `routing-style` | string | `dsl` | — | dsl \| resources \| a style registered by a plugin |
+| `grouping` | `per-interface` \| `per-namespace` \| `single-file` | `per-interface` | — | How operations are grouped into service interfaces and route files: per-interface (default, one per TypeSpec interface), per-namespace (one per enclosing namespace) or single-file (every operation in one). |
+| `handler-shape` | `params` \| `request-object` | `params` | — | Shape of generated service methods' parameters: params (default, one Kotlin parameter per path/query/header/body field) or request-object (the operation's fields bundled into one generated <Op>Request data class parameter). |
+| `service-suffix` | string | `Service` | — | Service interface suffix (e.g. "Api"). |
+| `multipart` | `buffered` \| `streaming` \| `raw` | `buffered` | — | How multipart and file bodies reach the service: buffered (HttpFile / request class), streaming (Flow of parts / ByteReadChannel) or raw (MultiPartData / ByteReadChannel); per operation via @meta("kotlin:ktor-server", #{ multipart }). |
+| `max-upload-size` | integer | `52428800` | — | Largest multipart part and buffered file body, in bytes (default 50 MiB, Ktor's formFieldLimit); larger ones answer 413. Per operation via @meta("kotlin:ktor-server", #{ maxUploadSize }). |
+| `auth-providers` | object | `{}` | — | Auth scheme id → Kotlin expression naming its Ktor authentication provider (e.g. { BearerAuth: "JWT_AUTH" }); unmapped ids are used as string literals. |
+| `sse` | `text-writer` \| `plugin` | `text-writer` | — | How server-sent event streams are written: text-writer (respondBytesWriter, no extra dependency) or plugin (the ktor-server-sse plugin, installed by the module); per operation via @meta("kotlin:ktor-server", #{ sse }). |
+| `package` | string | — | — | Server package (default "<package>.server"). |
+| `features.module` | feature | `true` | — | <Service>Module.kt: content negotiation, StatusPages and routing. |
+| `features.auth` | feature | `true` | — | Wrap routes in authenticate(...) per the operations' @useAuth (off: only the authenticate/wrap meta keys). |
+| `features.call-access` | feature | `false` | — | Pass the ApplicationCall to handlers. |
+| `features.nest-routes` | feature | `false` | — | Nest each route function under its operations' common path prefix (dsl style). |
+
+### `@abhigyakrishna/tspgen-kotlin-ktor-client` (target)
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `package` | string | — | — | Client package (default "<package>.client"). |
+
+### `@abhigyakrishna/tspgen-typescript`
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `template-dir` | string | — | — | Directory with template overrides; takes precedence over plugin, target and language templates. |
+| `plugins` | string[] | — | — | Plugin modules (relative paths or package names) applied in order. |
+| `models-output-dir` | string | — | — | Output directory of the built-in models (default: emitter-output-dir). Relative to the project root; {project-root} and {emitter-output-dir} are interpolated. Targets take `output-dir` in their options. |
+| `version` | string | — | — | Version of @versioned services to generate: a version enum member's name or value (default: the latest). |
+| `header-text` | string | `Code generated by @abhigyakrishna/tspgen-typescript. DO NOT EDIT.` | — | Banner at the top of every generated file, without comment syntax (each line becomes a line comment; multi-line allowed). Needs features.header. |
+| `import-extension` | `none` \| `.js` | `none` | — | Suffix for relative imports: "none" for bundlers/Next.js (default), ".js" for Node ESM. |
+| `layout` | `per-type` \| `single-file` | `per-type` | — | per-type (default): models/<Name>.ts + barrel; single-file: every model in types.ts. |
+| `errors` | `typed` \| `thrown` | `typed` | — | typed (default): <Body>Error classes; thrown: error responses are documentation only. |
+| `features.header` | feature | `true` | — | Banner comment at the top of every generated file (text: header-text). |
+| `features.docs` | feature | `true` | declaration | KDoc/JSDoc from @doc and doc comments. |
+| `features.api-version` | feature | `true` | — | Version constant (API_VERSION) for @versioned services; unversioned services never get one. |
+| `features.generics` | feature | `true` | model | Template models once as generic types (Page<T>); false: one model per instance (PagePet). |
+| `features.zod` | feature | `false` | — | zod schemas (<Name>Schema) next to the types, constraint decorators as refinements; needs zod >= 4.3. |
+| `features.barrel` | feature | `true` | — | models/index.ts re-exporting every model (per-type layout). |
+
+### `@abhigyakrishna/tspgen-ts-nextjs-client` (target)
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `base-url-env` | string | `API_BASE_URL` | — | Environment variable holding the API base URL for Server Actions. |
+| `client-style` | `grouped` \| `flat` | `grouped` | — | grouped: client/ with per-group classes, hooks, actions; flat: client.ts with one class. |
+| `error-class` | string | `ApiError` | — | Error class of the flat client. |
+| `error-model` | string | — | — | Model (TypeScript name or TypeSpec id) whose fields the flat client's error class exposes. |
+| `features.server-actions` | feature | `true` | — | Server Actions for non-GET operations (grouped style only). |
+| `features.react-query` | feature | `true` | — | TanStack Query keys, queryOptions and hooks (flat style: queries.ts + hooks.ts); needs @tanstack/react-query. |
+| `features.validate` | feature | `true` | — | Flat style: check request bodies, query objects and constrained path parameters with zod before fetch; needs features.zod on the TypeScript emitter. |
+
+<!-- options:end -->
+
 ## TypeScript / Next.js
 
 ```yaml
@@ -136,20 +215,21 @@ emit:
   - "@abhigyakrishna/tspgen-typescript"
 options:
   "@abhigyakrishna/tspgen-typescript":
-    zod: true                         # emit PetSchema: z.ZodType<Pet> next to each type, with constraint decorators as refinements (default false; requires zod ≥ 4.3)
     import-extension: none            # none (Next.js/bundlers) | .js (Node ESM)
     layout: per-type                  # per-type (models/<Name>.ts + barrel) | single-file (types.ts, namespace banners)
     errors: typed                     # typed | thrown (no <Body>Error classes; success unions unchanged; api/errors.ts keeps HttpError)
-    version: v2                       # @versioned services: version to generate, by name or value (default: the latest; see Versioning)
+    features:
+      zod: true                       # PetSchema: z.ZodType<Pet> next to each type, constraint decorators as refinements (default false; zod ≥ 4.3)
     targets:
       - "@abhigyakrishna/tspgen-ts-nextjs-client":
           client-style: grouped       # grouped (client/…, hooks, actions) | flat (client.ts: one <Service>Client class)
-          react-query: true           # no schema default — grouped: unset behaves as true; flat: unset behaves as false (true adds queries.ts + hooks.ts)
-          server-actions: true        # grouped only; no schema default — unset behaves as true (flat: error if set true)
           base-url-env: API_BASE_URL  # env var read by the actions' server-side client
           error-class: ApiError       # flat: error class name
           error-model: ErrorResponse  # flat: model whose fields the error class exposes (optional)
-          validate: false             # flat only: check body/query/constrained path params with the zod schemas before fetch (needs zod: true); rejects with ZodError. Grouped style warns (validate-flat-only)
+          features:
+            react-query: true         # TanStack Query keys, queryOptions and hooks (both styles, default true)
+            server-actions: true      # grouped only (flat: ignored; unsupported-feature when set true)
+            validate: true            # flat only: zod checks of body/query/constrained path params before fetch (needs features.zod)
 ```
 
 Output: `models/` (one file per type + `index.ts`), `api/` (`HttpError` + typed `<Body>Error` classes,
@@ -190,7 +270,7 @@ checked first (`{ ok: false, status: 400, error: { issues } }`; not affected by 
 `<Group>Client` calls don't check their params. Property names match the JSON wire names; dates are ISO
 strings.
 
-**Constraints in zod.** With `zod: true`, TypeSpec constraint decorators on model properties and operation
+**Constraints in zod.** With `features.zod`, TypeSpec constraint decorators on model properties and operation
 parameters become refinements on the generated schemas: `@minLength`/`@maxLength` → `.min(n)`/`.max(n)` on
 strings, `@pattern` → `.regex(new RegExp("…", "u"))`, `@minItems`/`@maxItems` → `.min`/`.max` on arrays,
 `@minValue`/`@maxValue` → `.gte`/`.lte` on numbers, and `notBlank: true` in meta scope `*` or `typescript` →
@@ -198,7 +278,7 @@ strings, `@pattern` → `.regex(new RegExp("…", "u"))`, `@minItems`/`@maxItems
 property with a `@TS.type` override gets none. Optional properties use zod's `.exactOptional()` instead of
 `.optional()`, so schemas type-check under `exactOptionalPropertyTypes`; when parsing responses or models,
 an optional key present with value `undefined` (e.g. `{ note: undefined }`) fails — omit the key instead.
-Request checks (Server Action input, flat `validate` bodies) drop `undefined`-valued keys first, as JSON
+Request checks (Server Action input, flat `features.validate` bodies) drop `undefined`-valued keys first, as JSON
 does when sending. Not applied: numeric bounds (`@minValue`/`@maxValue`) on `decimal`/`decimal128` (zod
 strings, so string constraints such as `@pattern` do apply), `@minValueExclusive`/`@maxValueExclusive`, and
 scalar-level constraints on array items (`Slug[]`); `notBlank` applies to model properties only. `@pattern`
@@ -211,9 +291,9 @@ wrapper instead of the grouped client/hooks/actions tree:
 ```
 types.ts / models/…   models (per layout)
 client.ts             ClientOptions, <error-class>, <Service>Client (one method per operation)
-index.ts              export * from ./types (or ./models/index), ./client (and ./queries with react-query)
-queries.ts            react-query: true only — <Op>Vars, <service>Keys, <service>Queries (server-safe)
-hooks.ts              react-query: true only — "use client": <Service>ClientProvider, use<Service>Client,
+index.ts              export * from ./types (or ./models/index), ./client (and ./queries unless features.react-query is false)
+queries.ts            features.react-query only — <Op>Vars, <service>Keys, <service>Queries (server-safe)
+hooks.ts              features.react-query only — "use client": <Service>ClientProvider, use<Service>Client,
                       use<Op>Query / use<Op>Mutation (not re-exported from index.ts; import from ./hooks)
 ```
 
@@ -235,7 +315,7 @@ has all of that model's required fields, else `undefined`; without `error-model`
 the model's other identifier-named fields (nullable types kept as-is), and
 `isUnauthorized`/`isForbidden`/`isNotFound`/`isConflict`.
 
-The flat client does not validate responses. With `validate: true` (requires `zod: true` on the
+The flat client does not validate responses. With `features.validate` (on by default; effective only with `features.zod` on the
 `@abhigyakrishna/tspgen-typescript` options), each method checks its body (skipped when an optional body is
 `undefined`; `undefined`-valued keys are ignored), its query object, and any path parameters that carry
 constraints against the generated zod schemas before calling `fetch`; on failure the returned promise
@@ -243,11 +323,11 @@ rejects with zod's `ZodError` — not `<error-class>` — and the original value
 parsed copy. A path parameter or body named `z` is renamed inside the method so it does not shadow the zod
 import (parameters are positional, so callers are unaffected), and a generated type named `z` is reported as
 a name clash. The grouped client style validates responses and Server Action input (not direct
-`<Group>Client` calls) on its own; setting `validate` there has no effect and warns (`validate-flat-only`).
+`<Group>Client` calls) on its own; setting `features.validate: true` there has no effect and warns (`unsupported-feature`).
 The flat client also ignores `errors: typed` for its own error handling: `<error-class>` is always the flat client's single thrown error type, so the
 `api/` `<Body>Error` classes are still generated but go unused; set `errors: thrown` to skip generating them.
 
-**Flat client + TanStack Query** (`react-query: true`; off by default for the flat style):
+**Flat client + TanStack Query** (`features.react-query`, on by default):
 
 ```ts
 // queries.ts (server-safe, re-exported from index.ts) — prefetch on the server
@@ -274,7 +354,7 @@ update.mutate({ id, body: { name: "db" }, query: { dryRun: true } });
 ```
 
 `<Op>Vars` (for operations with inputs) holds the path parameters under the generated parameter names
-(camelCased, e.g. `@path node_id` → `nodeId`; a parameter renamed inside the method — `z` with `validate`, a
+(camelCased, e.g. `@path node_id` → `nodeId`; a parameter renamed inside the method — `z` with `features.validate`, a
 reserved word such as `class` — keeps that name here), `body` (optional when the body is; documented with the
 body parameter's doc comment), and `query` (the method's query object; optional unless a query parameter is
 required); operations without inputs get no Vars type and their hooks take none (`useRefreshMutation()`,
@@ -290,15 +370,15 @@ whose `mutate` takes the Vars object (mutations are not cancellable). `use<Servi
 `<Service>ClientProvider`. Hooks and query options call the provided client's methods, so `@useAuth` credentials
 (the client's `auth` option) and the query's `signal` both reach `fetch`. An operation with a path parameter named `body` (and a body) or `query` (and query
 parameters), which would collide with those Vars keys, gets no hooks, keys or Vars — only its client method —
-with a `flat-react-query-skipped` warning. With react-query the flat style also reports a hook, Vars type or query key generated twice — the same operation name in two services, a query operation
+with a `flat-react-query-skipped` warning. With `features.react-query` the flat style also reports a hook, Vars type or query key generated twice — the same operation name in two services, a query operation
 named `all`, a group named `All` (`flat-react-query-name-clash`); and generated types named like the new
 exports or like the TanStack Query / React names the two files use (`queryOptions`, `useQuery`,
 `useMutation`, `UseQueryOptions`, `UseMutationOptions`, `createContext`, `createElement`, `useContext`,
 `ReactNode`, `Omit`, `ReturnType`, `<Service>ClientContext`) (`flat-client-name-clash`).
 
-React Query hooks and Server Actions have no schema default: unset, the grouped client treats them as on and
-the flat client treats React Query as off; under `client-style: flat` setting `server-actions: true` is an
-error (`unsupported-in-flat-style`). The flat style also
+React Query hooks and Server Actions are on by default (`features.react-query`, `features.server-actions`);
+Server Actions exist only in the grouped style: under `client-style: flat`, `features.server-actions: true` is
+ignored with an `unsupported-feature` warning. The flat style also
 rejects, per operation, several success responses or response headers, header/cookie parameters, non-JSON
 bodies other than multipart and file uploads, non-JSON responses, optional path parameters, and operation
 names that clash with client members (`flat-client-unsupported`); rejects duplicate operation names
@@ -308,7 +388,7 @@ and rejects a generated type named like the error class, `ClientOptions`, `<Serv
 internally — a global such as `Response`, `Promise`, `RequestInit` or `AbortSignal`, with uploads `BodyInit`,
 `RawBody`, `PartSpec` or `toFormData`, with `@useAuth` `AuthScheme`, `AuthEntries`, `resolveAuth` or `base64`, with
 server-sent event streams `EventSpec`, `RawEvent`, `readEvents`, `decodeEvents`, `decodeData`, `MAX_SSE_SIZE`,
-`AsyncGenerator`, `AsyncIterable`, `ReadableStream`, `TextDecoder` or `Uint8Array`, with `validate` zod's `z` (same
+`AsyncGenerator`, `AsyncIterable`, `ReadableStream`, `TextDecoder` or `Uint8Array`, with `features.validate` zod's `z` (same
 code, its own message) — rename it with `@TS.name`. With `@useAuth`, an operation named `auth` clashes with a client
 member. `Headers`, `Blob`, `File` and `FormData` are read through `globalThis`, so models may use those names.
 Server-sent event streams are the one non-JSON response the flat style accepts (see Server-sent events).
@@ -432,11 +512,11 @@ providers of those names. Routes with the same wrapper share one block.
 Nested `authenticate` blocks are not used for `A & B`: Ktor collects the providers of nested blocks into one
 set, each with its block's strategy, so two default (first-successful) blocks accept either credential. For the
 same reason, don't combine `@useAuth` with a `wrap` that calls `authenticate(...)` (the house-style pattern):
-the route would accept either provider — use the `authenticate` meta key or `generate-auth: false` instead. The `authenticate` meta key on an operation
+the route would accept either provider — use the `authenticate` meta key or `features.auth: false` instead. The `authenticate` meta key on an operation
 or group replaces the generated wrapper (and silences `unsupported-auth-combination` and
 `auth-combination-approximated`); `wrap` wrappers go inside it. An `authenticate` key inherited from a namespace or
 group replaces the wrapper of an operation with its own `@useAuth` too, so it can loosen (or tighten) that
-operation's auth. `generate-auth: false` turns generation off. The Ktor client is unaffected (configure its `Auth` plugin or
+operation's auth. `features.auth: false` turns generation off. The Ktor client is unaffected (configure its `Auth` plugin or
 `defaultRequest`).
 
 **Next.js clients.** A service using schemes the client can send gets a `<Service>Auth` type of credential
@@ -607,14 +687,14 @@ that use it; used as a regular JSON type (a model property, a request or JSON re
     event;
   - `plugin`: responds through the `ktor-server-sse` plugin (`SSEServerContent`, `ServerSentEvent`s); add
     `io.ktor:ktor-server-sse` to your build. The generated module installs `SSE` when any operation uses it; with
-    `module: false`, `install(SSE)` yourself.
+    `features.module: false`, `install(SSE)` yourself.
 
   Both work with every routing style and handler shape (routes stay regular `get`/`post`/… routes, inside the
   `authenticate(...)` wrapper generated from `@useAuth` like any other route) and send
   `Cache-Control: no-store` and `X-Accel-Buffering: no`. JSON payloads are encoded with `sseJson` in
   `ServerSupport.kt`, the same Json the generated module's content negotiation installs (Ktor's `DefaultJson`, or
   the java.time-aware configuration), so an event carries exactly the JSON a REST response would; with
-  `module: false` and your own content negotiation, events still use that configuration. Text payloads are sent
+  `features.module: false` and your own content negotiation, events still use that configuration. Text payloads are sent
   as-is (strings) or as their wire string (numbers, java.time values, enums); CR and CRLF line breaks in data
   become separate `data:` lines, so clients receive them as LF. CR and LF are removed from `SseMessage` event
   names and ids (they would otherwise forge fields or events) and an id containing NUL is dropped. Streams answer
@@ -705,8 +785,12 @@ using TspGen;
 ```
 
 Resolution: `"*"` → language → `language:target`, key by key (later wins; arrays concatenate).
-Operations inherit metadata from enclosing namespaces (outermost first), then their interface. `wrap`, `routeSet`
-and `nest-routes` require `routing-style: dsl`; with any other style the target fails rather than dropping guards.
+For every `@meta` key, an operation or interface inherits from every namespace enclosing it (outermost first),
+then its own scope (interface, then operation) — the same in Kotlin and TypeScript. Models, enums and unions
+only inherit the `features` key from their enclosing namespaces; any other key set on a namespace has no effect
+on them. `wrap`, `routeSet` and `features.nest-routes` require `routing-style: dsl`; with any other style the
+target fails (a hard error, not a warning) rather than dropping guards. `features` objects merge key by key
+across scopes and levels.
 Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass through untouched):
 
 | Scope | Key | On | Effect |
@@ -715,13 +799,13 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `kotlin` | `imports: string[]` | types | extra imports |
 | `kotlin` | `implements: string[]` | models, sealed hierarchies | extra supertypes (FQN; qualified automatically on name clashes) |
 | `kotlin` | `checks: string[]` | models | statements appended to the data class `init { }` block (`init` is reserved in TypeSpec) |
-| `kotlin` / `typescript` (or `*`) | `notBlank: boolean` | string properties | `require(x.isNotBlank())`, emitted with or without `validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract; TypeScript: `.regex(/\S/)` on the zod schema |
+| `kotlin` / `typescript` (or `*`) | `notBlank: boolean` | string properties | `require(x.isNotBlank())`, emitted with or without `features.validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract; TypeScript: `.regex(/\S/)` on the zod schema |
 | `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`); replaces the wrapper generated from `@useAuth` |
 | `kotlin:ktor-server` / `kotlin:ktor-client` | `annotations: string[]` | operations, groups | annotations on service / client methods |
 | `kotlin:ktor-server` | `wrap: string[]` | namespaces, groups, operations | route-builder calls wrapped around routes, outermost first (dsl style); duplicates within one chain are dropped and shared prefixes share one block |
 | `kotlin:ktor-server` | `imports: string[]` | namespaces, groups, operations | imports added to the routes file (for names used in `wrap`/`context`; a `wrap` call to `authenticate(...)` needs `io.ktor.server.auth.authenticate` here — only the `authenticate` key adds it automatically) |
 | `kotlin:ktor-server` | `context: { name, type, expr, replaces? }[]` | namespaces, groups, operations | service parameters supplied by `expr` in the route handler (`call` in scope); `replaces` (string or list) hides those HTTP parameters from the service signature — never a path parameter — and the entry applies only where they all exist; names are backtick-escaped if they are Kotlin keywords, `call`/`service`/`resource` are reserved, and later entries with the same name win |
-| `kotlin:ktor-server` | `routeSet: string` | namespaces, groups, operations | move routes into `fun Route.<unit><RouteSet>Routes(service)` (dsl style); with `module: true` the generated module mounts every route function, including per-routeSet ones; a name that isn't a valid Kotlin identifier fails the target |
+| `kotlin:ktor-server` | `routeSet: string` | namespaces, groups, operations | move routes into `fun Route.<unit><RouteSet>Routes(service)` (dsl style); with `features.module: true` the generated module mounts every route function, including per-routeSet ones; a name that isn't a valid Kotlin identifier fails the target |
 | `kotlin:ktor-server` | `multipart: "buffered" \| "streaming" \| "raw"` | namespaces, groups, operations | how multipart and file bodies reach the service (see Uploads); overrides the `multipart` option |
 | `kotlin:ktor-server` | `maxUploadSize: integer` | namespaces, groups, operations | largest multipart part / buffered multipart request / buffered file body in bytes (larger → 413); overrides the `max-upload-size` option |
 | `kotlin:ktor-server` | `sse: "text-writer" \| "plugin"` | namespaces, groups, operations | how a server-sent event stream is written (see Server-sent events); overrides the `sse` option |
@@ -731,6 +815,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `typescript` | `values: string` | enums, string-literal unions | an identifier different from the type's own name → `export const <values> = [...] as const; export type X = (typeof <values>)[number]`; otherwise ignored with an `invalid-meta` warning |
 | `typescript:ts-nextjs-client` | `next: { revalidate?, tags? }` | operations, groups | default Next.js fetch options |
 | `typescript:ts-nextjs-client` | `staleTime: number` | GET operations, groups | default `staleTime` in `queryOptions` |
+| `kotlin` / `typescript` (or `*`) | `features: { <key>: boolean }` | namespaces, interfaces, operations, models, enums, unions | per-declaration value of a feature with an `@meta` override (`docs`, `generics`; see Options reference); other keys, wrong types or disallowed places warn `invalid-meta` |
 
 Templates read any metadata with `it.h.meta(item)` / `it.h.meta(item, "ktor-server")`; plugins use
 `resolveMeta(item.meta, language, target)` from `@abhigyakrishna/tspgen-core`.
@@ -756,7 +841,11 @@ language templates, so you can override one partial without forking:
 | `ts-nextjs/{queries,hooks}` | TanStack Query |
 | `ts-nextjs/{actions,action-result,server-client}` | Server Actions |
 
-Templates receive the file data as `it`, emitter options as `it.ctx.options`, and helpers as `it.h`
+Templates receive the file data as `it`, emitter options as `it.ctx.options`, resolved feature values as
+`it.features` (`{ [key]: boolean }` — the producing target's features layered over the language's, from
+`FileSpec.features`), the banner text as `it.ctx.headerText` (already resolved from `features.header` and
+`header-text`, `undefined` when the header is off — `common/header.eta` renders it with
+`<% if (it.ctx?.headerText) { %><%~ it.h.lineComment(it.ctx.headerText) %><% } %>`), and helpers as `it.h`
 (`it.h.kdoc`, `it.h.str`, `it.h.ktorServer.*`, `it.h.ktorClient.*`, plus plugin helpers).
 
 **Plugins.** A plugin is a module whose default export is a `TspGenPlugin`:
@@ -786,6 +875,10 @@ export default {
       imports: () => ["io.ktor.server.routing.Route"],
     });
   },
+  // 5. declare a feature of your own: set with features: { audited: true } in the language's features: block,
+  //    read in transformIR/files/templates as it.features.audited (a duplicate-feature error if the language or
+  //    another plugin already declares the key)
+  features: { audited: { default: false, description: "Add @Audited to every model." } },
 };
 ```
 
@@ -834,10 +927,62 @@ and vitest.
 
 - **New server/client library for an existing language:** publish a package whose default export is a
   `Target<KotlinIR>` (`name`, `kind`, `language: "kotlin"`, `templates`, `helpers`, `optionsSchema`,
-  `files(ir, ctx)`), then list it under `targets`. See `packages/kotlin-ktor-client` for a compact example.
+  `files(ir, ctx)`), then list it under `targets`. See `packages/kotlin-ktor-client` for a compact example. A
+  target can declare its own on/off gates with `features` (a `FeatureSet`, merged into `optionsSchema.properties.features`
+  and read from `ctx.features` in `files(ir, ctx)`) and rename option keys moved since an earlier release with
+  `movedOptions` (checked before the target's own options are validated):
+  ```ts
+  export default {
+    name: "my-server",
+    kind: "server",
+    language: "kotlin",
+    files(ir, ctx) { return ctx.features.values.retries ? [/* … */] : [/* … */]; },
+    features: defineFeatures({ retries: { default: false, description: "Retry failed requests." } }),
+    movedOptions: { "old-key": "new-key" },
+  } satisfies Target<KotlinIR>;
+  ```
 - **New language:** create an emitter package with a `LanguageModule` (`transform(apiIR) → YourIR`,
   base `templates`, `helpers`, optional `format`) and a built-in models target, and call `runPipeline`
   from `$onEmit`. Core (IR, plugins, templates, targets, manifest) is reused unchanged.
+
+## Upgrading from 0.1.x
+
+0.2.0 is a breaking release. On/off options moved under `features:`; an old key fails with `option-moved`
+naming its new location:
+
+| 0.1.x key | 0.2.0 key |
+|---|---|
+| `generics` (Kotlin, TypeScript) | `features.generics` |
+| `validation` (Kotlin) | `features.validation` |
+| `zod` (TypeScript) | `features.zod` |
+| `module` (Ktor server) | `features.module` |
+| `generate-auth` (Ktor server) | `features.auth` |
+| `call-access` (Ktor server) | `features.call-access` |
+| `nest-routes` (Ktor server) | `features.nest-routes` |
+| `react-query` (Next.js client) | `features.react-query` |
+| `server-actions` (Next.js client) | `features.server-actions` |
+| `validate` (Next.js client) | `features.validate` |
+
+New defaults change generated output:
+
+| Change | Restore 0.1.x behaviour |
+|---|---|
+| Kotlin `features.validation` defaults to true: models with constraint decorators get `init { require(...) }` checks, so constructing or deserializing a value that violates a constraint throws `IllegalArgumentException` (the Ktor server answers such bodies with an error) | `features: { validation: false }` |
+| Flat Next.js client: `features.react-query` defaults to true, adding `queries.ts` and `hooks.ts` (and `export * from "./queries"` in `index.ts`); they import `@tanstack/react-query` (now an optional peer dependency) and `react` | `features: { react-query: false }` on the target (projects without TanStack Query) |
+| Flat Next.js client: `features.validate` defaults to true: with `features.zod` on, methods check body, query object and constrained path parameters with zod before `fetch` and reject with `ZodError` (checked methods become `async`) | `features: { validate: false }` on the target |
+| `server-actions: true` with the flat style, `validate: true` without zod, and `validate: true` with the grouped style were errors (`unsupported-in-flat-style`, `validate-requires-zod`) or a `validate-flat-only` warning; they are now ignored with an `unsupported-feature` warning, and those three diagnostics are gone | none |
+| A `features` key in `@meta` is now read and validated (`invalid-meta`); it used to pass through untouched | rename the key |
+| For every `@meta` key (not only `features`), an operation or interface now inherits from every namespace enclosing it: Kotlin previously stopped inheriting at the service namespace, and TypeScript did not inherit namespace `@meta` onto operations or interfaces at all; models, enums and unions still only inherit the `features` key from enclosing namespaces | scope the meta to the declaration itself (or the narrowest namespace that should apply) |
+
+Known limitations:
+
+- A `features.docs: false` override on a namespace, interface, operation or model does not reach anonymous
+  inline models nested inside it (e.g. an inline object response or property type); use the global
+  `features.docs: false` to cover them too.
+- `language:target` scope `@meta` features (e.g. `@meta("kotlin:ktor-server", #{ features: #{ … } })`) are not
+  applied to `docs` or `generics`: the IR they act on is shared across every target of a language.
+- `features.generics` can be overridden with `@meta` only on namespaces and models, not on interfaces,
+  operations, enums or unions.
 
 ## Upgrading from 0.1.3
 

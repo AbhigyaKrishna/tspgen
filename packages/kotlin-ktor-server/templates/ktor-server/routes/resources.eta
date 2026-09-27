@@ -1,5 +1,5 @@
 <% const u = it.unit; const s = it.h.ktorServer; -%>
-object <%= u.resourcesObject %> {
+<%= it.h.visibility(it) %>object <%= u.resourcesObject %> {
 <% u.operations.forEach((op, i) => { const params = s.resourceParams(op); -%>
 <% if (i > 0) { -%>
 
@@ -10,7 +10,7 @@ object <%= u.resourcesObject %> {
 <% }) -%>
 }
 
-fun Route.<%= u.routesFn %>(service: <%= u.serviceName %>) {
+<%= it.h.visibility(it) %>fun Route.<%= u.routesFn %>(service: <%= u.serviceName %>) {
 <% for (const op of u.operations) { const [auth] = it.extras[op.id].auth; const route = include("ktor-server/routes/resources-route", { op, unit: u, options: it.options, h: it.h }); -%>
 <% if (auth) { -%>
     <%~ auth %> {

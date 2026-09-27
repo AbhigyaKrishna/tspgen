@@ -18,7 +18,7 @@ const graphSpec = `
   }
 `;
 
-const house = { grouping: "per-namespace", "service-suffix": "Api", module: false };
+const house = { grouping: "per-namespace", "service-suffix": "Api", features: { module: false } };
 
 const permissions = `
   @@meta(Shop.Graph, "kotlin:ktor-server", #{
@@ -119,7 +119,7 @@ interface GraphApi {
   });
 
   it("nests routes under their common prefix and splits route sets into their own functions", async () => {
-    const { outputs } = await server({ ...house, "nest-routes": true }).compile(
+    const { outputs } = await server({ ...house, features: { ...house.features, "nest-routes": true } }).compile(
       graphSpec + permissions + `@@meta(Shop.Graph.Probe, "kotlin:ktor-server", #{ routeSet: "unmanaged" });`,
     );
     const routes = outputs[ROUTES];
@@ -203,6 +203,14 @@ fun Route.graphUnmanagedRoutes(service: GraphApi) {
 
   it("refuses wrap, routeSet and nest-routes outside the dsl routing style", async () => {
     const [, diagnostics] = await server({ ...house, "routing-style": "resources" }).compileAndDiagnose(graphSpec + permissions);
+    expectDiagnostics(diagnostics, {
+      code: "@abhigyakrishna/tspgen-core/target-failed",
+      message: /need routing-style "dsl" \(got "resources"\)/,
+    });
+  });
+
+  it("refuses features.nest-routes outside the dsl routing style with no wrap/routeSet meta", async () => {
+    const [, diagnostics] = await server({ features: { "nest-routes": true }, "routing-style": "resources" }).compileAndDiagnose(graphSpec);
     expectDiagnostics(diagnostics, {
       code: "@abhigyakrishna/tspgen-core/target-failed",
       message: /need routing-style "dsl" \(got "resources"\)/,

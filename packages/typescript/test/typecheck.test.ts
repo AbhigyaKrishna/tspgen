@@ -45,7 +45,7 @@ function typecheck(outputs: Record<string, string>, extra: Record<string, unknow
 
 describe("generated TypeScript", () => {
   it("type-checks with zod schemas, discriminated unions, results and errors", async () => {
-    const { outputs } = await emitter({ zod: true }).compile(`
+    const { outputs } = await emitter({ features: { zod: true } }).compile(`
       @service namespace PetStore;
       model Pet {
         id: int64;
@@ -76,7 +76,7 @@ describe("generated TypeScript", () => {
   });
 
   it("type-checks constrained zod schemas", async () => {
-    const { outputs } = await emitter({ zod: true }).compile(`
+    const { outputs } = await emitter({ features: { zod: true } }).compile(`
       using TspGen;
       @service namespace S;
       model Req { @minLength(1) @pattern("^a") name: string; @maxValue(3) n?: int32 | null; @maxItems(2) xs: string[] }
@@ -88,7 +88,7 @@ describe("generated TypeScript", () => {
 
   it("type-checks generic models and their zod schema functions", async () => {
     for (const layout of ["per-type", "single-file"]) {
-      const { outputs } = await emitter({ zod: true, layout }).compile(`
+      const { outputs } = await emitter({ features: { zod: true }, layout }).compile(`
         @service namespace Shop;
         model Page<T> { items: T[]; total: int64; next?: T }
         model Pair<K, V> { key: K; value: V; pages: Page<V>[] }
@@ -103,7 +103,7 @@ describe("generated TypeScript", () => {
   });
 
   it("type-checks zod schemas of optional properties under exactOptionalPropertyTypes", async () => {
-    const { outputs } = await emitter({ zod: true }).compile(`
+    const { outputs } = await emitter({ features: { zod: true } }).compile(`
       @service namespace S;
       model Inner { a?: string }
       model Req { note?: string; inner?: Inner; inline?: { b?: int32 } }

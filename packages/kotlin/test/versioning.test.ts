@@ -51,6 +51,11 @@ const val API_VERSION: String = "2024-06-01"
 )`);
   });
 
+  it("emits no version constant with features.api-version false", async () => {
+    const { outputs } = await versioned({ features: { "api-version": false } }).compile(spec);
+    expect(outputs["models/com/acme/models/ApiVersionConstants.kt"]).toBeUndefined();
+  });
+
   it("does not clash with a version enum named ApiVersion used as a parameter", async () => {
     const [{ outputs }, diagnostics] = await versioned().compileAndDiagnose(`
       @service @versioned(ApiVersion) namespace PetStore;

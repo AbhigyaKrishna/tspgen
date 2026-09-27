@@ -33,11 +33,15 @@
     "@abhigyakrishna/tspgen-typescript": "workspace:*"
   },
   "peerDependencies": {
+    "@tanstack/react-query": ">=5.0.0",
     "@typespec/compiler": "^1.16.0",
     "@typespec/http": "^1.16.0",
     "zod": ">=4.3.0"
   },
   "peerDependenciesMeta": {
+    "@tanstack/react-query": {
+      "optional": true
+    },
     "zod": {
       "optional": true
     }
@@ -50,6 +54,7 @@
     "@typespec/http": "1.16.0",
     "@typespec/sse": "0.86.0",
     "@typespec/streams": "0.86.0",
+    "@typespec/versioning": "0.86.0",
     "react": "^19.3.0",
     "zod": "^4.6.5"
   }

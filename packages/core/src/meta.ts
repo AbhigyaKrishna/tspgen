@@ -1,5 +1,6 @@
 import { NoTarget, type Program } from "@typespec/compiler";
 import type { DecoratorData } from "./ir/types.js";
+import { isRecord } from "./features.js";
 import { reportDiagnostic } from "./lib.js";
 
 export type MetaData = Record<string, unknown>;
@@ -8,16 +9,14 @@ export type MetaScopes = Record<string, MetaData>;
 
 export const META_DECORATOR = "TspGen.meta";
 
-function isObject(value: unknown): value is MetaData {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Key-by-key merge; `b` wins, except arrays on both sides are concatenated. */
+/** Key-by-key merge; `b` wins, except arrays on both sides are concatenated and `features` objects merge by key. */
 export function mergeMeta(a: MetaData, b: MetaData): MetaData {
   const out: MetaData = { ...a };
   for (const [key, value] of Object.entries(b)) {
     const current = out[key];
-    out[key] = Array.isArray(current) && Array.isArray(value) ? [...current, ...value] : value;
+    if (Array.isArray(current) && Array.isArray(value)) out[key] = [...current, ...value];
+    else if (key === "features" && isRecord(current) && isRecord(value)) out[key] = { ...current, ...value };
+    else out[key] = value;
   }
   return out;
 }
@@ -32,7 +31,7 @@ export function mergeScopes(a: MetaScopes, b: MetaScopes): MetaScopes {
 export function metaScopes(decorators: DecoratorData | undefined): MetaScopes {
   const scopes: MetaScopes = {};
   for (const [scope, data] of decorators?.[META_DECORATOR] ?? []) {
-    if (typeof scope !== "string" || !isObject(data)) continue;
+    if (typeof scope !== "string" || !isRecord(data)) continue;
     scopes[scope] = mergeMeta(scopes[scope] ?? {}, data);
   }
   return scopes;
@@ -73,7 +72,7 @@ export function metaNumber(program: Program, meta: MetaData, key: string, where:
 
 export function metaObject(program: Program, meta: MetaData, key: string, where: string): MetaData | undefined {
   const value = meta[key];
-  if (value === undefined || isObject(value)) return value;
+  if (value === undefined || isRecord(value)) return value;
   return invalid(program, key, where, "an object");
 }
 
@@ -81,7 +80,7 @@ export function metaObject(program: Program, meta: MetaData, key: string, where:
 export function metaObjects(program: Program, meta: MetaData, key: string, where: string): MetaData[] {
   const value = meta[key];
   if (value === undefined) return [];
-  if (Array.isArray(value) && value.every(isObject)) return value;
+  if (Array.isArray(value) && value.every(isRecord)) return value;
   invalid(program, key, where, "a list of objects");
   return [];
 }

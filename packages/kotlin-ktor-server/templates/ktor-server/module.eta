@@ -2,7 +2,7 @@
 /**
  * Installs content negotiation, error handling and all <%= it.service.name %> routes.
  */
-fun Application.<%= it.moduleFn %>(<%= params %>) {
+<%= it.h.visibility(it) %>fun Application.<%= it.moduleFn %>(<%= params %>) {
     install(ContentNegotiation) {
         json(<%~ it.json %>)
     }
@@ -17,7 +17,7 @@ fun Application.<%= it.moduleFn %>(<%= params %>) {
     }
 }
 
-fun Route.<%= it.apiRoutesFn %>(<%= params %>) {
+<%= it.h.visibility(it) %>fun Route.<%= it.apiRoutesFn %>(<%= params %>) {
 <% for (const [i, u] of it.units.entries()) { -%>
 <% for (const fn of it.mounts[i]) { -%>
     <%= fn %>(<%= s.paramName(u) %>)
@@ -25,7 +25,7 @@ fun Route.<%= it.apiRoutesFn %>(<%= params %>) {
 <% } -%>
 }
 
-fun StatusPagesConfig.<%= it.errorsFn %>() {
+<%= it.h.visibility(it) %>fun StatusPagesConfig.<%= it.errorsFn %>() {
 <% for (const e of it.exceptions) { -%>
     exception<<%= e %>> { call, cause ->
         call.respond(HttpStatusCode.fromValue(cause.status), cause.error)

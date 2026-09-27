@@ -145,7 +145,7 @@ export const ktorServerHelpers = {
   },
 
   handlerParams(op: KtOperation, options: KtorServerOptions): string {
-    const params = options["call-access"] ? ["call: ApplicationCall"] : [];
+    const params = options.features["call-access"] ? ["call: ApplicationCall"] : [];
     const fields = requestFields(op);
     if (options["handler-shape"] === "request-object") {
       if (fields.length > 0) params.push(`request: ${requestName(op)}`);
@@ -156,7 +156,7 @@ export const ktorServerHelpers = {
   },
 
   callExpr(op: KtOperation, unit: ServerUnit, options: KtorServerOptions): string {
-    const args = options["call-access"] ? ["call"] : [];
+    const args = options.features["call-access"] ? ["call"] : [];
     const fields = requestFields(op);
     if (options["handler-shape"] === "request-object") {
       if (fields.length > 0) {

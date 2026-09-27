@@ -30,7 +30,7 @@ const flatSpec = authSpec.replace("@cookie theme?: string", "");
 
 describe("grouped client auth", () => {
   it("declares <Service>Auth and types the factory's config with it", async () => {
-    const { outputs } = await nextjs({ "react-query": false, "server-actions": false }).compile(authSpec);
+    const { outputs } = await nextjs({ features: { "react-query": false, "server-actions": false } }).compile(authSpec);
     expect(outputs["client/index.ts"]).toBe(`${HEADER}
 import type { AuthProvider, BasicCredentials, ClientConfig } from "./core";
 import { ItemsClient } from "./items";
@@ -68,7 +68,7 @@ export function createShopClient(config: ClientConfig<ShopAuth>): ShopApiClient 
   });
 
   it("gives each operation its auth descriptor; NoAuth-only operations get none", async () => {
-    const { outputs } = await nextjs({ "react-query": false, "server-actions": false }).compile(authSpec);
+    const { outputs } = await nextjs({ features: { "react-query": false, "server-actions": false } }).compile(authSpec);
     const items = outputs["client/items.ts"];
     expect(items).toContain(`        path: "/items",
         query: [["q", params.q, false]],
@@ -87,7 +87,7 @@ export function createShopClient(config: ClientConfig<ShopAuth>): ShopApiClient 
   });
 
   it("exports only AuthScheme from core; the auth runtime stays module-private", async () => {
-    const { outputs } = await nextjs({ "react-query": false, "server-actions": false }).compile(authSpec);
+    const { outputs } = await nextjs({ features: { "react-query": false, "server-actions": false } }).compile(authSpec);
     const core = outputs["client/core.ts"];
     expect(core).toContain("export interface AuthScheme {");
     expect(core).toContain("\ninterface AuthEntries {");
@@ -105,7 +105,7 @@ export function createShopClient(config: ClientConfig<ShopAuth>): ShopApiClient 
 
   it("type-checks under shipyard's compiler flags, with and without zod", async () => {
     for (const zod of [false, true]) {
-      const { outputs } = await nextjs({}, { zod }).compile(authSpec);
+      const { outputs } = await nextjs({}, { features: { zod } }).compile(authSpec);
       const usage = `import { createShopClient } from "./client/index";
 export const api = createShopClient({
   baseUrl: "/api",
@@ -123,7 +123,7 @@ createShopClient({ baseUrl: "/api", auth: { Nope: () => "x" } });
   });
 
   it("warns about unsupported http schemes and drops the alternatives needing them", async () => {
-    const [{ outputs }, diagnostics] = await nextjs({ "react-query": false, "server-actions": false }).compileAndDiagnose(`
+    const [{ outputs }, diagnostics] = await nextjs({ features: { "react-query": false, "server-actions": false } }).compileAndDiagnose(`
       @service namespace S;
       model Digest { type: AuthType.http; scheme: "Digest" }
       @route("/a") interface A {
@@ -145,7 +145,7 @@ createShopClient({ baseUrl: "/api", auth: { Nope: () => "x" } });
 
   it("warns when one alternative sends two credentials as the same header", async () => {
     for (const flat of [false, true]) {
-      const [, diagnostics] = await nextjs(flat ? { "client-style": "flat" } : { "react-query": false, "server-actions": false }).compileAndDiagnose(`
+      const [, diagnostics] = await nextjs(flat ? { "client-style": "flat" } : { features: { "react-query": false, "server-actions": false } }).compileAndDiagnose(`
         @service namespace S;
         model Auth2 is ApiKeyAuth<ApiKeyLocation.header, "authorization">;
         model K1 is ApiKeyAuth<ApiKeyLocation.header, "X-Key">;

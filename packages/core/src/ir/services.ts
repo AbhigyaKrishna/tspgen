@@ -23,7 +23,7 @@ import {
 } from "@typespec/http";
 import { reportDiagnostic } from "../lib.js";
 import { pascal } from "../naming.js";
-import { collectDecorators } from "./decorators.js";
+import { collectDecorators, enclosingNamespaceDecorators } from "./decorators.js";
 import { docInfo } from "./docs.js";
 import { declaresStream, isEventStream, streamEvents, type SseLibraries } from "./sse.js";
 import { hasParts, isBytes, splitNamespace, type TypeCollector } from "./type-collector.js";
@@ -31,7 +31,6 @@ import type { ResolvedService } from "./versioning.js";
 import type {
   AuthIR,
   AuthRequirementIR,
-  DecoratorData,
   OperationGroupIR,
   OperationIR,
   ParamIR,
@@ -119,7 +118,8 @@ function buildService(
         namespace: namespaceOf(container),
         ...docInfo(program, container),
         decorators: collectDecorators(container),
-        namespaceDecorators: enclosingNamespaceDecorators(container, ns),
+        namespaceDecorators: enclosingNamespaceDecorators(container),
+        container: container.kind === "Namespace" ? "namespace" : "interface",
         operations: [],
       };
       groups.set(groupId, group);
@@ -152,16 +152,6 @@ function buildService(
 function namespaceOf(container: Namespace | Interface): string[] {
   if (container.kind === "Namespace") return splitNamespace(getNamespaceFullName(container));
   return container.namespace ? splitNamespace(getNamespaceFullName(container.namespace)) : [];
-}
-
-/** Decorators of the namespaces enclosing `container`, from the service namespace inwards. */
-function enclosingNamespaceDecorators(container: Namespace | Interface, service: Namespace): DecoratorData[] {
-  const chain: Namespace[] = [];
-  for (let current = container.namespace; current; current = current.namespace) {
-    chain.unshift(current);
-    if (current === service) return chain.map(collectDecorators);
-  }
-  return [];
 }
 
 /**

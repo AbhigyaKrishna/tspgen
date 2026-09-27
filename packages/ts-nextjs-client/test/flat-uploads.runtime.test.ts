@@ -35,12 +35,12 @@ async function write(sub: string, outputs: Record<string, string>): Promise<stri
 }
 
 async function load() {
-  const { outputs } = await nextjs({ "client-style": "flat", validate: true }, { zod: true, layout: "single-file" }).compile(spec);
+  const { outputs } = await nextjs({ "client-style": "flat", features: { validate: true } }, { features: { zod: true }, layout: "single-file" }).compile(spec);
   return import(pathToFileURL(join(await write("flat", outputs), "client.ts")).href);
 }
 
 async function loadGrouped() {
-  const { outputs } = await nextjs({ "react-query": false, "server-actions": false }, { zod: true }).compile(spec);
+  const { outputs } = await nextjs({ features: { "react-query": false, "server-actions": false } }, { features: { zod: true } }).compile(spec);
   return import(pathToFileURL(join(await write("grouped", outputs), "client/index.ts")).href);
 }
 

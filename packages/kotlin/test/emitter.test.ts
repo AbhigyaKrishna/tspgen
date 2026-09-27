@@ -129,7 +129,7 @@ data class Slot(
   });
 
   it("nests variants only a sealed union uses inside it, named after their keys", async () => {
-    const { outputs } = await emitter({ validation: true }).compile(`
+    const { outputs } = await emitter({ features: { validation: true } }).compile(`
       using TspGen;
       @service namespace S;
       model Cat { @minLength(1) name: string; at: utcDateTime; @Kotlin.type("java.util.UUID") id: string }
@@ -290,8 +290,8 @@ data class Page<T>(
     expect(outputs["models/com/acme/models/Page.kt"]).toBeUndefined();
   });
 
-  it("emits one model per template instance with generics: false", async () => {
-    const { outputs } = await emitter({ generics: false }).compile(`
+  it("emits one model per template instance with features.generics false", async () => {
+    const { outputs } = await emitter({ features: { generics: false } }).compile(`
       @service namespace S;
       model Page<T> { items: T[] }
       model Pet { id: int64 }

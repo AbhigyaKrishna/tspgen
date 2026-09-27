@@ -28,6 +28,20 @@ describe("IR facts for house-style features", () => {
     expect(root.namespaceDecorators).toEqual([]);
   });
 
+  it("also reaches namespaces above the service namespace (unified with types)", async () => {
+    const { program } = await MetaTester.compile(`
+      @meta("*", #{ level: "outer" })
+      namespace Acme {
+        @service namespace Pets {
+          @route("/p") @get op list(): void;
+        }
+      }
+    `);
+    const groups = buildApiIR(program).services[0].groups;
+    const root = groups.find((g) => g.name === "Pets")!;
+    expect(root.namespaceDecorators.map(metaScopes)).toEqual([{ "*": { level: "outer" } }]);
+  });
+
   it("records template arguments of decorated template instances (generics: false)", async () => {
     const { program } = await MetaTester.compile(`
       @service namespace S;

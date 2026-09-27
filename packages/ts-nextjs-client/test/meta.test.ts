@@ -8,6 +8,14 @@ const withMeta = `using TspGen;\n${petSpec}
 `;
 
 describe("ts-nextjs @meta keys", () => {
+  it("inherits next fetch options from an enclosing namespace onto operations", async () => {
+    const spec = `using TspGen;\n${petSpec}
+      @@meta(PetStore, "typescript:ts-nextjs-client", #{ next: #{ revalidate: 120, tags: #["all"] } });
+    `;
+    const { outputs } = await nextjs().compile(spec);
+    expect(outputs["client/pets.ts"]).toContain(`      { next: {"revalidate":120,"tags":["all"]}, ...options },`);
+  });
+
   it("applies default next fetch options (operation overrides group)", async () => {
     const { outputs } = await nextjs().compile(withMeta);
     const pets = outputs["client/pets.ts"];

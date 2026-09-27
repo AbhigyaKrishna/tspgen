@@ -1,4 +1,11 @@
-export { $lib, reportDiagnostic, type TypeScriptEmitterOptions } from "./lib.js";
+export {
+  $lib,
+  reportDiagnostic,
+  TYPESCRIPT_EMITTER,
+  typescriptFeatures,
+  typescriptMovedOptions,
+  type TypeScriptEmitterOptions,
+} from "./lib.js";
 export { $onEmit } from "./emitter.js";
 export { camel, memberName, propertyKey, RESERVED_WORDS, typeName } from "./naming.js";
 export { modelsPrefix, rebase, relativeSpecifier, renderImports, type TsImport } from "./imports.js";
@@ -21,5 +28,5 @@ export {
 } from "./transform/type-map.js";
 export { HTTP_ERROR } from "./transform/operations.js";
 export { typescriptLanguage } from "./language.js";
-export { tsModelsTarget } from "./models-target.js";
+export { API_VERSION_FILE, tsModelsTarget } from "./models-target.js";
 export { tsHelpers } from "./helpers.js";

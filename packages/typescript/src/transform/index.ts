@@ -1,4 +1,4 @@
-import { apiVersionConstants, type ApiIR, type ApiVersionConstant } from "@abhigyakrishna/tspgen-core";
+import { apiVersionConstants, type ApiIR, type ApiVersionConstant, type ResolvedFeatures } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
@@ -12,14 +12,20 @@ export interface TsTransformOptions {
   importExtension: "" | ".js";
   layout?: "per-type" | "single-file";
   errors?: "typed" | "thrown";
+  /** Generate the API version constants (default true). */
+  apiVersion?: boolean;
+  /** Generate models/index.ts (default true). */
+  barrel?: boolean;
 }
 
-export function resolveTsOptions(options: Record<string, unknown>): TsTransformOptions {
+export function resolveTsOptions(options: Record<string, unknown>, features?: ResolvedFeatures<string>): TsTransformOptions {
   return {
-    zod: options.zod === true,
+    zod: features?.values.zod === true,
     importExtension: options["import-extension"] === ".js" ? ".js" : "",
     layout: options.layout === "single-file" ? "single-file" : "per-type",
     errors: options.errors === "thrown" ? "thrown" : "typed",
+    apiVersion: features?.values["api-version"] !== false,
+    barrel: features?.values.barrel !== false,
   };
 }
 
@@ -45,14 +51,17 @@ export function transformToTs(program: Program, api: ApiIR, options: TsTransform
     zod: options.zod,
     importExtension: options.importExtension,
     layout,
-    apiVersions: versionConstants(program, api, declarations),
+    barrel: options.barrel !== false,
+    apiVersions: options.apiVersion === false ? [] : versionConstants(program, api, declarations),
     api,
   };
 }
 
 /**
- * The version constants, without those named like a generated declaration: the barrel's own export would
- * silently shadow the model's `export *` (and clash in types.ts), so the clash is reported instead.
+ * The version constants, without those named like a generated declaration: an `export *` that re-exports both
+ * (the models barrel; the flat client's index.ts, which re-exports models/api-version instead when
+ * features.barrel is false) would silently shadow the model's own export (and clash in types.ts), so the
+ * clash is reported instead.
  */
 function versionConstants(program: Program, api: ApiIR, declarations: TsDecl[]): ApiVersionConstant[] {
   const exported = new Map<string, TsDecl>();

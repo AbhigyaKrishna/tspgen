@@ -285,8 +285,8 @@ ${route("b", "            ")}
     expectDiagnostics(none, []);
   });
 
-  it("generates nothing with generate-auth: false", async () => {
-    const { outputs } = await server({ "generate-auth": false }).compile(spec);
+  it("generates nothing with features.auth false", async () => {
+    const { outputs } = await server({ features: { auth: false } }).compile(spec);
     expect(outputs[ROUTES]).not.toContain("authenticate");
   });
 

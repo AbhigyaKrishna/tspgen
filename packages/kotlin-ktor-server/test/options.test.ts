@@ -17,6 +17,25 @@ function dirWith(files: Record<string, string>): string {
 }
 
 describe("ktor server options", () => {
+  it.each([
+    ["module", "features.module"],
+    ["generate-auth", "features.auth"],
+    ["call-access", "features.call-access"],
+    ["nest-routes", "features.nest-routes"],
+  ])("rejects the moved option %s", async (key, to) => {
+    const diagnostics = await server({ [key]: true }).diagnose(petSpec);
+    expectDiagnostics(diagnostics, {
+      code: "@abhigyakrishna/tspgen-core/option-moved",
+      message: `\`${key}\` moved to \`${to}\` in 0.2.0.`,
+    });
+  });
+
+  it("skips the module with features.module false", async () => {
+    const { outputs } = await server({ features: { module: false } }).compile(petSpec);
+    expect(outputs["server/com/acme/server/PetStoreModule.kt"]).toBeUndefined();
+    expect(outputs["server/com/acme/server/PetsRoutes.kt"]).toBeDefined();
+  });
+
   it("writes models and server code to their own output dirs", async () => {
     const { outputs } = await server(
       { "output-dir": "{emitter-output-dir}/features" },
@@ -100,7 +119,7 @@ fun Route.petsRoutes(service: PetsService) {
   });
 
   it("supports request objects and call access", async () => {
-    const { outputs } = await server({ "handler-shape": "request-object", "call-access": true }).compile(petSpec);
+    const { outputs } = await server({ "handler-shape": "request-object", features: { "call-access": true } }).compile(petSpec);
     const service = outputs[`${DIR}/PetsService.kt`];
     expect(service).toContain("import io.ktor.server.application.ApplicationCall\n");
     expect(service).toContain("    suspend fun get(call: ApplicationCall, request: GetRequest): Pet\n");
@@ -167,5 +186,29 @@ fun Route.petsRoutes(service: PetsService) {
   it("validates target options", async () => {
     const [, diagnostics] = await server({ grouping: "sideways" }).compileAndDiagnose(petSpec);
     expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-core/invalid-target-options" });
+  });
+
+  it("adds the emitter's file-annotations to a target file", async () => {
+    const { outputs } = await server({}, { "file-annotations": ['Suppress("unused")'] }).compile(petSpec);
+    expect(outputs[`${DIR}/PetsService.kt`]).toContain('@file:Suppress("unused")\n');
+  });
+
+  it("marks generated declarations internal with the emitter's visibility: internal", async () => {
+    const { outputs } = await server({}, { visibility: "internal" }).compile(petSpec);
+    expect(outputs[`${DIR}/PetsService.kt`]).toContain("\ninternal interface PetsService {");
+    expect(outputs[`${DIR}/PetsRoutes.kt`]).toContain("\ninternal fun Route.petsRoutes(service: PetsService) {");
+    const module = outputs[`${DIR}/PetStoreModule.kt`];
+    expect(module).toContain("\ninternal fun Application.petStoreModule(");
+    expect(module).toContain("\ninternal fun Route.petStoreApiRoutes(");
+    expect(module).toMatch(/\ninternal fun StatusPagesConfig\.\w+\(\) \{/);
+    const resources = await server({ "routing-style": "resources" }, { visibility: "internal" }).compile(petSpec);
+    expect(resources.outputs[`${DIR}/PetsRoutes.kt`]).toMatch(/\ninternal object \w+ \{/);
+    expect(resources.outputs[`${DIR}/PetsRoutes.kt`]).toContain("\ninternal fun Route.petsRoutes(service: PetsService) {");
+    const streaming = await server({ multipart: "streaming" }, { visibility: "internal" }).compile(`
+      @service namespace S;
+      model Upload { name: HttpPart<string>; file: HttpPart<File> }
+      @route("/u") @post op upload(@header contentType: "multipart/form-data", @multipartBody body: Upload): void;
+    `);
+    expect(Object.values(streaming.outputs).some((c) => /\ninternal sealed class \w+Part \{/.test(c))).toBe(true);
   });
 });

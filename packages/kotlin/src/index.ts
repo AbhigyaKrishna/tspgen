@@ -1,4 +1,4 @@
-export { $lib, type KotlinEmitterOptions, type EnumMemberNaming } from "./lib.js";
+export { $lib, KOTLIN_EMITTER, kotlinFeatures, kotlinMovedOptions, type KotlinEmitterOptions, type EnumMemberNaming } from "./lib.js";
 export { $onEmit } from "./emitter.js";
 export { camel, identifier, typeName, upperSnake } from "./naming.js";
 export { kotlinString } from "./kotlin-string.js";

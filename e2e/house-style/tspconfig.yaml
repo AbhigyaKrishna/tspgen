@@ -9,14 +9,16 @@ options:
       - namespace: "Shop.Graph"
         package: "com.example.graph"
     errors: thrown
-    validation: true
+    features:
+      validation: true
     plugins: ["./tspgen/permissions.ts"]
     targets:
       - "@abhigyakrishna/tspgen-kotlin-ktor-server":
           grouping: per-namespace
           service-suffix: Api
-          module: false
-          nest-routes: true
+          features:
+            module: false
+            nest-routes: true
   "@abhigyakrishna/tspgen-typescript":
     emitter-output-dir: "{project-root}/ts/generated"
     layout: single-file
@@ -25,3 +27,5 @@ options:
       - "@abhigyakrishna/tspgen-ts-nextjs-client":
           client-style: flat
           error-model: ErrorResponse
+          features:
+            react-query: false

@@ -221,6 +221,8 @@ export interface TsIR {
   importExtension: string;
   /** "per-type": models/<Name>.ts; "single-file": every model in types.ts. */
   layout: "per-type" | "single-file";
+  /** `models/index.ts` is generated (per-type layout); false: `API_VERSION` goes to `models/api-version.ts`. */
+  barrel: boolean;
   /** Version constants of the versioned services (models barrel, or types.ts in the single-file layout). */
   apiVersions: ApiVersionConstant[];
   api: ApiIR;

@@ -1,5 +1,5 @@
 <%~ include("kotlin/common/header", it) %>
-<% for (const a of it.fileAnnotations ?? []) { %>@file:<%~ a %>
+<% for (const a of [...(it.fileAnnotations ?? []), ...(it.ctx?.options?.["file-annotations"] ?? []).map((a) => a.trim().replace(/^@file:/, ""))]) { %>@file:<%~ a %>
 <% } %>package <%= it.package %>
 
 <% for (const i of it.imports) { %>import <%= i %>

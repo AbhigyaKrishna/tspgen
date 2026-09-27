@@ -89,7 +89,7 @@ describe("kotlin house-style options", () => {
   });
 
   it("accepts the new emitter options", async () => {
-    const { outputs } = await emitter({ packages: [{ namespace: "S.Graph", package: "com.acme.graph" }], errors: "thrown", validation: true }).compile(`
+    const { outputs } = await emitter({ packages: [{ namespace: "S.Graph", package: "com.acme.graph" }], errors: "thrown", features: { validation: true } }).compile(`
       @service namespace S;
       namespace Graph { model Node { id: string } }
     `);
@@ -169,8 +169,8 @@ describe("kotlin house-style options", () => {
     expect(ir.declarations.map((d) => d.name).filter((n) => n.startsWith("Page"))).toEqual([]);
   });
 
-  it("validation: true renders constraint checks in init; @meta checks lines are appended", async () => {
-    const { outputs } = await emitter({ validation: true }).compile(`
+  it("features.validation renders constraint checks in init; @meta checks lines are appended", async () => {
+    const { outputs } = await emitter({ features: { validation: true } }).compile(`
       using TspGen;
       @service namespace S;
       @meta("kotlin", #{ checks: #["require((a == null) == (b == null)) { \\"a and b go together\\" }"] })
@@ -228,14 +228,14 @@ data class Req(
       `require(note == null || note.isNotBlank()) { "note must not be blank" }`,
     ];
     for (const validation of [true, false]) {
-      const req = (await emitter({ validation }).compile(spec)).outputs["models/com/acme/models/Req.kt"];
+      const req = (await emitter({ features: { validation } }).compile(spec)).outputs["models/com/acme/models/Req.kt"];
       for (const check of checks) expect(req).toContain(check);
       expect(req).not.toContain("isNotEmpty()");
     }
   });
 
   it("renders @pattern as an unanchored containsMatchIn check", async () => {
-    const { outputs } = await emitter({ validation: true }).compile(`
+    const { outputs } = await emitter({ features: { validation: true } }).compile(`
       @service namespace S;
       model Req { @pattern("[0-9]") code: string }
     `);
@@ -245,7 +245,7 @@ data class Req(
   });
 
   it("checks scalar-level constraints of a nullable custom scalar", async () => {
-    const { outputs } = await emitter({ validation: true }).compile(`
+    const { outputs } = await emitter({ features: { validation: true } }).compile(`
       @service namespace S;
       scalar Slug extends string;
       @@pattern(Slug, "^[a-z]+$");
@@ -256,8 +256,8 @@ data class Req(
     );
   });
 
-  it("renders no checks without validation", async () => {
-    const { outputs } = await emitter().compile(`
+  it("renders no checks with features.validation false", async () => {
+    const { outputs } = await emitter({ features: { validation: false } }).compile(`
       @service namespace S;
       model Req { @maxLength(200) name: string }
     `);
@@ -272,7 +272,7 @@ data class Req(
     // TypeSpec's own discriminant check looks up the property by its TypeSpec name ("kind", not
     // found, so it's skipped), while our IR's `fillUnion` matches by wire name ("kind") and
     // removes it from the variant's properties — exactly the case under test.
-    const { outputs } = await emitter({ validation: true }).compile(`
+    const { outputs } = await emitter({ features: { validation: true } }).compile(`
       using TspGen;
       @service namespace S;
       model Cat {

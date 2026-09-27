@@ -45,6 +45,21 @@ export const API_VERSION = "2024-06-01";
 }`);
   });
 
+  it("emits no API_VERSION with features.api-version false", async () => {
+    const { outputs } = await versioned({ features: { "api-version": false } }).compile(spec);
+    expect(outputs["models/index.ts"]).not.toContain("API_VERSION");
+  });
+
+  it("moves API_VERSION to models/api-version.ts with features.barrel false", async () => {
+    const { outputs } = await versioned({ features: { barrel: false } }).compile(spec);
+    expect(outputs["models/index.ts"]).toBeUndefined();
+    expect(outputs["models/api-version.ts"]).toBe(`${HEADER}
+
+/** Version of the PetStore API this code was generated for. */
+export const API_VERSION = "2024-06-01";
+`);
+  });
+
   it("emits the version chosen by the version option", async () => {
     const { outputs } = await versioned({ version: "2024-01-01" }).compile(spec);
     expect(outputs["models/Toy.ts"]).toBeUndefined();

@@ -1,22 +1,40 @@
+import { defineFeatures, type MovedOptions } from "@abhigyakrishna/tspgen-core";
+
+export const nextClientFeatures = defineFeatures({
+  "server-actions": { default: true, description: "Server Actions for non-GET operations (grouped style only)." },
+  "react-query": {
+    default: true,
+    description: "TanStack Query keys, queryOptions and hooks (flat style: queries.ts + hooks.ts); needs @tanstack/react-query.",
+  },
+  validate: {
+    default: true,
+    description:
+      "Flat style: check request bodies, query objects and constrained path parameters with zod before fetch; needs features.zod on the TypeScript emitter.",
+  },
+});
+
+export type NextClientFeatures = Record<keyof typeof nextClientFeatures.defs, boolean>;
+
+/** Next.js client option keys moved in 0.2.0. */
+export const nextClientMovedOptions: MovedOptions = {
+  "react-query": "features.react-query",
+  "server-actions": "features.server-actions",
+  validate: "features.validate",
+};
+
 export interface NextClientOptions {
-  /** Grouped style: defaults to true; flat style: defaults to false (queries.ts + hooks.ts for the flat client). */
-  "react-query"?: boolean;
-  /** Grouped style only; defaults to true there. */
-  "server-actions"?: boolean;
   "base-url-env": string;
   "client-style": "grouped" | "flat";
   "error-class": string;
   "error-model"?: string;
-  /** Flat style only: validate request bodies, query objects and constrained path params with zod before fetch. */
-  validate?: boolean;
+  /** On/off gates; every key is filled from its default. */
+  features: NextClientFeatures;
 }
 
 export const nextClientOptionsSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    "react-query": { type: "boolean", description: "Emit TanStack Query keys, queryOptions and hooks (grouped: default true; flat: default false)." },
-    "server-actions": { type: "boolean", description: "Emit Server Actions for non-GET operations (grouped; default true)." },
     "base-url-env": {
       type: "string",
       default: "API_BASE_URL",
@@ -32,10 +50,6 @@ export const nextClientOptionsSchema = {
     "error-model": {
       type: "string",
       description: "Model (TypeScript name or TypeSpec id) whose fields the flat client's error class exposes.",
-    },
-    validate: {
-      type: "boolean",
-      description: "Flat style: validate requests with the zod schemas before fetch (needs zod: true; default false).",
     },
   },
 };

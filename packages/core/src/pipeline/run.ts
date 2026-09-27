@@ -1,7 +1,7 @@
 import { NoTarget, resolvePath, type Program } from "@typespec/compiler";
 import { relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildApiIR } from "../ir/build.js";
+import { mergeFeatures, type ResolvedFeatures } from "../features.js";
 import { loadSseLibraries, usesSseLibraries } from "../ir/sse.js";
 import { loadVersioning, resolveServices } from "../ir/versioning.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
@@ -11,12 +11,15 @@ import { resolveMeta, type MetaScopes } from "../meta.js";
 import { ExtensionRegistry } from "../plugins/registry.js";
 import type { FileSpec, LanguageModule, Target } from "../targets/target.js";
 import { TemplateEngine, TemplateNotFoundError, type TemplateLayer } from "../templates/engine.js";
+import { buildFeaturedApiIR, resolveHeaderText, resolveRunFeatures } from "./run-features.js";
 
 export interface PipelineTarget<L> {
   target: Target<L>;
   options: Record<string, unknown>;
   /** Absolute directory for this target's files; the pipeline's `outputDir` when absent. */
   outputDir?: string;
+  /** This target's own features, resolved from its `features` option (see `loadTargets`). */
+  features?: ResolvedFeatures<string>;
 }
 
 export interface PipelineOptions<L> {
@@ -43,7 +46,9 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
   const emitterOptions = opts.emitterOptions ?? {};
   const registry = new ExtensionRegistry();
   const plugins = (opts.plugins ?? []).filter((p) => !p.languages || p.languages.includes(language.name));
-  const ctx: PluginContext = { language: language.name, options: emitterOptions, registry };
+  const features = resolveRunFeatures(program, language, plugins, emitterOptions.features);
+  if (!features) return;
+  const ctx: PluginContext = { language: language.name, options: emitterOptions, registry, features };
 
   const guard = <T>(code: "plugin-failed" | "target-failed", name: string, stage: string, fn: () => T) => {
     try {
@@ -66,15 +71,8 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
   if (resolution.failed) return;
   // Without the SSE libraries, event streams are untyped (the operations report sse-libraries-missing).
   const sse = usesSseLibraries(program) ? await loadSseLibraries() : undefined;
-  const api = buildApiIR(program, {
-    generics: emitterOptions.generics !== false,
-    services: resolution.services,
-    ...(sse ? { sse } : {}),
-  });
-  let ir = language.transform(api, {
-    program,
-    options: emitterOptions,
-  });
+  const api = buildFeaturedApiIR(program, features, language.name, resolution.services, sse);
+  let ir = language.transform(api, { program, options: emitterOptions, features });
   for (const plugin of plugins) {
     if (!plugin.transformIR) continue;
     const result = guard("plugin-failed", plugin.name, "transformIR", () => plugin.transformIR!(ir, ctx));
@@ -94,12 +92,29 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
   };
   const modelsOutputDir = opts.targets.find((t) => t.target.kind === "models")?.outputDir ?? opts.outputDir;
   let files: FileSpec[] = [];
-  for (const { target, options, outputDir = opts.outputDir } of opts.targets) {
+  for (const { target, options, outputDir = opts.outputDir, features: own } of opts.targets) {
+    const targetFeatures = own ? mergeFeatures(features, own) : features;
     const result = guard("target-failed", target.name, "files", () =>
-      target.files(ir, { program, language: language.name, emitterOptions, options, registry, outputDir, modelsOutputDir, resolveTemplate }),
+      target.files(ir, {
+        program,
+        language: language.name,
+        emitterOptions,
+        options,
+        registry,
+        outputDir,
+        modelsOutputDir,
+        resolveTemplate,
+        features: targetFeatures,
+      }),
     );
     if (result === FAILED) return;
-    files.push(...result.map((file) => ({ ...file, outputDir: normalizeDir(file.outputDir ?? outputDir) })));
+    files.push(
+      ...result.map((file) => ({
+        ...file,
+        outputDir: normalizeDir(file.outputDir ?? outputDir),
+        ...(own ? { features: { ...own.values, ...file.features } } : {}),
+      })),
+    );
   }
   for (const plugin of plugins) {
     if (!plugin.files) continue;
@@ -125,13 +140,15 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
     ...Object.assign({}, ...opts.targets.map((t) => t.target.helpers ?? {})),
     ...Object.assign({}, ...plugins.map((p) => p.helpers ?? {})),
   });
+  const headerText = resolveHeaderText(features, emitterOptions, language.emitter ?? language.name);
   const outputs = new Map<string, OutputFile[]>([[opts.outputDir, []]]);
   let failed = false;
   for (const file of files) {
     try {
       let content = engine.render(file.template, {
         ...file.data,
-        ctx: { language: language.name, options: emitterOptions },
+        features: { ...features.values, ...file.features },
+        ctx: { language: language.name, options: emitterOptions, headerText },
       });
       if (language.format) content = await language.format(file.path, content);
       const dir = file.outputDir ?? opts.outputDir;

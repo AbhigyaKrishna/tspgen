@@ -32,7 +32,7 @@ import {
 import { getHttpPart, isBody, isBodyRoot, isMetadata, isOrExtendsHttpFile } from "@typespec/http";
 import { reportDiagnostic } from "../lib.js";
 import { pascal } from "../naming.js";
-import { collectDecorators } from "./decorators.js";
+import { collectDecorators, namespaceDecoratorsField } from "./decorators.js";
 import { docInfo } from "./docs.js";
 import { isEventsUnion, type SseLibraries } from "./sse.js";
 import type { ConstraintsIR, EnumIR, EventIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
@@ -47,6 +47,8 @@ export class TypeCollector {
   private readonly ids = new Map<Type, string>();
   /** Template declarations checked by `declarationGeneric` (true while being checked, for recursion). */
   private readonly genericDeclarations = new Map<Model, boolean>();
+  /** `genericsFor` results by declaration, so a `generics` callback runs once per template declaration. */
+  private readonly genericsCache = new Map<Model, boolean>();
   /** Ids already reported by `version-conflict`. */
   private readonly conflicts = new Set<string>();
   /** The service being built, when its namespace is a mutated (versioned) clone. */
@@ -58,7 +60,9 @@ export class TypeCollector {
 
   constructor(
     private readonly program: Program,
-    private readonly options: { generics: boolean; sse?: SseLibraries | undefined } = { generics: true },
+    private readonly options: { generics: boolean | ((declaration: Model) => boolean); sse?: SseLibraries | undefined } = {
+      generics: true,
+    },
   ) {}
 
   /** The TypeSpec type collected under `id`, if any. */
@@ -112,7 +116,7 @@ export class TypeCollector {
           // Partial instances inside template declarations (`Link<T>`) are not types of their own.
           if (this.mentionsTemplateParameter(m)) return;
           // A template instance that can be generic contributes its declaration, not a model of its own.
-          if (!(this.options.generics && this.genericRef(m, m.name))) this.collectModel(m, m.name);
+          if (!this.genericRef(m, m.name)) this.collectModel(m, m.name);
         }
       },
       enum: (e) => {
@@ -194,7 +198,7 @@ export class TypeCollector {
         : { kind: "map", of: this.ref(element, `${hint}Value`) };
     }
     const source = this.spreadSource(model) ?? model;
-    if (this.options.generics && generic) {
+    if (generic) {
       const ref = this.genericRef(source, hint);
       if (ref) return ref;
     }
@@ -224,6 +228,7 @@ export class TypeCollector {
     const declaration =
       this.service?.declarations.get(instance.templateNode) ?? this.program.checker.getTypeForNode(instance.templateNode);
     if (declaration.kind !== "Model" || !isTemplateDeclaration(declaration)) return undefined;
+    if (!this.genericsFor(declaration)) return undefined;
     const types = args.filter(
       (arg): arg is Type =>
         (arg as { entityKind?: string }).entityKind === "Type" &&
@@ -231,6 +236,21 @@ export class TypeCollector {
     );
     if (types.length !== args.length || !this.expressible(instance, declaration)) return undefined;
     return this.declarationGeneric(declaration) ? { declaration, args: types } : undefined;
+  }
+
+  /**
+   * Whether a template declaration may be emitted as a generic model (the `generics` option or callback). A
+   * callback's result is cached per declaration, so it runs once even when the declaration is referenced from
+   * several instances.
+   */
+  private genericsFor(declaration: Model): boolean {
+    const { generics } = this.options;
+    if (typeof generics !== "function") return generics;
+    const cached = this.genericsCache.get(declaration);
+    if (cached !== undefined) return cached;
+    const result = generics(declaration);
+    this.genericsCache.set(declaration, result);
+    return result;
   }
 
   /**
@@ -374,6 +394,7 @@ export class TypeCollector {
       namespace,
       ...docInfo(this.program, state ?? model),
       decorators: collectDecorators(model),
+      ...namespaceDecoratorsField(model),
       properties: [],
     };
     if (isTemplateDeclaration(model)) ir.typeParameters = model.node!.templateParameters.map((p) => p.id.sv);
@@ -469,6 +490,7 @@ export class TypeCollector {
       namespace,
       ...docInfo(this.program, e),
       decorators: collectDecorators(e),
+      ...namespaceDecoratorsField(e),
       members: [...e.members.values()].map((m) => ({
         name: m.name,
         value: m.value ?? m.name,
@@ -504,6 +526,7 @@ export class TypeCollector {
       namespace,
       ...docInfo(this.program, union),
       decorators: collectDecorators(union),
+      ...namespaceDecoratorsField(union),
       variants: [],
     };
     this.types.set(id, ir);
@@ -547,6 +570,7 @@ export class TypeCollector {
       namespace,
       ...docInfo(this.program, union),
       decorators: collectDecorators(union),
+      ...namespaceDecoratorsField(union),
       variants: [],
       events: [],
     };

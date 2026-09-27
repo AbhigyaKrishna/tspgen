@@ -21,7 +21,7 @@ const spec = `
 
 describe("typescript uploads", () => {
   it("maps Http.File to globalThis.Blob with an instanceof schema", async () => {
-    const { outputs } = await emitter({ zod: true }).compile(spec);
+    const { outputs } = await emitter({ features: { zod: true } }).compile(spec);
     expect(outputs["models/UploadRequest.ts"]).toBe(`${HEADER}
 import { z } from "zod";
 import { MetaSchema } from "./Meta";

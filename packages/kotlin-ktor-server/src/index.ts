@@ -2,7 +2,7 @@ import type { Target } from "@abhigyakrishna/tspgen-core";
 import type { KotlinIR } from "@abhigyakrishna/tspgen-kotlin";
 import { resolve } from "node:path";
 import { ktorServerHelpers } from "./helpers.js";
-import { ktorServerOptionsSchema, type KtorServerOptions } from "./options.js";
+import { ktorServerFeatures, ktorServerMovedOptions, ktorServerOptionsSchema, type KtorServerOptions } from "./options.js";
 import { planServerFiles } from "./plan.js";
 
 const TEMPLATES = resolve(import.meta.dirname, "../templates");
@@ -14,6 +14,8 @@ export const ktorServerTarget: Target<KotlinIR> = {
   templates: TEMPLATES,
   helpers: { ktorServer: ktorServerHelpers },
   optionsSchema: ktorServerOptionsSchema,
+  features: ktorServerFeatures,
+  movedOptions: ktorServerMovedOptions,
   files: (ir, ctx) =>
     planServerFiles(ir, ctx.options as unknown as KtorServerOptions, ctx.registry, ctx.program, (template) => {
       const path = ctx.resolveTemplate?.(template);
@@ -24,7 +26,13 @@ export const ktorServerTarget: Target<KotlinIR> = {
 export default ktorServerTarget;
 
 export { ktorServerHelpers, type HandlerField, type ResourceParam } from "./helpers.js";
-export { ktorServerOptionsSchema, type KtorServerOptions } from "./options.js";
+export {
+  ktorServerFeatures,
+  ktorServerMovedOptions,
+  ktorServerOptionsSchema,
+  type KtorServerFeatures,
+  type KtorServerOptions,
+} from "./options.js";
 export { builtinStyles, resolveStyle, ROUTING_STYLE_KIND, type RoutingStyle } from "./styles.js";
 export { commonPrefix, routeTree, type RouteFunction, type RouteItem, type RouteNode } from "./routes.js";
 export { buildUnits, type ServerUnit } from "./units.js";

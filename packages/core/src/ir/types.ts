@@ -43,6 +43,11 @@ interface NamedTypeBase extends DocInfo {
   name: string;
   namespace: string[];
   decorators: DecoratorData;
+  /**
+   * Decorators of the enclosing namespaces, outermost first; present only when one of them has non-TypeSpec
+   * decorators. Used for `@meta` feature overrides (`features`), which namespaces pass on to their types.
+   */
+  namespaceDecorators?: DecoratorData[];
 }
 
 export interface ModelIR extends NamedTypeBase {
@@ -164,8 +169,18 @@ export interface OperationGroupIR extends DocInfo {
   name: string;
   namespace: string[];
   decorators: DecoratorData;
-  /** Decorators of the namespaces enclosing the group, service namespace first (the group's own excluded). */
+  /**
+   * Decorators of the namespaces enclosing the group, outermost first (the group's own excluded), excluding the
+   * global namespace.
+   */
   namespaceDecorators: DecoratorData[];
+  /**
+   * Where `id`/`decorators`/`docs` come from: `"interface"` normally, or `"namespace"` for operations declared
+   * directly in a namespace (no interface) — that namespace's own `@meta` checks (`checkMetaFeatures`) already
+   * ran as `"namespace"` while walking every namespace in the program, so it must not be checked again as
+   * `"interface"` (an override level like `"model"` allows one kind and not the other).
+   */
+  container: "interface" | "namespace";
   operations: OperationIR[];
 }
 

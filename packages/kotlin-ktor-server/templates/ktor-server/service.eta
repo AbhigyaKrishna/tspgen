@@ -1,5 +1,5 @@
 <% const u = it.unit; const s = it.h.ktorServer; -%>
-interface <%= u.serviceName %> {
+<%= it.h.visibility(it) %>interface <%= u.serviceName %> {
 <% for (const op of u.operations) { -%>
 <%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations([...op.annotations, ...it.extras[op.id].annotations], "    ") %>    suspend fun <%= op.name %>(<%= s.handlerParams(op, it.options) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %>
 <% } -%>

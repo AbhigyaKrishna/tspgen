@@ -1,4 +1,4 @@
-import { apiVersionConstants, type ApiIR } from "@abhigyakrishna/tspgen-core";
+import { apiVersionConstants, type ApiIR, type ResolvedFeatures } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
@@ -18,9 +18,14 @@ export interface KotlinTransformOptions {
   validation?: boolean;
   dateTime?: DateTimeMapping;
   unionVariants?: "nested" | "top-level";
+  /** Generate the API version constants (default true). */
+  apiVersion?: boolean;
 }
 
-export function resolveKotlinOptions(options: Record<string, unknown>): KotlinTransformOptions {
+export function resolveKotlinOptions(
+  options: Record<string, unknown>,
+  features?: ResolvedFeatures<string>,
+): KotlinTransformOptions {
   const naming = options.naming as { "enum-members"?: EnumMemberNaming } | undefined;
   return {
     package: typeof options.package === "string" ? options.package : "generated",
@@ -29,9 +34,10 @@ export function resolveKotlinOptions(options: Record<string, unknown>): KotlinTr
       ((options.packages as { namespace: string; package: string }[] | undefined) ?? []).map((m) => [m.namespace, m.package]),
     ),
     errors: options.errors === "thrown" ? "thrown" : "typed",
-    validation: options.validation === true,
+    validation: features?.values.validation !== false,
     dateTime: options["date-time"] === "kotlin.time" ? "kotlin.time" : "java.time",
     unionVariants: options["union-variants"] === "top-level" ? "top-level" : "nested",
+    apiVersion: features?.values["api-version"] !== false,
   };
 }
 
@@ -73,7 +79,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     services,
     api,
     javaTime,
-    apiVersions: apiVersionConstants(api),
+    apiVersions: options.apiVersion === false ? [] : apiVersionConstants(api),
     ...(builder.fileUsed ? { httpFile: builder.httpFileFqn } : {}),
     ...(builder.sseMessageUsed ? { sseMessage: builder.sseMessageFqn } : {}),
     ...(javaTime.length > 0 ? { javaTimeModule: `${modelsPackage}.javaTimeSerializersModule` } : {}),

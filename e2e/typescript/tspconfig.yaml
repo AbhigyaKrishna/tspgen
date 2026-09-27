@@ -3,6 +3,7 @@ emit:
 options:
   "@abhigyakrishna/tspgen-typescript":
     emitter-output-dir: "{project-root}/generated"
-    zod: true
+    features:
+      zod: true
     targets:
       - "@abhigyakrishna/tspgen-ts-nextjs-client": {}
