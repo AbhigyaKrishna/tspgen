@@ -11,6 +11,8 @@ export type TypeRef =
   | { kind: "scalar"; name: string; custom?: CustomScalarIR }
   | { kind: "literal"; value: string | number | boolean }
   | { kind: "nullable"; of: TypeRef }
+  /** `Http.File` or a model extending it: each language maps it to its built-in file type. */
+  | { kind: "file" }
   | { kind: "unknown" };
 
 /** A user-declared scalar; `name` on the TypeRef is its TypeSpec std root. */
@@ -57,6 +59,8 @@ export interface ModelIR extends NamedTypeBase {
   templateArgs?: TypeRef[];
   /** Type parameter names of a generic model (`Page<T>` → ["T"]); its uses are `named` refs with `args`. */
   typeParameters?: string[];
+  /** Declares `HttpPart` properties: a multipart body shape, never serialized as JSON. */
+  multipart?: boolean;
 }
 
 export interface PropertyIR extends DocInfo {
@@ -165,6 +169,34 @@ export interface BodyIR {
   kind: "single" | "multipart" | "file";
   /** Constraint decorators of the explicit `@body` parameter. */
   constraints?: ConstraintsIR;
+  /** Parts of a `multipart` body (model form), in declaration order. */
+  parts?: PartIR[];
+  /** A `file` body (`Http.File`). */
+  file?: FileBodyIR;
+}
+
+/** One part of a model-form `@multipartBody`. */
+export interface PartIR {
+  /** Wire part name. */
+  name: string;
+  /** Property of the multipart body model defining the part. */
+  property: string;
+  optional: boolean;
+  /** `HttpPart<T>[]`: the part may repeat. */
+  multi: boolean;
+  kind: "file" | "text" | "json";
+  /** Value type of one part: `{ kind: "file" }` for files, else the part's `T`. */
+  type: TypeRef;
+  /** Allowed part content types; for file parts the declared file content types ([] when any). */
+  contentTypes: string[];
+  docs?: string;
+}
+
+export interface FileBodyIR {
+  /** The file contents are declared as `string` rather than `bytes`. */
+  isText: boolean;
+  /** Declared file content types ([] when any). */
+  contentTypes: string[];
 }
 
 export type StatusCodes = number | { start: number; end: number } | "default";

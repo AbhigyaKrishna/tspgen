@@ -29,7 +29,7 @@ import {
   type Union,
   type UnionVariant,
 } from "@typespec/compiler";
-import { isBody, isBodyRoot, isMetadata } from "@typespec/http";
+import { getHttpPart, isBody, isBodyRoot, isMetadata, isOrExtendsHttpFile } from "@typespec/http";
 import { reportDiagnostic } from "../lib.js";
 import { pascal } from "../naming.js";
 import { collectDecorators } from "./decorators.js";
@@ -37,6 +37,7 @@ import { docInfo } from "./docs.js";
 import type { ConstraintsIR, EnumIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
 
 const UNKNOWN: TypeRef = { kind: "unknown" };
+const FILE: TypeRef = { kind: "file" };
 
 /** Converts TypeSpec types into TypeRefs, collecting named/anonymous declarations as TypeIR. */
 export class TypeCollector {
@@ -50,6 +51,12 @@ export class TypeCollector {
     private readonly options: { generics: boolean } = { generics: true },
   ) {}
 
+  /** The TypeSpec type collected under `id`, if any. */
+  sourceOf(id: string): Type | undefined {
+    for (const [type, typeId] of this.ids) if (typeId === id) return type;
+    return undefined;
+  }
+
   getTypes(): TypeIR[] {
     return [...this.types.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
@@ -58,7 +65,13 @@ export class TypeCollector {
   collectNamespace(ns: Namespace): void {
     navigateTypesInNamespace(ns, {
       model: (m) => {
-        if (m.name && !isTemplateDeclaration(m) && !this.isCollection(m) && !this.isHttpEnvelope(m)) {
+        if (
+          m.name &&
+          !isTemplateDeclaration(m) &&
+          !this.isCollection(m) &&
+          !this.isHttpEnvelope(m) &&
+          !isOrExtendsHttpFile(this.program, m)
+        ) {
           // Partial instances inside template declarations (`Link<T>`) are not types of their own.
           if (this.mentionsTemplateParameter(m)) return;
           // A template instance that can be generic contributes its declaration, not a model of its own.
@@ -113,8 +126,24 @@ export class TypeCollector {
     );
   }
 
+  /** The type of the `@body` / `@bodyRoot` property of an HTTP envelope model, if it has one. */
+  private envelopeBody(model: Model): Type | undefined {
+    for (const p of model.properties.values()) {
+      if (isBody(this.program, p) || isBodyRoot(this.program, p)) return p.type;
+    }
+    return undefined;
+  }
+
   /** `generic: false` collects a template instance as its own model even when it could be generic. */
   private modelRef(model: Model, hint: string, generic = true): TypeRef {
+    // Http.File (and models extending it) are the languages' file types; HttpPart<T> is T.
+    if (isOrExtendsHttpFile(this.program, model)) return FILE;
+    const part = getHttpPart(this.program, model);
+    if (part) {
+      // A part declared with an envelope (`HttpPart<{ @header contentType: …; @body value: T }>`) carries T.
+      const value = (part.type.kind === "Model" && this.envelopeBody(part.type)) || part.type;
+      return isBytes(value) ? FILE : this.ref(value, hint);
+    }
     if (isArrayModelType(model)) return { kind: "array", of: this.ref(model.indexer.value, `${hint}Item`) };
     if (isRecordModelType(model) && model.name === "Record") {
       return { kind: "map", of: this.ref(model.indexer.value, `${hint}Value`) };
@@ -292,6 +321,7 @@ export class TypeCollector {
       properties: [],
     };
     if (isTemplateDeclaration(model)) ir.typeParameters = model.node!.templateParameters.map((p) => p.id.sv);
+    if (hasParts(this.program, model)) ir.multipart = true;
     this.types.set(id, ir);
     for (const prop of model.properties.values()) {
       const stateProp = state?.properties.get(prop.name) ?? prop;
@@ -440,6 +470,26 @@ export class TypeCollector {
     }
     return id;
   }
+}
+
+/** The `bytes` scalar or a scalar extending it. */
+export function isBytes(type: Type): boolean {
+  for (let current = type.kind === "Scalar" ? type : undefined; current; current = current.baseScalar) {
+    if (current.name === "bytes" && current.namespace && getNamespaceFullName(current.namespace) === "TypeSpec") return true;
+  }
+  return false;
+}
+
+/** `HttpPart<T>` or `HttpPart<T>[]`. */
+export function isPartType(program: Program, type: Type): boolean {
+  if (type.kind !== "Model") return false;
+  if (getHttpPart(program, type)) return true;
+  return isArrayModelType(type) && type.indexer.value.kind === "Model" && getHttpPart(program, type.indexer.value) !== undefined;
+}
+
+/** Whether `model` declares (not inherits) `HttpPart` properties. */
+export function hasParts(program: Program, model: Model): boolean {
+  return [...model.properties.values()].some((p) => isPartType(program, p.type));
 }
 
 function literalValues(type: Type): (string | number | boolean)[] {

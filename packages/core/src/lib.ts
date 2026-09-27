@@ -9,6 +9,31 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Type kind '${"kind"}' is not supported; it will be emitted as unknown.`,
       },
     },
+    "unsupported-multipart-tuple": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Operation '${"operation"}' uses a tuple-form @multipartBody, which is not supported; use a model with HttpPart properties. The operation is skipped.`,
+      },
+    },
+    "unsupported-multipart-base": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Multipart body model '${"model"}' of operation '${"operation"}' extends '${"base"}', whose parts TypeSpec ignores; spread the base instead (\`...${"baseName"}\`). The operation is skipped.`,
+      },
+    },
+    "file-in-json": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Model '${"model"}' uses an Http.File type outside a multipart part; file types can't be serialized as JSON.`,
+        response: paramMessage`Operation '${"operation"}' returns an Http.File type; file responses are not supported and file types can't be serialized as JSON.`,
+      },
+    },
+    "multipart-model-in-json": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Multipart model '${"model"}' is also used as JSON (${"where"}); it is generated for multipart only and can't be serialized as JSON.`,
+      },
+    },
     "template-error": {
       severity: "error",
       messages: {
