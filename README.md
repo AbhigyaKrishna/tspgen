@@ -31,8 +31,13 @@ options:
       - { namespace: "PetStore.Admin", package: "com.acme.admin" }
     errors: typed                       # typed | thrown (error responses documented only; you throw your own)
     validation: false                   # true: @minLength/@maxLength/@pattern/@minItems/@maxItems/@minValue/@maxValue → init { require(...) }
+    date-time: java.time                # java.time (Instant, LocalDate… + generated serializers) | kotlin.time (kotlin.time / kotlinx.datetime)
+    union-variants: nested              # nested: single-use variants of a sealed union are declared inside it | top-level
+    generics: true                      # false: one model per template instance (PagePet) instead of Page<T>
+    models-output-dir: ./gen/contract   # optional: write models/ elsewhere (relative to the project root)
     targets:
       - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          output-dir: ./gen/server      # optional, any target: write its files elsewhere
           routing-style: dsl            # dsl | resources | <plugin-registered>
           grouping: per-interface       # per-interface | per-namespace | single-file
           handler-shape: params         # params | request-object
@@ -65,6 +70,29 @@ client/<pkg>/client/…   <Group>Client, <Service>ApiClient, ClientSupport
 
 Re-emitting deletes only files listed in the previous manifest; hand-written files are never touched.
 Implement the generated `…Service` interfaces outside the output directory.
+
+`models-output-dir` (language option) and `output-dir` (any target's options) move those files to another
+directory, e.g. models into a shared contract module and routes into the feature module. Paths are relative
+to the project root and may use `{project-root}` / `{emitter-output-dir}`; paths inside each directory are
+unchanged (`models/…`, `server/…`), and every directory gets its own `.generated-manifest.json`. The Next.js
+client rewrites its imports of the models when they live elsewhere.
+
+**Generics.** A template model is generated once as a generic class and every use passes its arguments:
+`model Page<T> { items: T[]; total: int64 }` → `data class Page<T>(val items: List<T>, val total: Long)` and
+`Page<Pet>` at each use (TypeScript: `interface Page<T>`, with zod a `PageSchema(itemSchema)` function). A
+template that needs per-instance models — a base model or `@discriminator`, HTTP metadata, `...T` spreads, or
+`@friendlyName` — still gets one model per instance (`PagePet`), as does everything with `generics: false`.
+
+**Date and time.** With `date-time: java.time` (the default) `utcDateTime`, `offsetDateTime`, `plainDate`,
+`plainTime` and `duration` map to `java.time.Instant`, `OffsetDateTime`, `LocalDate`, `LocalTime` and
+`Duration`. kotlinx.serialization has no serializers for them, so `models/<pkg>/models/JavaTimeSerializers.kt`
+holds ISO-8601 serializers for the ones in use and each model file using them declares
+`@file:UseSerializers(...)`; Ktor parameters and headers of these types use `X.parse` / `toString()`.
+
+**Sealed unions.** A `@discriminated(#{ envelope: "none" })` union of models becomes a sealed interface. A
+variant model nothing else references is declared inside it, named after its variant key
+(`union NodeSource { catalog: CatalogSource }` → `NodeSource.Catalog`, or `@Kotlin.name` on the model);
+variants used elsewhere stay top-level. `union-variants: top-level` keeps every variant in its own file.
 
 ### Server
 
@@ -248,6 +276,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `kotlin` | `imports: string[]` | types | extra imports |
 | `kotlin` | `implements: string[]` | models, sealed hierarchies | extra supertypes (FQN; qualified automatically on name clashes) |
 | `kotlin` | `checks: string[]` | models | statements appended to the data class `init { }` block (`init` is reserved in TypeSpec) |
+| `kotlin` (or `*`) | `notBlank: boolean` | string properties | `require(x.isNotBlank())`, emitted with or without `validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract |
 | `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`) |
 | `kotlin:ktor-server` / `kotlin:ktor-client` | `annotations: string[]` | operations, groups | annotations on service / client methods |
 | `kotlin:ktor-server` | `wrap: string[]` | namespaces, groups, operations | route-builder calls wrapped around routes, outermost first (dsl style); duplicates within one chain are dropped and shared prefixes share one block |
@@ -362,6 +391,18 @@ and vitest.
 - **New language:** create an emitter package with a `LanguageModule` (`transform(apiIR) → YourIR`,
   base `templates`, `helpers`, optional `format`) and a built-in models target, and call `runPipeline`
   from `$onEmit`. Core (IR, plugins, templates, targets, manifest) is reused unchanged.
+
+## Upgrading from 0.1
+
+0.2 changes generated output by default; each change has an option restoring the old behaviour.
+
+| Change | Restore 0.1 output |
+|---|---|
+| Template models are generic (`Page<T>`) instead of one model per instance (`PagePet`) | `generics: false` |
+| Kotlin date/time types come from `java.time`, with generated serializers | `date-time: kotlin.time` |
+| Single-use sealed-union variants are nested (`NodeSource.Catalog`) | `union-variants: top-level` |
+| Kotlin enum members get `@SerialName` only when the wire value differs | — (serialization unchanged) |
+| `@minLength(1)` validates `isNotEmpty()`, no longer `isNotBlank()` | add `@meta("kotlin", #{ notBlank: true })` |
 
 ## Development
 
