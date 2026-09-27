@@ -18,7 +18,7 @@ import {
 } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "../lib.js";
-import { memberName, propertyKey, typeName } from "../naming.js";
+import { memberName, propertyKey, RESERVED_WORDS, typeName } from "../naming.js";
 import { constrain } from "./constraints.js";
 import type { TsDecl, TsEnumMember, TsProperty, TsTypeUse } from "./model.js";
 import {
@@ -40,56 +40,6 @@ import {
 } from "./type-map.js";
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
-/** JS/TS reserved words: invalid as a `values` meta identifier even though they match IDENTIFIER. */
-const RESERVED_WORDS = new Set([
-  "break",
-  "case",
-  "catch",
-  "class",
-  "const",
-  "continue",
-  "debugger",
-  "default",
-  "delete",
-  "do",
-  "else",
-  "enum",
-  "export",
-  "extends",
-  "false",
-  "finally",
-  "for",
-  "function",
-  "if",
-  "import",
-  "in",
-  "instanceof",
-  "new",
-  "null",
-  "return",
-  "super",
-  "switch",
-  "this",
-  "throw",
-  "true",
-  "try",
-  "typeof",
-  "var",
-  "void",
-  "while",
-  "with",
-  "yield",
-  "let",
-  "static",
-  "implements",
-  "interface",
-  "package",
-  "private",
-  "protected",
-  "public",
-  "await",
-]);
-
 /** `@TS.type(name, module?)` override, if applied. */
 export function typeOverride(decorators: DecoratorData | undefined): TsTypeUse | undefined {
   const args = decorators?.["TS.type"]?.at(-1);

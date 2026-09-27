@@ -80,6 +80,7 @@ export interface TsParam {
 
 export interface TsBody {
   name: string;
+  docs?: string;
   type: TsTypeUse;
   contentType: string;
   optional: boolean;

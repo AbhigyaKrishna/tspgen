@@ -18,11 +18,18 @@ export const <%= n.names.keys(s) %> = {
 export const <%= n.names.queries(s) %> = {
 <% for (const g of s.groups) { const prop = n.names.groupProperty(g); const ops = it.queryOps(g); if (ops.length === 0) continue; -%>
   <%= prop %>: {
-<% for (const op of ops) { const has = n.hasParams(op); -%>
+<% for (const op of ops) { const has = n.hasParams(op); const call = `client.${prop}.${op.name}(${has ? "params, " : ""}{ signal })`; -%>
     <%= op.name %>: (client: <%= n.names.apiClient(s) %><%= has ? ", params: " + n.names.params(g, op) : "" %>) =>
       queryOptions({
         queryKey: <%= n.names.keys(s) %>.<%= prop %>.<%= op.name %>(<%= has ? "params" : "" %>),
-        queryFn: ({ signal }) => client.<%= prop %>.<%= op.name %>(<%= has ? "params, " : "" %>{ signal }),
+<% if (op.result.type.text === "void") { -%>
+        queryFn: async ({ signal }) => {
+          await <%= call %>;
+          return null;
+        },
+<% } else { -%>
+        queryFn: ({ signal }) => <%= call %>,
+<% } -%>
 <% if (it.extras[op.id].staleTime !== undefined) { -%>
         staleTime: <%= it.extras[op.id].staleTime %>,
 <% } -%>

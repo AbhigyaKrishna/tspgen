@@ -176,6 +176,8 @@ export interface ParamIR extends DocInfo {
 export interface BodyIR {
   /** Name of the explicit `@body` parameter, when there is one. */
   name?: string;
+  /** Doc comment of the explicit `@body` parameter. */
+  docs?: string;
   type: TypeRef;
   contentTypes: string[];
   optional: boolean;

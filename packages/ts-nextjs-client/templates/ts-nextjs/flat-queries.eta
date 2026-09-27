@@ -1,0 +1,49 @@
+<% const str = it.h.str; -%>
+<% for (const s of it.services) { for (const g of s.groups) { for (const op of [...g.queries, ...g.mutations]) { if (!op.vars) continue; -%>
+export interface <%= op.vars %> {
+<% for (const f of op.fields) { -%>
+<%~ it.h.jsdoc(f.docs, "  ") %>  <%= f.key %><%= f.optional ? "?" : "" %>: <%~ f.type %>;
+<% } -%>
+}
+
+<% } } } -%>
+<% it.services.forEach((s, si) => { -%>
+<% if (si > 0) { -%>
+
+<% } -%>
+export const <%= s.keys %> = {
+  all: [<%~ str(s.name) %>] as const,
+<% for (const g of s.groups) { -%>
+  <%= g.prop %>: {
+    all: [<%~ str(s.name) %>, <%~ str(g.prop) %>] as const,
+<% for (const op of g.queries) { -%>
+<%~ it.h.jsdoc(undefined, "    ", op.deprecated) %>    <%= op.name %>: (<%~ op.varsDecl %>) => [<%~ str(s.name) %>, <%~ str(g.prop) %>, <%~ str(op.name) %><%= op.vars ? ", vars" : "" %>] as const,
+<% } -%>
+  },
+<% } -%>
+};
+
+export const <%= s.queriesName %> = {
+<% for (const g of s.groups) { if (g.queries.length === 0) continue; -%>
+  <%= g.prop %>: {
+<% for (const op of g.queries) { const call = `client.${op.name}(${[...op.args, "{ signal }"].join(", ")})`; -%>
+<%~ it.h.jsdoc(undefined, "    ", op.deprecated) %>    <%= op.name %>: (client: <%= s.client %><%= op.vars ? ", " + op.varsDecl : "" %>) =>
+      queryOptions({
+        queryKey: <%= s.keys %>.<%= g.prop %>.<%= op.name %>(<%= op.vars ? "vars" : "" %>),
+<% if (op.void) { -%>
+        queryFn: async ({ signal }) => {
+          await <%= call %>;
+          return null;
+        },
+<% } else { -%>
+        queryFn: ({ signal }) => <%= call %>,
+<% } -%>
+<% if (op.staleTime !== undefined) { -%>
+        staleTime: <%= op.staleTime %>,
+<% } -%>
+      }),
+<% } -%>
+  },
+<% } -%>
+};
+<% }) -%>

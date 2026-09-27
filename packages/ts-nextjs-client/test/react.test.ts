@@ -27,6 +27,26 @@ describe("next.js react-query and server actions", () => {
       }),`);
   });
 
+  it("resolves void GET/HEAD queries to null", async () => {
+    const spec = `@service namespace S;
+      @route("/n") interface Ns {
+        @head @route("/{id}") exists(@path id: string): void;
+      }`;
+    const { outputs } = await nextjs({ "server-actions": false }).compile(spec);
+    expect(outputs["client/react-query/queries.ts"]).toContain(`    exists: (client: SApiClient, params: NsExistsParams) =>
+      queryOptions({
+        queryKey: sKeys.ns.exists(params),
+        queryFn: async ({ signal }) => {
+          await client.ns.exists(params, { signal });
+          return null;
+        },
+      }),`);
+    expect(outputs["client/react-query/hooks.ts"]).toContain(
+      `  options?: Omit<UseQueryOptions<null, Error, null, ReturnType<typeof sKeys.ns.exists>>, "queryKey" | "queryFn">,`,
+    );
+    expect(typecheck(outputs)).toBe("");
+  });
+
   it("emits hooks in a use-client module", async () => {
     const { outputs } = await nextjs().compile(petSpec);
     const hooks = outputs["client/react-query/hooks.ts"];

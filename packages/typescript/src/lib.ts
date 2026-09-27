@@ -86,6 +86,18 @@ export const $lib = createTypeSpecLibrary({
         local: paramMessage`Generated type '${"name"}' clashes with a name the flat client uses internally ('${"name"}'); rename it with @TS.name.`,
       },
     },
+    "flat-react-query-name-clash": {
+      severity: "error",
+      messages: {
+        default: paramMessage`'${"first"}' and '${"second"}' both generate '${"name"}' in the flat client's React Query code; rename one (e.g. @TS.name).`,
+      },
+    },
+    "flat-react-query-skipped": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Operation '${"operation"}' gets no React Query hooks, keys or Vars: ${"reason"}.`,
+      },
+    },
     "non-json-body": {
       severity: "warning",
       messages: {

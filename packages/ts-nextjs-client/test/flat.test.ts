@@ -330,6 +330,20 @@ export * from "./types";
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
+  it("renames path parameters and bodies named like reserved words inside the method", async () => {
+    const spec = `${shopSpec}
+      model Payload { v: string }
+      @route("/kw") interface Kw {
+        @put @route("/{class}/{classValue}") put(@path \`class\`: string, @path classValue: string, @body \`default\`: Payload, @query \`new\`?: boolean): void;
+      }`;
+    const { outputs } = await nextjs(flat, house).compile(spec);
+    expect(outputs["client.ts"]).toContain(
+      "  async put(classValue2: string, classValue: string, defaultValue: Payload, query: { new?: boolean } = {}, init?: { signal?: AbortSignal }): Promise<void> {\n" +
+        '    await this.request("PUT", `/kw/${encodeURIComponent(String(classValue2))}/${encodeURIComponent(String(classValue))}${toQuery(query)}`, defaultValue, init);',
+    );
+    expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
+  });
+
   const validatedSpec = "using TspGen;\n" + shopSpec
     .replace("model CreateNodeRequest { name: string }", "model CreateNodeRequest { @maxLength(64) name: string }")
     + `@@meta(Shop.Graph.CreateNodeRequest.name, "*", #{ notBlank: true });`;

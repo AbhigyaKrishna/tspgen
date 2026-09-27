@@ -1,5 +1,5 @@
 export interface NextClientOptions {
-  /** Grouped style only; defaults to true there. */
+  /** Grouped style: defaults to true; flat style: defaults to false (queries.ts + hooks.ts for the flat client). */
   "react-query"?: boolean;
   /** Grouped style only; defaults to true there. */
   "server-actions"?: boolean;
@@ -15,7 +15,7 @@ export const nextClientOptionsSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    "react-query": { type: "boolean", description: "Emit TanStack Query keys, queryOptions and hooks (grouped; default true)." },
+    "react-query": { type: "boolean", description: "Emit TanStack Query keys, queryOptions and hooks (grouped: default true; flat: default false)." },
     "server-actions": { type: "boolean", description: "Emit Server Actions for non-GET operations (grouped; default true)." },
     "base-url-env": {
       type: "string",

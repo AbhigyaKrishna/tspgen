@@ -13,7 +13,7 @@ export function <%= n.names.useClient(s) %>(): <%= client %> {
   return client;
 }
 <% for (const g of s.groups) { const prop = n.names.groupProperty(g); -%>
-<% for (const op of it.queryOps(g)) { const has = n.hasParams(op); const data = op.result.type.text; -%>
+<% for (const op of it.queryOps(g)) { const has = n.hasParams(op); const data = op.result.type.text === "void" ? "null" : op.result.type.text; -%>
 
 <%~ it.h.jsdoc(op.docs) %>export function <%= n.names.queryHook(g, op) %>(
 <% if (has) { -%>

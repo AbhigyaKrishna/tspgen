@@ -19,4 +19,8 @@ export const names = {
   actionsFile: (g: TsGroup) => `client/actions/${camel(g.name)}`,
   serverClient: (s: TsService) => `${camel(s.name)}ServerClient`,
   configureActions: (s: TsService) => `configure${s.name}Actions`,
+  /** Flat style: `<Op>Vars`, the single argument of the operation's hooks and query options. */
+  flatVars: (op: TsOperation) => `${typeName(op.name)}Vars`,
+  flatQueryHook: (op: TsOperation) => `use${typeName(op.name)}Query`,
+  flatMutationHook: (op: TsOperation) => `use${typeName(op.name)}Mutation`,
 };

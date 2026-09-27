@@ -232,8 +232,10 @@ function buildOperation(
   };
   if (body) {
     const property = "property" in body ? body.property : undefined;
+    const bodyDocs = property ? docInfo(program, property).docs : undefined;
     ir.body = {
       ...(property ? { name: property.name } : {}),
+      ...(bodyDocs ? { docs: bodyDocs } : {}),
       type: collector.ref(body.type, `${base}Request`),
       contentTypes: body.contentTypes,
       optional: property?.optional ?? false,

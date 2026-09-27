@@ -1,4 +1,4 @@
-import { metaNumber, metaObject, type FileSpec, type TargetContext } from "@abhigyakrishna/tspgen-core";
+import type { FileSpec, TargetContext } from "@abhigyakrishna/tspgen-core";
 import { reportDiagnostic } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
 import {
@@ -12,6 +12,7 @@ import {
   type TsService,
 } from "@abhigyakrishna/tspgen-typescript";
 import { clientAuth, type ClientAuth } from "./auth.js";
+import { nextExtras, type NextOpExtras } from "./extras.js";
 import { planFlatFiles } from "./flat.js";
 import { nextjsHelpers as h } from "./helpers.js";
 import { names } from "./names.js";
@@ -66,24 +67,6 @@ function groupImports(ir: TsIR, g: TsGroup): TsImport[] {
     ...(ir.zod ? [Z, ...fields.flatMap((t) => t.schemaImports), ...bodies.flatMap((t) => t.schemaImports)] : []),
     ...bodies.flatMap((t) => t.imports),
   ];
-}
-
-export interface NextOpExtras {
-  next?: Record<string, unknown>;
-  staleTime?: number;
-}
-
-function nextExtras(ctx: TargetContext, groups: TsGroup[]): Record<string, NextOpExtras> {
-  const extras: Record<string, NextOpExtras> = {};
-  for (const g of groups) {
-    for (const op of g.operations) {
-      const meta = op.meta["typescript:ts-nextjs-client"] ?? {};
-      const next = metaObject(ctx.program, meta, "next", op.id);
-      const staleTime = metaNumber(ctx.program, meta, "staleTime", op.id);
-      extras[op.id] = { ...(next ? { next } : {}), ...(staleTime !== undefined ? { staleTime } : {}) };
-    }
-  }
-  return extras;
 }
 
 export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
@@ -241,4 +224,4 @@ function actionFiles(ir: TsIR, services: TsService[], options: NextClientOptions
   return files;
 }
 
-export type { TsOperation, TsService };
+export type { NextOpExtras, TsOperation, TsService };

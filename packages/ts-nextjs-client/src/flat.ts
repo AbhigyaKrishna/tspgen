@@ -3,6 +3,7 @@ import {
   propertyKey,
   rebase,
   relativeSpecifier,
+  RESERVED_WORDS,
   renderImports,
   reportDiagnostic,
   type TsImport,
@@ -13,6 +14,7 @@ import {
 } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
 import { clientAuth, memberType, type AuthMember, type ClientAuth } from "./auth.js";
+import { planFlatReactQuery, REACT_QUERY_INTERNALS, reactQueryNames, varsKeyClash } from "./flat-react-query.js";
 import { nextjsHelpers, queryObjectType } from "./helpers.js";
 import type { NextClientOptions } from "./options.js";
 
@@ -94,22 +96,25 @@ function unsupported(op: TsOperation, auth: boolean): string | undefined {
 }
 
 /**
- * With validate, method bodies reference the zod import `z`, so a path parameter or body named `z` is renamed
- * (`zValue`, `zValue2`, …) avoiding the method's other names. Parameters are positional; callers are unaffected.
+ * Local names of a method's path parameters and body. A reserved word (`class`, `default`, …; also `arguments` and
+ * `eval`, invalid as strict-mode parameters) and, with validate — method bodies reference the zod import `z` — a
+ * parameter named `z` are renamed `<name>Value` (`<name>Value2`, … avoiding the method's other names). Parameters
+ * are positional, so callers are unaffected; `<Op>Vars` keeps the public names.
  */
 function localNames(op: TsOperation, validate: boolean): { path: TsParam[]; body: string | undefined } {
   const path = op.params.filter((p) => p.location === "path");
   const names = [...path.map((p) => p.name), ...(op.body ? [op.body.name] : [])];
-  if (validate && names.includes("z")) {
-    let replacement = "zValue";
-    for (let i = 2; names.includes(replacement); i++) replacement = `zValue${i}`;
-    const renamed = names.map((n) => (n === "z" ? replacement : n));
-    return {
-      path: path.map((p, i) => ({ ...p, name: renamed[i] })),
-      body: op.body ? renamed[path.length] : undefined,
-    };
-  }
-  return { path, body: op.body?.name };
+  const renamed = [...names];
+  names.forEach((n, i) => {
+    if (!RESERVED_WORDS.has(n) && n !== "arguments" && n !== "eval" && !(validate && n === "z")) return;
+    let replacement = `${n}Value`;
+    for (let k = 2; renamed.includes(replacement) || names.includes(replacement); k++) replacement = `${n}Value${k}`;
+    renamed[i] = replacement;
+  });
+  return {
+    path: path.map((p, i) => ({ ...p, name: renamed[i]! })),
+    body: op.body ? renamed[path.length] : undefined,
+  };
 }
 
 function method(op: TsOperation, validate: boolean, auth: string | undefined): FlatMethod {
@@ -216,15 +221,17 @@ function flatMembers(members: AuthMember[]): (AuthMember & { type: string })[] {
   return members.map((m) => ({ ...m, type: memberType(m.kind, "flat") }));
 }
 
-/** client.ts (one class per service + error class) and index.ts; nothing when a limitation is hit. */
+/**
+ * client.ts (one class per service + error class) and index.ts, plus queries.ts and hooks.ts with react-query;
+ * nothing when a limitation is hit.
+ */
 export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
   const fail = (code: Parameters<typeof reportDiagnostic>[1]["code"], format: Record<string, string>, messageId?: string): FileSpec[] => {
     reportDiagnostic(ctx.program, { code, format, target: NoTarget, ...(messageId ? { messageId } : {}) } as Parameters<typeof reportDiagnostic>[1]);
     return [];
   };
-  for (const option of ["react-query", "server-actions"] as const) {
-    if (options[option] === true) return fail("unsupported-in-flat-style", { option });
-  }
+  if (options["server-actions"] === true) return fail("unsupported-in-flat-style", { option: "server-actions" });
+  const reactQuery = options["react-query"] === true;
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const validate = options.validate === true;
@@ -245,13 +252,23 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
     if (found) auths.set(s.id, found);
   }
   const authNames = services.filter((s) => auths.has(s.id)).map((s) => `${s.name}Auth`);
-  const exported = new Set([options["error-class"], "ClientOptions", ...clientNames, ...authNames]);
-  // With validate, client.ts imports zod's `z`, which a generated type named z would clash with.
+  const rqNames = reactQuery ? reactQueryNames(services) : [];
+  const exported = new Set([
+    options["error-class"],
+    "ClientOptions",
+    ...clientNames,
+    ...authNames,
+    ...rqNames.filter((n) => n.exported).map((n) => n.name),
+  ]);
+  // With validate, client.ts imports zod's `z`, which a generated type named z would clash with. The React Query
+  // files import TanStack Query and React names and declare a module-local context per service.
   const internal = new Set([
     ...TEMPLATE_GLOBALS,
     ...(usesUploads ? UPLOAD_GLOBALS : []),
     ...(validate ? ["z"] : []),
     ...(auths.size > 0 ? AUTH_LOCALS : []),
+    // Key paths (`shopKeys.nodes.all`) are not identifiers; they only matter for the duplicate check below.
+    ...(reactQuery ? [...REACT_QUERY_INTERNALS, ...rqNames.filter((n) => !n.exported && !n.name.includes(".")).map((n) => n.name)] : []),
   ]);
   // index.ts re-exports both the types and client.ts, so any shared name is ambiguous there.
   const clash = ir.declarations.find((d) => exported.has(d.name) || internal.has(d.name));
@@ -271,6 +288,10 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         seen.set(op.name, op.id);
         const reason = unsupported(op, auth !== undefined);
         if (reason) return fail("flat-client-unsupported", { operation: op.id, reason });
+        const skipped = reactQuery ? varsKeyClash(op) : undefined;
+        if (skipped) {
+          reportDiagnostic(ctx.program, { code: "flat-react-query-skipped", format: { operation: op.id, reason: skipped }, target: NoTarget });
+        }
         imports.push(
           ...op.params.flatMap((p) => p.type.imports),
           ...(op.body?.type.imports ?? []),
@@ -295,6 +316,16 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
       usesSend,
       ...(auth ? { auth: { name: `${service.name}Auth`, service: service.name, members: flatMembers(auth.members) } } : {}),
     });
+  }
+  if (reactQuery) {
+    // Names are unique within a service (duplicate-operation-name); hooks, Vars and keys must be across services too,
+    // and must not take another service's `<Service>Auth`.
+    const owners = new Map<string, string>(services.filter((s) => auths.has(s.id)).map((s) => [`${s.name}Auth`, s.id]));
+    for (const { name, owner } of rqNames) {
+      const first = owners.get(name);
+      if (first !== undefined && first !== owner) return fail("flat-react-query-name-clash", { first, second: owner, name });
+      owners.set(name, owner);
+    }
   }
   if (model) {
     imports.push({ name: model.name, from: model.file, typeOnly: true, root: "models" }, ...model.properties.flatMap((p) => p.type.imports));
@@ -328,10 +359,11 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
       data: {
         imports: [],
         body: "ts/barrel",
-        exports: [...(ir.declarations.length > 0 ? [typesFile] : []), "client"]
+        exports: [...(ir.declarations.length > 0 ? [typesFile] : []), "client", ...(reactQuery ? ["queries"] : [])]
           .map((f) => relativeSpecifier("index", f, ext))
           .sort(),
       },
     },
+    ...(reactQuery ? planFlatReactQuery(ir, services, ctx) : []),
   ];
 }

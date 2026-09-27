@@ -1,0 +1,40 @@
+<% it.services.forEach((s, si) => { -%>
+<% if (si > 0) { -%>
+
+<% } -%>
+const <%= s.context %> = createContext<<%= s.client %> | null>(null);
+
+/** Makes a <%= s.client %> available to the generated hooks. */
+export function <%= s.provider %>(props: { client: <%= s.client %>; children?: ReactNode }): ReactNode {
+  return createElement(<%= s.context %>.Provider, { value: props.client }, props.children);
+}
+
+export function <%= s.useClient %>(): <%= s.client %> {
+  const client = useContext(<%= s.context %>);
+  if (!client) throw new Error("<%= s.provider %> is missing");
+  return client;
+}
+<% for (const g of s.groups) { -%>
+<% for (const op of g.queries) { -%>
+
+<%~ it.h.jsdoc(op.docs, "", op.deprecated) %>export function <%= op.hook %>(
+<% if (op.vars) { -%>
+  <%~ op.varsDecl %>,
+<% } -%>
+  options?: Omit<UseQueryOptions<<%~ op.data %>, Error, <%~ op.data %>, ReturnType<typeof <%= s.keys %>.<%= g.prop %>.<%= op.name %>>>, "queryKey" | "queryFn">,
+) {
+  const client = <%= s.useClient %>();
+  return useQuery({ ...<%= s.queriesName %>.<%= g.prop %>.<%= op.name %>(client<%= op.vars ? ", vars" : "" %>), ...options });
+}
+<% } -%>
+<% for (const op of g.mutations) { -%>
+
+<%~ it.h.jsdoc(op.docs, "", op.deprecated) %>export function <%= op.hook %>(
+  options?: Omit<UseMutationOptions<<%~ op.data %>, Error, <%= op.vars ?? "void" %>>, "mutationFn">,
+) {
+  const client = <%= s.useClient %>();
+  return useMutation({ ...options, mutationFn: (<%= op.vars ? "vars: " + op.vars : "" %>) => client.<%= op.name %>(<%= op.args.join(", ") %>) });
+}
+<% } -%>
+<% } -%>
+<% }) -%>

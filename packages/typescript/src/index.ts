@@ -1,6 +1,6 @@
 export { $lib, reportDiagnostic, type TypeScriptEmitterOptions } from "./lib.js";
 export { $onEmit } from "./emitter.js";
-export { camel, memberName, propertyKey, typeName } from "./naming.js";
+export { camel, memberName, propertyKey, RESERVED_WORDS, typeName } from "./naming.js";
 export { modelsPrefix, rebase, relativeSpecifier, renderImports, type TsImport } from "./imports.js";
 export * from "./transform/index.js";
 export {
