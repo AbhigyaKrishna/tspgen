@@ -13,6 +13,10 @@ import type { KtorServerOptions } from "./options.js";
 import { commonPrefix, routeTree, type RouteFunction } from "./routes.js";
 import { resolveStyle, type RoutingStyle } from "./styles.js";
 import { buildUnits, type ServerUnit } from "./units.js";
+import { multipartMode, PartClasses, planUpload, uploadLimit, type SupportNeed } from "./uploads.js";
+
+/** Ktor's default `formFieldLimit`. */
+const DEFAULT_UPLOAD_LIMIT = 52428800;
 
 const SUPPORT_IMPORTS = [
   "io.ktor.server.application.ApplicationCall",
@@ -50,10 +54,79 @@ const MODULE_IMPORTS = [
   "io.ktor.server.routing.routing",
 ];
 
-function typeImports(ops: ServerOperation[]): string[] {
+/** ServerSupport.kt helpers per upload need, their imports, and the functions routes elsewhere import. */
+const UPLOAD_SUPPORT: Record<SupportNeed, { imports: (ir: KotlinIR) => string[]; functions: string[] }> = {
+  limit: {
+    imports: () => [
+      "io.ktor.http.content.MultiPartData",
+      "io.ktor.server.plugins.PayloadTooLargeException",
+      "io.ktor.server.request.receiveMultipart",
+      "java.util.concurrent.atomic.AtomicReference",
+      "kotlinx.coroutines.CancellationException",
+      "kotlinx.coroutines.coroutineScope",
+      "kotlinx.coroutines.job",
+      "kotlinx.io.IOException",
+    ],
+    functions: ["withMultipart"],
+  },
+  parts: {
+    imports: () => [
+      "io.ktor.http.content.PartData",
+      "io.ktor.http.content.forEachPart",
+      "io.ktor.server.plugins.BadRequestException",
+      "io.ktor.server.request.receiveMultipart",
+      "io.ktor.utils.io.toByteArray",
+    ],
+    functions: ["partText"],
+  },
+  json: {
+    imports: (ir) => (ir.javaTimeModule ? [ir.javaTimeModule] : []),
+    functions: ["partJson"],
+  },
+  buffered: { imports: () => [], functions: ["receiveParts"] },
+  files: { imports: (ir) => [`${ir.modelsPackage}.HttpFile`], functions: [] },
+  streaming: {
+    imports: () => [
+      "java.util.concurrent.atomic.AtomicBoolean",
+      "kotlinx.coroutines.flow.Flow",
+      "kotlinx.coroutines.flow.FlowCollector",
+      "kotlinx.coroutines.flow.flow",
+    ],
+    functions: ["partsFlow"],
+  },
+  channel: { imports: () => ["io.ktor.utils.io.ByteReadChannel"], functions: ["partChannel", "partFileName"] },
+  file: {
+    imports: (ir) => [
+      `${ir.modelsPackage}.HttpFile`,
+      "io.ktor.http.ContentDisposition",
+      "io.ktor.http.HttpHeaders",
+      "io.ktor.server.plugins.PayloadTooLargeException",
+      "io.ktor.server.request.receiveChannel",
+      "io.ktor.utils.io.readBuffer",
+      "kotlinx.io.readByteArray",
+    ],
+    functions: ["receiveFile"],
+  },
+};
+
+const SUPPORT_NEEDS: readonly SupportNeed[] = ["limit", "parts", "json", "buffered", "files", "streaming", "channel", "file"];
+
+function withUpload(program: Program, op: ServerOperation, options: KtorServerOptions, classes: PartClasses): ServerOperation {
+  if (!op.body || op.body.kind === "single") return op;
+  const mode = multipartMode(program, op, options.multipart ?? "buffered");
+  const upload = planUpload(op, mode, uploadLimit(program, op, options["max-upload-size"] ?? DEFAULT_UPLOAD_LIMIT), classes);
+  return upload ? { ...op, upload } : op;
+}
+
+/** Types the service (`fields`) or routes file refers to; upload routes get theirs from `upload.routeImports`. */
+function typeImports(ops: ServerOperation[], file: "service" | "routes" = "service"): string[] {
   return ops.flatMap((op) => [
     ...op.params.flatMap((p) => p.type.imports),
-    ...(op.body?.type.imports ?? []),
+    ...(op.upload
+      ? file === "service"
+        ? op.upload.fields.flatMap((f) => f.type.imports)
+        : []
+      : (op.body?.type.imports ?? [])),
     ...op.result.type.imports,
     ...op.context.flatMap((c) => c.type.imports),
   ]);
@@ -161,24 +234,45 @@ export function planServerFiles(
   const style = resolveStyle(options["routing-style"], registry);
   const supportPkg = options.package ?? `${ir.basePackage}.server`;
   const dirOf = (pkg: string) => `server/${pkg.replaceAll(".", "/")}`;
-  const files: FileSpec[] = [
-    {
-      path: `${dirOf(supportPkg)}/ServerSupport.kt`,
-      template: "kotlin/file",
-      data: { package: supportPkg, imports: SUPPORT_IMPORTS, body: "ktor-server/support" },
-    },
-  ];
-  for (const service of ir.services) {
-    const units = buildUnits(service, options.grouping, options["service-suffix"]).map((unit) => ({
+  const files: FileSpec[] = [];
+  const partClasses = new PartClasses(supportPkg);
+  const serviceUnits = ir.services.map((service) =>
+    buildUnits(service, options.grouping, options["service-suffix"]).map((unit) => ({
       ...unit,
-      operations: unit.operations.map((op) => withContext(program, op, op.meta["kotlin:ktor-server"] ?? {})),
-    }));
+      operations: unit.operations.map((op) =>
+        withUpload(program, withContext(program, op, op.meta["kotlin:ktor-server"] ?? {}), options, partClasses),
+      ),
+    })),
+  );
+  const used = new Set(serviceUnits.flat().flatMap((u) => u.operations.flatMap((op) => op.upload?.support ?? [])));
+  const needs = SUPPORT_NEEDS.filter((n) => used.has(n));
+  const supportFunctions = [...SUPPORT_FUNCTIONS, ...needs.flatMap((n) => UPLOAD_SUPPORT[n].functions)].sort();
+  files.push({
+    path: `${dirOf(supportPkg)}/ServerSupport.kt`,
+    template: "kotlin/file",
+    data: {
+      package: supportPkg,
+      imports: organizeImports([...SUPPORT_IMPORTS, ...needs.flatMap((n) => UPLOAD_SUPPORT[n].imports(ir))], supportPkg),
+      body: "ktor-server/support",
+      uploads: Object.fromEntries(needs.map((n) => [n, true])),
+      partJson: ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "Json",
+    },
+  });
+  for (const part of partClasses.all()) {
+    files.push({
+      path: `${dirOf(supportPkg)}/${part.name}.kt`,
+      template: "kotlin/file",
+      data: { package: supportPkg, imports: organizeImports(part.imports, supportPkg), body: "ktor-server/part-class", decl: part.lines.join("\n") },
+    });
+  }
+  for (const [index, service] of ir.services.entries()) {
+    const units = serviceUnits[index];
     const extras = serverExtras(program, units);
     checkDslOnly(options, units, extras);
     const functions = new Map(units.map((unit) => [unit, routeFunctions(unit, options, extras)]));
     for (const unit of units) {
       const pkg = unit.package ?? supportPkg;
-      const support = pkg === supportPkg ? [] : SUPPORT_FUNCTIONS.map((f) => `${supportPkg}.${f}`);
+      const support = pkg === supportPkg ? [] : supportFunctions.map((f) => `${supportPkg}.${f}`);
       files.push(
         serviceFile(unit, pkg, dirOf(pkg), options, extras),
         routesFile(unit, pkg, dirOf(pkg), options, style, extras, support, functions.get(unit)!),
@@ -203,7 +297,14 @@ function serviceFile(
   return {
     path: `${dir}/${unit.serviceName}.kt`,
     template: "kotlin/file",
-    data: { package: pkg, imports: organizeImports(imports, pkg), body: "ktor-server/service", unit, options, extras },
+    data: {
+      package: pkg,
+      imports: organizeImports(imports, pkg),
+      body: "ktor-server/service",
+      unit,
+      options,
+      extras,
+    },
   };
 }
 
@@ -218,7 +319,7 @@ function routesFile(
   functions: RouteFunction[],
 ): FileSpec {
   const imports = [
-    ...typeImports(unit.operations),
+    ...typeImports(unit.operations, "routes"),
     ...style.imports(unit, options),
     ...support,
     ...unit.operations.flatMap((op) => extras[op.id].imports),

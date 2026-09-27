@@ -9,6 +9,7 @@ export function needsSerialName(member: KtEnumMember): boolean {
 export function kotlinxImports(decl: KtDecl): string[] {
   switch (decl.kind) {
     case "data-class":
+      if (decl.plain) return [];
       return [
         "kotlinx.serialization.Serializable",
         ...(decl.serialName !== undefined || decl.properties.some((p) => p.serialName !== undefined)

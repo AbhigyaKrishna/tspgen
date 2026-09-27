@@ -173,11 +173,27 @@ export class ApiBuilder {
       const taken = new Set(params.map((p) => p.name));
       const preferred = identifier(camel(op.body.name ?? "body"));
       const type = this.types.typeUse(op.body.type);
+      const body = op.body;
       result.body = {
         name: taken.has(preferred) ? "requestBody" : preferred,
-        type: op.body.optional ? nullable(type) : type,
-        contentType: op.body.contentTypes[0] ?? "application/json",
-        optional: op.body.optional,
+        type: body.optional ? nullable(type) : type,
+        contentType: body.contentTypes[0] ?? "application/json",
+        optional: body.optional,
+        kind: body.kind,
+        ...(body.parts
+          ? {
+              parts: body.parts.map((p) => ({
+                name: body.type.kind === "named" ? this.types.propertyName(body.type.id, p.property) : identifier(camel(p.property)),
+                wireName: p.name,
+                kind: p.kind,
+                multi: p.multi,
+                optional: p.optional,
+                type: this.types.typeUse(p.type),
+                contentTypes: p.contentTypes,
+              })),
+            }
+          : {}),
+        ...(body.file ? { file: { isText: body.file.isText, contentTypes: body.file.contentTypes } } : {}),
       };
     }
     return result;

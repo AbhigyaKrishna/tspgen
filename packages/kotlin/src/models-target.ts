@@ -49,6 +49,18 @@ function javaTimeSerializersFile(ir: KotlinIR): FileSpec[] {
   ];
 }
 
+/** `HttpFile`, the Kotlin type of `Http.File` bodies and multipart file parts, when the API uses one. */
+function httpFileFile(ir: KotlinIR): FileSpec[] {
+  if (!ir.httpFile) return [];
+  return [
+    {
+      path: `models/${ir.modelsPackage.replaceAll(".", "/")}/HttpFile.kt`,
+      template: "kotlin/file",
+      data: { package: ir.modelsPackage, imports: [], body: "kotlin/model/http-file" },
+    },
+  ];
+}
+
 /** Built-in target: one Kotlin file per declaration under `models/`. */
 export const modelsTarget: Target<KotlinIR> = {
   name: "kotlin-models",
@@ -82,7 +94,7 @@ export const modelsTarget: Target<KotlinIR> = {
         },
       };
     });
-    return [...declFiles, ...javaTimeSerializersFile(ir), ...apiFiles(ir)];
+    return [...declFiles, ...httpFileFile(ir), ...javaTimeSerializersFile(ir), ...apiFiles(ir)];
   },
 };
 

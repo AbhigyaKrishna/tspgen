@@ -3,9 +3,11 @@ import {
   camel,
   javaTimeCodec,
   kotlinString as str,
+  type KtBody,
   type KtGroup,
   type KtOperation,
   type KtParam,
+  type KtPart,
   type KtResultVariant,
 } from "@abhigyakrishna/tspgen-kotlin";
 
@@ -65,6 +67,58 @@ function headerExpr(h: KtParam): string {
 function valueExpr(name: string, typeText: string, imports: readonly string[]): string {
   const item = listItem(typeText);
   return item ? `${name}.joinToString(",") { ${encode("it", item, imports)} }` : encode(name, typeText, imports);
+}
+
+const OCTET_STREAM = "application/octet-stream";
+
+const JSON = "application/json";
+
+/** The declared JSON content type of JSON part `p` as a Kotlin argument; none for `application/json`. */
+function jsonContentType(p: KtPart): string {
+  const declared = p.contentTypes.find((t) => /[/+]json(;|$)/.test(t)) ?? JSON;
+  return declared === JSON ? "" : str(declared);
+}
+
+/** `formData { … }` statement appending one part (every item of a multi part) from `body.<name>`. */
+function partLine(body: string, p: KtPart): string {
+  const wire = str(p.wireName);
+  const append = (value: string): string => {
+    switch (p.kind) {
+      case "file":
+        return `append(${wire}, ${value}.bytes, fileHeaders(${value}, ${wire}, ${str(p.contentTypes[0] ?? OCTET_STREAM)}))`;
+      case "json":
+        return `append(${wire}, encodeJson(${value}), jsonPartHeaders(${jsonContentType(p)}))`;
+      case "text":
+        return `append(${wire}, ${encode(value, p.type.text, p.type.imports)})`;
+    }
+  };
+  const value = `${body}.${p.name}`;
+  if (p.multi) return `${value}${p.optional ? "?" : ""}.forEach { ${append("it")} }`;
+  return p.optional ? `${value}?.let { ${append("it")} }` : append(value);
+}
+
+/** Statements setting the request body. */
+function bodyLines(body: KtBody): string[] {
+  switch (body.kind) {
+    case "multipart":
+      return [
+        "setBody(",
+        "    MultiPartFormDataContent(",
+        "        formData {",
+        ...(body.parts ?? []).map((p) => `            ${partLine(body.name, p)}`),
+        "        },",
+        "    ),",
+        ")",
+      ];
+    case "file":
+      return [
+        `contentType(ContentType.parse(${body.name}.contentType ?: ${str(body.file?.contentTypes[0] ?? OCTET_STREAM)}))`,
+        `${body.name}.filename?.let { header(HttpHeaders.ContentDisposition, ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, it).toString()) }`,
+        `setBody(${body.name}.bytes)`,
+      ];
+    default:
+      return [`contentType(ContentType.parse(${str(body.contentType)}))`, `setBody(${body.name})`];
+  }
 }
 
 /** Exposed to templates as `it.h.ktorClient`. */
@@ -129,7 +183,7 @@ export const ktorClientHelpers = {
       });
     const body = op.body;
     if (body) {
-      const inner = [`contentType(ContentType.parse(${str(body.contentType)}))`, `setBody(${body.name})`];
+      const inner = bodyLines(body);
       lines.push(...(body.optional ? [`if (${body.name} != null) {`, ...inner.map((l) => `    ${l}`), "}"] : inner));
     }
     return lines;

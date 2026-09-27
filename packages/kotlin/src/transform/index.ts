@@ -1,6 +1,6 @@
 import type { ApiIR } from "@abhigyakrishna/tspgen-core";
-import type { Program } from "@typespec/compiler";
-import type { EnumMemberNaming } from "../lib.js";
+import { NoTarget, type Program } from "@typespec/compiler";
+import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
 import type { KotlinIR, KtDecl, KtService, KtTypeUse } from "./model.js";
 import { JAVA_TIME_CLASSES, javaTimeIn, type DateTimeMapping } from "./type-map.js";
@@ -50,6 +50,13 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
   const apiBuilder = new ApiBuilder(builder, apiPackage, { errors: options.errors, packages: options.packages });
   const services = apiBuilder.services(api, options.package);
   const javaTime = usedJavaTime(declarations, services);
+  if (builder.fileUsed) {
+    for (const d of declarations) {
+      if (d.fqn === builder.httpFileFqn) {
+        reportDiagnostic(program, { code: "http-file-conflict", format: { id: d.id, fqn: d.fqn }, target: NoTarget });
+      }
+    }
+  }
   return {
     basePackage: options.package,
     modelsPackage,
@@ -59,6 +66,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     services,
     api,
     javaTime,
+    ...(builder.fileUsed ? { httpFile: builder.httpFileFqn } : {}),
     ...(javaTime.length > 0 ? { javaTimeModule: `${modelsPackage}.javaTimeSerializersModule` } : {}),
   };
 }

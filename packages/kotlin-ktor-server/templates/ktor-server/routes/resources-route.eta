@@ -3,8 +3,8 @@
 <% for (const p of op.params) { -%>
         val <%= p.name %> = <%~ p.location === "path" || p.location === "query" ? "resource." + p.name : s.paramExpr(p) %>
 <% } -%>
-<% if (op.body) { -%>
-        val <%= op.body.name %> = <%~ s.bodyExpr(op.body) %>
+<% for (const line of s.bodyLines(op)) { -%>
+        <%~ line %>
 <% } -%>
 <% for (const c of op.context ?? []) { -%>
         val <%= c.name %> = <%~ c.expr %>

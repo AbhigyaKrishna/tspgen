@@ -1,0 +1,15 @@
+/**
+ * A file sent as an HTTP body or a multipart part: its bytes plus the optional filename and content type.
+ */
+class HttpFile(
+    val filename: String?,
+    val contentType: String?,
+    val bytes: ByteArray,
+) {
+    override fun equals(other: Any?): Boolean =
+        other is HttpFile && filename == other.filename && contentType == other.contentType && bytes.contentEquals(other.bytes)
+
+    override fun hashCode(): Int = 31 * (31 * filename.hashCode() + contentType.hashCode()) + bytes.contentHashCode()
+
+    override fun toString(): String = "HttpFile(filename=$filename, contentType=$contentType, size=${bytes.size})"
+}

@@ -28,4 +28,208 @@ internal inline fun <reified T> encodeParam(value: T): String =
     when (val element = paramJson.encodeToJsonElement(value)) {
         is JsonPrimitive -> element.content
         else -> element.toString()
+    }<% if (it.uploads?.limit) { -%>
+
+
+/**
+ * Runs [block] on the request's multipart parts, each limited to [limit] bytes. Ktor parses the request alongside
+ * [block] (in a child coroutine); when that parser fails on the limit, the call fails with [PayloadTooLargeException],
+ * which Ktor answers with 413. Whatever [block] throws on its own propagates unchanged.
+ */
+internal suspend fun <T> ApplicationCall.withMultipart(limit: Long, block: suspend (MultiPartData) -> T): T {
+    val parserFailure = AtomicReference<Throwable>()
+    try {
+        return coroutineScope {
+            val data = receiveMultipart(formFieldLimit = limit)
+            coroutineContext.job.children.forEach { parser ->
+                parser.invokeOnCompletion { cause ->
+                    if (cause != null && cause !is CancellationException) parserFailure.compareAndSet(null, cause)
+                }
+            }
+            block(data)
+        }
+    } catch (e: Throwable) {
+        if (parserFailure.get().isPartOverLimit()) throw PayloadTooLargeException(limit)
+        throw e
     }
+}
+
+/** Ktor's multipart parser failing on a part over `formFieldLimit` (Ktor 3's wordings). */
+private fun Throwable?.isPartOverLimit(): Boolean {
+    val message = (this as? IOException)?.message ?: return false
+    return message.startsWith("Multipart content length exceeds limit ") ||
+        (message.startsWith("Limit of ") && message.contains(" bytes exceeded"))
+}
+<% } -%>
+<% if (it.uploads?.parts) { -%>
+
+/** The text of a multipart part (a part sent as a file is decoded as UTF-8). */
+internal suspend fun PartData.partText(): String =
+    when (this) {
+        is PartData.FormItem -> value
+        is PartData.FileItem -> provider().toByteArray().decodeToString()
+        is PartData.BinaryChannelItem -> provider().toByteArray().decodeToString()
+        else -> throw BadRequestException("Unsupported multipart part '$name'")
+    }
+<% } -%>
+<% if (it.uploads?.json) { -%>
+
+/** JSON of multipart JSON parts: the models' serializers, as the module's content negotiation uses. */
+internal val partJson: Json = <%~ it.partJson %>
+<% } -%>
+<% if (it.uploads?.buffered) { -%>
+
+/**
+ * A multipart request read into memory: the declared text values<% if (it.uploads.files) { %> and files<% } %> by part name, in arrival order. A part
+ * not in `multiParts` may be sent once (400 otherwise); the parts together may buffer at most `limit` bytes (413 otherwise).
+ */
+internal class ReceivedParts(private val limit: Long, private val multiParts: Set<String>) {
+    private val textValues = mutableMapOf<String, MutableList<String>>()
+<% if (it.uploads.files) { -%>
+    private val fileValues = mutableMapOf<String, MutableList<HttpFile>>()
+<% } -%>
+    private var size = 0L
+
+    fun text(name: String): String? = textValues[name]?.firstOrNull()
+
+    fun texts(name: String): List<String> = textValues[name].orEmpty()
+<% if (it.uploads.files) { -%>
+
+    fun file(name: String): HttpFile? = fileValues[name]?.firstOrNull()
+
+    fun files(name: String): List<HttpFile> = fileValues[name].orEmpty()
+<% } -%>
+
+    /** Checks that part [name] may be read (again). */
+    fun expect(name: String) {
+        if (name !in multiParts && (name in textValues<% if (it.uploads.files) { %> || name in fileValues<% } %>)) {
+            throw BadRequestException("Part '$name' must be sent at most once")
+        }
+    }
+
+    fun addText(name: String, value: String) {
+        buffer(value.utf8Size())
+        textValues.getOrPut(name) { mutableListOf() }.add(value)
+    }
+<% if (it.uploads.files) { -%>
+
+    fun addFile(name: String, file: HttpFile) {
+        buffer(file.bytes.size.toLong())
+        fileValues.getOrPut(name) { mutableListOf() }.add(file)
+    }
+<% } -%>
+
+    private fun buffer(bytes: Long) {
+        size += bytes
+        if (size > limit) throw PayloadTooLargeException(limit)
+    }
+}
+
+private fun String.utf8Size(): Long =
+    sumOf { c -> if (c.code < 0x80) 1L else if (c.code < 0x800 || c.isSurrogate()) 2L else 3L }
+
+/**
+ * Reads the declared parts of a multipart request into memory: `textParts` as text<% if (it.uploads.files) { %>, `fileParts` as files<% } %>. Other parts
+ * are released unread. A part over `limit` bytes, or declared parts over `limit` bytes together, answer 413; a part not
+ * in `multiParts` sent more than once answers 400.
+ */
+internal suspend fun ApplicationCall.receiveParts(
+    limit: Long,
+    textParts: Set<String>,
+<% if (it.uploads.files) { -%>
+    fileParts: Set<String> = emptySet(),
+<% } -%>
+    multiParts: Set<String> = emptySet(),
+): ReceivedParts {
+    val parts = ReceivedParts(limit, multiParts)
+    withMultipart(limit) { data ->
+        data.forEachPart { part ->
+            try {
+                val name = part.name
+                when {
+                    name == null -> Unit
+                    name in textParts -> {
+                        parts.expect(name)
+                        parts.addText(name, part.partText())
+                    }
+<% if (it.uploads.files) { -%>
+                    name in fileParts -> {
+                        parts.expect(name)
+                        parts.addFile(name, part.partFile())
+                    }
+<% } -%>
+                }
+            } finally {
+                part.release()
+            }
+        }
+    }
+    return parts
+}
+<% } -%>
+<% if (it.uploads?.files) { -%>
+
+/** A file part read into memory. A part sent without a filename is rejected: Ktor reads it as (UTF-8) text. */
+internal suspend fun PartData.partFile(): HttpFile =
+    when (this) {
+        is PartData.FileItem -> HttpFile(originalFileName, contentType?.toString(), provider().toByteArray())
+        is PartData.BinaryChannelItem -> HttpFile(null, contentType?.toString(), provider().toByteArray())
+        is PartData.FormItem -> throw BadRequestException("File part '$name' must be sent with a filename")
+        else -> throw BadRequestException("Unsupported multipart part '$name'")
+    }
+<% } -%>
+<% if (it.uploads?.streaming) { -%>
+
+/**
+ * The parts of a multipart request as a flow that reads the request while it is collected: `emitPart` emits the
+ * declared parts, the others are released unread. The flow can be collected once; a part over `limit` bytes answers 413.
+ */
+internal fun <T> ApplicationCall.partsFlow(limit: Long, emitPart: suspend FlowCollector<T>.(PartData) -> Unit): Flow<T> {
+    val collected = AtomicBoolean()
+    return flow {
+        check(collected.compareAndSet(false, true)) { "The parts of a multipart request can be collected only once" }
+        withMultipart(limit) { data ->
+            data.forEachPart { part ->
+                try {
+                    emitPart(part)
+                } finally {
+                    part.release()
+                }
+            }
+        }
+    }
+}
+<% } -%>
+<% if (it.uploads?.channel) { -%>
+
+/**
+ * A file part's content as a channel, readable until the part is released. A part sent without a filename is
+ * rejected: Ktor reads it as (UTF-8) text.
+ */
+internal fun PartData.partChannel(): ByteReadChannel =
+    when (this) {
+        is PartData.FileItem -> provider()
+        is PartData.BinaryChannelItem -> provider()
+        is PartData.FormItem -> throw BadRequestException("File part '$name' must be sent with a filename")
+        else -> throw BadRequestException("Unsupported multipart part '$name'")
+    }
+
+internal fun PartData.partFileName(): String? = (this as? PartData.FileItem)?.originalFileName
+<% } -%>
+<% if (it.uploads?.file) { -%>
+
+/**
+ * Reads a file request body of at most `limit` bytes (larger ones answer 413); the filename comes from a
+ * Content-Disposition header when present.
+ */
+internal suspend fun ApplicationCall.receiveFile(limit: Long): HttpFile {
+    if ((request.headers[HttpHeaders.ContentLength]?.toLongOrNull() ?: 0L) > limit) throw PayloadTooLargeException(limit)
+    val bytes = receiveChannel().readBuffer(limit + 1).readByteArray()
+    if (bytes.size > limit) throw PayloadTooLargeException(limit)
+    return HttpFile(
+        request.headers[HttpHeaders.ContentDisposition]?.let { ContentDisposition.parse(it).parameter(ContentDisposition.Parameters.FileName) },
+        request.headers[HttpHeaders.ContentType],
+        bytes,
+    )
+}
+<% } -%>

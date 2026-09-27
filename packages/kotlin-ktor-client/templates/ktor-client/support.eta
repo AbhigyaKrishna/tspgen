@@ -7,4 +7,26 @@ internal inline fun <reified T> encodeParam(value: T): String =
         else -> element.toString()
     }
 
-internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))
+internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))<% if (it.multipart) { -%>
+
+
+/** JSON of multipart JSON parts: the models' serializers, as the API client's JSON uses. */
+internal val partJson: Json = <%~ it.partJson %>
+
+internal inline fun <reified T> encodeJson(value: T): String = partJson.encodeToJsonElement(value).toString()
+
+/** Headers of a JSON multipart part: the part's declared JSON content type, else `application/json`. */
+internal fun jsonPartHeaders(contentType: String = "application/json"): Headers = headersOf(HttpHeaders.ContentType, contentType)
+<% } -%>
+<% if (it.fileParts) { -%>
+
+/**
+ * Headers of a file part: its content type (else `defaultType`) and filename (else the part name). The filename is
+ * quoted and escaped by Ktor; `formData` adds the `form-data; name=…` disposition itself.
+ */
+internal fun fileHeaders(file: HttpFile, part: String, defaultType: String): Headers =
+    headersOf(
+        HttpHeaders.ContentType to listOf(file.contentType ?: defaultType),
+        HttpHeaders.ContentDisposition to listOf("${ContentDisposition.Parameters.FileName}=${(file.filename ?: part).quote()}"),
+    )
+<% } -%>

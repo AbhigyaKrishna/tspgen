@@ -46,6 +46,8 @@ export interface KtDataClass extends KtDeclBase {
   checks: string[];
   /** Type parameters of a generic class (`Page<T>` → ["T"]). */
   typeParameters?: string[];
+  /** Not `@Serializable`: a multipart request body model, whose file parts are `HttpFile`s. */
+  plain?: boolean;
 }
 
 export interface KtSealedInterface extends KtDeclBase {
@@ -92,6 +94,32 @@ export interface KtBody {
   type: KtTypeUse;
   contentType: string;
   optional: boolean;
+  kind: "single" | "multipart" | "file";
+  /** Parts of a multipart body, in declaration order. */
+  parts?: KtPart[];
+  /** A file body: `type` is `HttpFile`. */
+  file?: KtFileBody;
+}
+
+/** One part of a multipart body, read from / written to a property of the request class. */
+export interface KtPart {
+  /** Property of the request class. */
+  name: string;
+  wireName: string;
+  kind: "file" | "text" | "json";
+  /** Repeated part: the property is a `List` of `type`. */
+  multi: boolean;
+  optional: boolean;
+  /** Type of one value (`HttpFile` for file parts); never nullable. */
+  type: KtTypeUse;
+  /** Declared content types; [] when any. */
+  contentTypes: string[];
+}
+
+export interface KtFileBody {
+  isText: boolean;
+  /** Declared content types; [] when any. */
+  contentTypes: string[];
 }
 
 export interface KtResponse {
@@ -150,6 +178,8 @@ export interface KotlinIR {
   apiDeclarations: KtApiDecl[];
   services: KtService[];
   api: ApiIR;
+  /** FQN of the generated `HttpFile` class, when any type uses `Http.File`. */
+  httpFile?: string;
   /** java.time classes used anywhere (models, parameters, bodies); each gets a generated serializer. */
   javaTime: string[];
   /**

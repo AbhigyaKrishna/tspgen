@@ -64,6 +64,9 @@ export class DeclarationBuilder {
    * checks are never emitted for properties no longer on the class.
    */
   private readonly modelProps = new Map<string, Map<string, PropertyIR>>();
+  /** Ids of multipart models (with parts, or request bodies): plain (non-@Serializable) classes, as they hold files. */
+  private readonly multipartModels: Set<string>;
+  private usesFile = false;
 
   constructor(
     private readonly program: Program,
@@ -71,6 +74,35 @@ export class DeclarationBuilder {
     private readonly options: DeclarationOptions,
   ) {
     this.types = new Map(api.types.map((t) => [t.id, t]));
+    this.multipartModels = new Set([
+      ...api.types.flatMap((t) => (t.kind === "model" && t.multipart ? [t.id] : [])),
+      ...api.services.flatMap((s) =>
+        s.groups.flatMap((g) =>
+          g.operations.flatMap((op) => (op.body?.kind === "multipart" && op.body.type.kind === "named" ? [op.body.type.id] : [])),
+        ),
+      ),
+    ]);
+  }
+
+  /** FQN of the generated `HttpFile` class (models package). */
+  get httpFileFqn(): string {
+    return `${this.options.modelsPackage}.HttpFile`;
+  }
+
+  /** Whether any type use so far mapped `Http.File` to `HttpFile`. */
+  get fileUsed(): boolean {
+    return this.usesFile;
+  }
+
+  /** Kotlin name of property `name` declared on model `modelId`, as its data class declares it. */
+  propertyName(modelId: string, name: string): string {
+    const model = this.types.get(modelId);
+    const prop = model?.kind === "model" ? model.properties.find((p) => p.name === name) : undefined;
+    return prop ? this.kotlinName(prop) : identifier(camel(name));
+  }
+
+  private kotlinName(p: PropertyIR): string {
+    return identifier(decoratorArg(p.decorators, "Kotlin.name") ?? camel(p.name));
   }
 
   build(): KtDecl[] {
@@ -131,6 +163,9 @@ export class DeclarationBuilder {
         );
       case "nullable":
         return nullable(this.typeUse(ref.of));
+      case "file":
+        this.usesFile = true;
+        return { text: "HttpFile", imports: [this.httpFileFqn], nullable: false };
       case "unknown":
         return JSON_ELEMENT;
     }
@@ -194,6 +229,7 @@ export class DeclarationBuilder {
               properties: [],
               implements: [...implementsMeta],
               checks: [],
+              ...(this.multipartModels.has(t.id) ? { plain: true } : {}),
               ...(t.typeParameters?.length ? { typeParameters: t.typeParameters } : {}),
             };
       case "enum":
@@ -395,7 +431,7 @@ export class DeclarationBuilder {
   }
 
   private property(p: PropertyIR, override: boolean, owner: string): KtProperty {
-    const name = identifier(decoratorArg(p.decorators, "Kotlin.name") ?? camel(p.name));
+    const name = this.kotlinName(p);
     const fqn = decoratorArg(p.decorators, "Kotlin.type");
     let type = fqn ? fqnTypeUse(fqn) : this.typeUse(p.type);
     const defaultValue = p.default !== undefined ? this.defaultLiteral(p.default, p.type, type) : undefined;
@@ -409,7 +445,7 @@ export class DeclarationBuilder {
       annotations: this.annotations(p, `${owner}.${p.name}`),
       meta: metaScopes(p.decorators),
     };
-    if (name.replace(/`/g, "") !== p.wireName) prop.serialName = p.wireName;
+    if (name.replace(/`/g, "") !== p.wireName && !this.multipartModels.has(owner)) prop.serialName = p.wireName;
     if (defaultValue !== undefined) prop.default = defaultValue;
     else if (p.optional) prop.default = "null";
     return prop;

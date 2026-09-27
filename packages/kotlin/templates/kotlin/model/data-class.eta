@@ -1,6 +1,6 @@
 <% const d = it.decl; const sup = d.implements.length ? " : " + d.implements.map((f) => it.h.ref(f, it.qualified)).join(", ") : ""; const tp = d.typeParameters?.length ? "<" + d.typeParameters.join(", ") + ">" : ""; %>
-<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable
-<% if (d.serialName !== undefined) { %>@SerialName(<%~ it.h.str(d.serialName) %>)
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><% if (!d.plain) { %>@Serializable
+<% } %><% if (d.serialName !== undefined) { %>@SerialName(<%~ it.h.str(d.serialName) %>)
 <% } %><% if (d.properties.length === 0) { %>class <%= d.name %><%= tp %><%= sup %>
 <% } else { %>data class <%= d.name %><%= tp %>(
 <% for (const p of d.properties) { %><%~ it.h.kdoc(p.docs, "    ") %><%~ it.h.annotations(p.annotations, "    ") %><% if (p.serialName !== undefined) { %>    @SerialName(<%~ it.h.str(p.serialName) %>)

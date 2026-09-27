@@ -21,8 +21,9 @@ function routeImports(unit: ServerUnit): string[] {
     "io.ktor.http.HttpStatusCode",
     "io.ktor.server.response.respond",
     "io.ktor.server.routing.Route",
-    ...(ops.some((o) => o.body && !o.body.optional) ? ["io.ktor.server.request.receive"] : []),
-    ...(ops.some((o) => o.body?.optional) ? ["io.ktor.server.request.receiveNullable"] : []),
+    ...(ops.some((o) => o.body && !o.upload && !o.body.optional) ? ["io.ktor.server.request.receive"] : []),
+    ...(ops.some((o) => o.body && !o.upload && o.body.optional) ? ["io.ktor.server.request.receiveNullable"] : []),
+    ...ops.flatMap((o) => o.upload?.routeImports ?? []),
     ...(ops.some((o) => o.result.kind === "sealed" && o.result.decl.variants.some((v) => v.headers.length > 0))
       ? ["io.ktor.server.response.header"]
       : []),

@@ -45,14 +45,14 @@ const CONVERTERS: Record<string, string> = {
 const SOURCES = { path: "pathParam", query: "queryParam", header: "headerParam", cookie: "cookieParam" } as const;
 
 /** `imports` of the parameter's type pick java.time codecs (see `javaTimeCodec`). */
-function converter(typeText: string, imports: readonly string[]): string | undefined {
+export function converter(typeText: string, imports: readonly string[]): string | undefined {
   if (typeText === "String") return undefined;
   const time = javaTimeCodec(typeText, imports);
   if (time) return `{ ${time.parse} }`;
   return CONVERTERS[typeText] ?? `{ decodeParam<${typeText}>(it) }`;
 }
 
-function convert(expr: string, wire: string, typeText: string, imports: readonly string[], safe: boolean): string {
+export function convert(expr: string, wire: string, typeText: string, imports: readonly string[], safe: boolean): string {
   const conv = converter(typeText, imports);
   return conv ? `${expr}${safe ? "?" : ""}.convertParam(${wire}) ${conv}` : expr;
 }
@@ -81,9 +81,10 @@ export interface ResourceParam {
 }
 
 function requestFields(op: KtOperation): HandlerField[] {
+  const upload = (op as Partial<ServerOperation>).upload;
   return [
     ...op.params.map((p) => ({ name: p.name, type: p.type })),
-    ...(op.body ? [{ name: op.body.name, type: op.body.type }] : []),
+    ...(upload ? upload.fields : op.body ? [{ name: op.body.name, type: op.body.type }] : []),
     ...((op as Partial<ServerOperation>).context ?? []).map((c) => ({ name: c.name, type: c.type })),
   ];
 }
@@ -121,6 +122,13 @@ export const ktorServerHelpers = {
       : convert(`${source}.required(${wire})`, wire, typeText, imports, false);
   },
 
+  /** Route-handler statements reading the request body: `call.receive…` for JSON, the upload plan's lines otherwise. */
+  bodyLines(op: KtOperation): string[] {
+    const upload = (op as Partial<ServerOperation>).upload;
+    if (upload) return upload.lines;
+    return op.body ? [`val ${op.body.name} = ${ktorServerHelpers.bodyExpr(op.body)}`] : [];
+  },
+
   bodyExpr(body: KtBody): string {
     return body.optional
       ? `call.receiveNullable<${body.type.text.replace(/\?$/, "")}>()`
@@ -151,7 +159,9 @@ export const ktorServerHelpers = {
     } else {
       args.push(...fields.map((f) => f.name));
     }
-    return `service.${op.name}(${args.join(", ")})`;
+    const call = `service.${op.name}(${args.join(", ")})`;
+    const wrap = (op as Partial<ServerOperation>).upload?.wrapCall;
+    return wrap ? wrap(call) : call;
   },
 
   headerWrite(h: KtParam): string {
