@@ -89,6 +89,13 @@ export async function startStubServer(): Promise<{ url: string; server: Server; 
       const body = await readBytes(req);
       return send(res, 200, { contentType: req.headers["content-type"], text: body.toString("utf8") });
     }
+    if (url.pathname === "/secure/secret") {
+      return req.headers.authorization === "Bearer secret" ? send(res, 200, { message: "secret" }) : send(res, 401);
+    }
+    if (url.pathname === "/secure/key") {
+      return url.searchParams.get("api_key") === "k" ? send(res, 200, { message: `key ${url.searchParams.get("q")}` }) : send(res, 401);
+    }
+    if (url.pathname === "/secure/public") return send(res, 200, { message: req.headers.authorization ?? "anonymous" });
     send(res, 404, { message: "no route" });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

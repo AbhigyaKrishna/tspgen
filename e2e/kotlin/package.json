@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "tsp compile kotlin.tsp",
+    "generate": "tsp compile kotlin.tsp && tsp compile secure.tsp --config tspconfig.resources.yaml && tsp compile secure.tsp --config tspconfig.nest.yaml",
     "test": "pnpm generate && ./gradlew test --console=plain"
   },
   "dependencies": {

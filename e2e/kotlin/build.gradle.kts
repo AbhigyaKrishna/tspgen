@@ -33,6 +33,10 @@ kotlin {
             "build/generated/tspgen/models",
             "build/generated/tspgen/server",
             "build/generated/tspgen/client",
+            "build/generated/tspgen-resources/models",
+            "build/generated/tspgen-resources/server",
+            "build/generated/tspgen-nest/models",
+            "build/generated/tspgen-nest/server",
         )
     }
 }

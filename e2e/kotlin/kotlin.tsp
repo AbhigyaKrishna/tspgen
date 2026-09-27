@@ -1,5 +1,6 @@
 import "@abhigyakrishna/tspgen-kotlin";
 import "./petstore.tsp";
+import "./secure.tsp";
 
 using TspGen;
 using Http;

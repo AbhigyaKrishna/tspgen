@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import { ApiErrorError, NotFoundError } from "../generated/api";
+import { HttpError } from "../generated/api/errors";
 import { createPetStoreClient, type PetStoreApiClient } from "../generated/client";
 import { petsCreateAction, petsRemoveAction } from "../generated/client/actions/pets";
 import type { Pet } from "../generated/models";
@@ -109,6 +110,26 @@ describe("generated Next.js client against a stub server", () => {
       contentType: "application/octet-stream",
       text: "raw bytes",
     });
+  });
+
+  it("sends @useAuth credentials from ClientConfig.auth", async () => {
+    const secure = createPetStoreClient({
+      baseUrl: process.env.API_BASE_URL!,
+      headers: { authorization: "Bearer from-headers" },
+      auth: { BearerAuth: async () => "secret", PartnerKey: () => "k" },
+    });
+    // The bearer provider wins over a configured Authorization header.
+    expect(await secure.secure.secret()).toEqual({ message: "secret" });
+    expect(await secure.secure.key({ q: "x" })).toEqual({ message: "key x" });
+    expect(requests).toContain("GET /secure/key?q=x&api_key=k");
+    // NoAuth operations get no credentials, only the configured headers.
+    expect(await secure.secure.open()).toEqual({ message: "Bearer from-headers" });
+
+    const denied = await api.secure.secret().catch((e: unknown) => e);
+    expect(denied).toBeInstanceOf(HttpError);
+    expect((denied as HttpError).status).toBe(401);
+    const noToken = createPetStoreClient({ baseUrl: process.env.API_BASE_URL!, auth: { BearerAuth: () => undefined } });
+    await expect(noToken.secure.secret()).rejects.toMatchObject({ status: 401 });
   });
 
   it("runs server actions with validation and serializable errors", async () => {

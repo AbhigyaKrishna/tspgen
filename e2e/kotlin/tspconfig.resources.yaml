@@ -2,10 +2,10 @@ emit:
   - "@abhigyakrishna/tspgen-kotlin"
 options:
   "@abhigyakrishna/tspgen-kotlin":
-    emitter-output-dir: "{project-root}/build/generated/tspgen"
-    package: "com.example.petstore"
+    emitter-output-dir: "{project-root}/build/generated/tspgen-resources"
+    package: "com.example.secure.resources"
     targets:
       - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          routing-style: resources
           auth-providers:
             PartnerKey: com.example.petstore.PARTNER_PROVIDER
-      - "@abhigyakrishna/tspgen-kotlin-ktor-client": {}
