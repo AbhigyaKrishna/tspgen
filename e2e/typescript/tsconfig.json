@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["generated/**/*.ts", "app/**/*.tsx", "test/**/*.ts"]
+  "include": ["generated/**/*.ts", "versioned/generated/**/*.ts", "app/**/*.tsx", "test/**/*.ts"]
 }

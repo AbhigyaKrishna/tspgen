@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "cp ../kotlin/petstore.tsp petstore.tsp && tsp compile typescript.tsp",
+    "generate": "cp ../kotlin/petstore.tsp petstore.tsp && cp ../kotlin/versioned/library.tsp versioned/library.tsp && tsp compile typescript.tsp && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml",
     "test": "pnpm generate && tsc -p tsconfig.json && vitest run"
   },
   "dependencies": {
@@ -17,6 +17,7 @@
     "next": "^16.3.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "@typespec/versioning": "0.86.0"
   }
 }

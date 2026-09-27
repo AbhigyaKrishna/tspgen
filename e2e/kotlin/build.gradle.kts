@@ -37,6 +37,12 @@ kotlin {
             "build/generated/tspgen-resources/server",
             "build/generated/tspgen-nest/models",
             "build/generated/tspgen-nest/server",
+            "build/generated/versioned/v1/models",
+            "build/generated/versioned/v1/server",
+            "build/generated/versioned/v1/client",
+            "build/generated/versioned/v2/models",
+            "build/generated/versioned/v2/server",
+            "build/generated/versioned/v2/client",
         )
     }
 }
