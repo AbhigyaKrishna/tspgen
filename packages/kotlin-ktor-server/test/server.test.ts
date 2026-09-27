@@ -159,6 +159,15 @@ fun StatusPagesConfig.petStoreErrors() {
     expect(java).toContain(`?.map { it.convertParam("at") { Instant.parse(it) } }`);
     expect(java).toContain(`val length = call.headerParam("x-length")?.convertParam("x-length") { Duration.parse(it) }`);
     expect(java).toContain(`call.response.header("x-next", result.next.toString())`);
+    const clash = (
+      await server().compile(`
+        @service namespace S;
+        model Duration { minutes: int32 }
+        @route("/d") op d(@query wait: duration, @body d: Duration): void;
+      `)
+    ).outputs[`${DIR}/SRoutes.kt`];
+    expect(clash).toContain(`{ java.time.Duration.parse(it) }`);
+    expect(clash).not.toContain("import java.time.Duration");
     const module = (await server().compile(spec)).outputs[`${DIR}/SModule.kt`];
     expect(module).toContain("json(Json { serializersModule = javaTimeSerializersModule })");
     expect(module).toContain("import com.acme.models.javaTimeSerializersModule\n");

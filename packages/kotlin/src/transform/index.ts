@@ -3,7 +3,7 @@ import type { Program } from "@typespec/compiler";
 import type { EnumMemberNaming } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
 import type { KotlinIR, KtDecl, KtService, KtTypeUse } from "./model.js";
-import { JAVA_TIME_CLASSES, type DateTimeMapping } from "./type-map.js";
+import { JAVA_TIME_CLASSES, javaTimeIn, type DateTimeMapping } from "./type-map.js";
 import { ApiBuilder } from "./operations.js";
 
 export * from "./model.js";
@@ -74,6 +74,6 @@ function usedJavaTime(declarations: KtDecl[], services: KtService[]): string[] {
     types.push(...op.params.map((p) => p.type), ...(op.body ? [op.body.type] : []));
     for (const r of op.responses) types.push(...(r.body ? [r.body] : []), ...r.headers.map((h) => h.type));
   }
-  const imports = new Set(types.flatMap((t) => t.imports));
-  return JAVA_TIME_CLASSES.filter((fqn) => imports.has(fqn));
+  const used = new Set(types.flatMap(javaTimeIn));
+  return JAVA_TIME_CLASSES.filter((fqn) => used.has(fqn));
 }

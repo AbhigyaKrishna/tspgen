@@ -37,7 +37,12 @@ export interface TargetContext {
   registry: ExtensionRegistry;
   /** Absolute directory this target's files are written to (its `output-dir`, else the emitter output dir). */
   outputDir: string;
-  /** Absolute directory of the built-in models target's files. */
+  /**
+   * Absolute directory of the built-in models target's files. A target whose files import the models by
+   * relative path must rebase those imports when it differs from `outputDir` (TypeScript targets:
+   * `renderImports(file, imports, ext, modelsPrefix(ctx.outputDir, ctx.modelsOutputDir))` from
+   * `@abhigyakrishna/tspgen-typescript`, which rebases imports marked `root: "models"`).
+   */
   modelsOutputDir: string;
 }
 

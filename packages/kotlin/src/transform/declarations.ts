@@ -113,7 +113,11 @@ export class DeclarationBuilder {
         return mapOf(this.typeUse(ref.of));
       case "scalar": {
         const fqn = decoratorArg(ref.custom?.decorators, "Kotlin.type");
-        return fqn ? fqnTypeUse(fqn) : scalarTypeUse(ref.name, this.options.dateTime);
+        if (fqn) return fqnTypeUse(fqn);
+        const scalar = scalarTypeUse(ref.name, this.options.dateTime);
+        // A generated type named like a java.time class (a model `Duration`) would clash with its import.
+        const [time] = scalar.imports.filter((i) => i.startsWith("java.time."));
+        return time && this.hasName(scalar.text) ? { text: time, imports: [], nullable: false } : scalar;
       }
       case "literal":
         return scalarTypeUse(
@@ -295,7 +299,15 @@ export class DeclarationBuilder {
       if (variant.type.kind !== "named" || uses.get(variant.type.id) !== 1) return [];
       const decl = this.decls.get(variant.type.id);
       const source = this.types.get(variant.type.id);
-      return decl?.kind === "data-class" && source?.kind === "model" ? [{ variant, id: variant.type.id, decl, source }] : [];
+      if (decl?.kind !== "data-class" || source?.kind !== "model") return [];
+      // Kotlin requires sealed inheritors in the sealed type's package: nesting must not move a variant
+      // away from a @discriminator base it extends.
+      const sealedBases = this.chain(source)
+        .slice(0, -1)
+        .map((m) => this.decls.get(m.id))
+        .filter((d) => d?.kind === "sealed-interface");
+      if (sealedBases.some((d) => d!.package !== parent.package)) return [];
+      return [{ variant, id: variant.type.id, decl, source }];
     });
     // Inside the interface a nested class shadows any type of the same simple name, so a nested name must
     // not be one the interface or its variants refer to (`catalog: CatalogSource { catalog: Catalog }`),

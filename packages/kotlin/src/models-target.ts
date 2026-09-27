@@ -1,7 +1,14 @@
 import type { FileSpec, Target } from "@abhigyakrishna/tspgen-core";
 import { apiDeclImports, organizeImports, qualifyDecl, resolveDeclImports } from "./imports.js";
-import type { KotlinIR } from "./transform/model.js";
-import { JAVA_TIME_CLASSES } from "./transform/type-map.js";
+import type { KotlinIR, KtDecl, KtTypeUse } from "./transform/model.js";
+import { JAVA_TIME_CLASSES, javaTimeIn } from "./transform/type-map.js";
+
+/** Property types of a declaration, including those of variants nested in it. */
+function declTypes(decl: KtDecl): KtTypeUse[] {
+  if (decl.kind === "typealias" || decl.kind === "enum") return [];
+  const own = decl.properties.map((p) => p.type);
+  return decl.kind === "sealed-interface" ? [...own, ...decl.variants.flatMap(declTypes)] : own;
+}
 
 const USE_SERIALIZERS = "kotlinx.serialization.UseSerializers";
 
@@ -54,7 +61,8 @@ export const modelsTarget: Target<KotlinIR> = {
       let { imports } = resolved;
       // java.time has no kotlinx serializers: register the generated ones for the whole file, which
       // also covers them as type arguments (List<Instant>) and map values.
-      const time = decl.kind === "typealias" ? [] : JAVA_TIME_CLASSES.filter((fqn) => [...imports, ...qualified].includes(fqn));
+      const used = new Set(declTypes(decl).flatMap(javaTimeIn));
+      const time = JAVA_TIME_CLASSES.filter((fqn) => used.has(fqn));
       const serializers = time.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`);
       if (time.length > 0) {
         imports = organizeImports([...imports, USE_SERIALIZERS, ...serializers], decl.package);

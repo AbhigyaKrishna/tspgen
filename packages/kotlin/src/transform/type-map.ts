@@ -48,8 +48,16 @@ export const JAVA_TIME_CLASSES: readonly string[] = Object.values(JAVA_TIME).map
  * parsed with `X.parse(...)` and written with `toString()` (both ISO-8601). Undefined for other types.
  */
 export function javaTimeCodec(typeText: string, imports: readonly string[]): { parse: string; encode: string } | undefined {
-  if (!imports.includes(`java.time.${typeText}`) || !JAVA_TIME_CLASSES.includes(`java.time.${typeText}`)) return undefined;
+  // Written qualified (`java.time.Duration`) when a generated type has the same simple name.
+  const fqn = typeText.startsWith("java.time.") ? typeText : `java.time.${typeText}`;
+  if (!JAVA_TIME_CLASSES.includes(fqn) || (fqn !== typeText && !imports.includes(fqn))) return undefined;
   return { parse: `${typeText}.parse(it)`, encode: "toString()" };
+}
+
+/** java.time classes a type use refers to, imported or written qualified. */
+export function javaTimeIn(type: KtTypeUse): string[] {
+  const qualified: string[] = type.text.match(/java\.time\.[A-Za-z]+/g) ?? [];
+  return JAVA_TIME_CLASSES.filter((fqn) => type.imports.includes(fqn) || qualified.includes(fqn));
 }
 
 export const JSON_ELEMENT: KtTypeUse = {

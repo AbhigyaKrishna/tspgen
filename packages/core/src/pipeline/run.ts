@@ -1,4 +1,5 @@
 import { NoTarget, resolvePath, type Program } from "@typespec/compiler";
+import { relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApiIR } from "../ir/build.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
@@ -120,9 +121,26 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
     }
   }
   if (failed) return;
-  // Every target directory gets its own manifest. The emitter output dir is always written, so files it
-  // held before a target moved elsewhere are cleaned up.
-  for (const [dir, dirOutputs] of outputs) await writeOutputs(program, dir, dirOutputs);
+  // Every directory gets its own manifest, with an entry per language. The emitter output dir is always
+  // written and records the other directories, so a directory a target no longer writes to is cleaned up.
+  const owner = language.name;
+  const others = [...outputs.keys()].filter((dir) => dir !== opts.outputDir);
+  for (const [dir, dirOutputs] of outputs) {
+    if (dir !== opts.outputDir) await writeOutputs(program, dir, dirOutputs, { owner });
+  }
+  const previous = await writeOutputs(program, opts.outputDir, outputs.get(opts.outputDir) ?? [], {
+    owner,
+    outputDirs: others.map((dir) => relativeDir(opts.outputDir, dir)).sort(),
+  });
+  for (const rel of previous.outputDirs ?? []) {
+    const dir = normalizeDir(resolvePath(opts.outputDir, rel));
+    if (!outputs.has(dir)) await writeOutputs(program, dir, [], { owner });
+  }
+}
+
+/** `to` relative to `from`, posix separators (manifests are portable across machines). */
+function relativeDir(from: string, to: string): string {
+  return relative(from, to).split(sep).join("/") || ".";
 }
 
 function templateLayers<L>(opts: PipelineOptions<L>, plugins: TspGenPlugin<L>[]): TemplateLayer[] {

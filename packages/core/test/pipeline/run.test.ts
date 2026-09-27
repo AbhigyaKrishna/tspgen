@@ -128,6 +128,26 @@ describe("runPipeline", () => {
     expect(await manifest(serverDir)).toEqual(["server/Routes.txt"]);
   });
 
+  it("cleans up a directory a target no longer writes to", async () => {
+    const { program } = await Tester.compile(spec);
+    const out = resolveVirtualPath("out");
+    const server: Target<FakeIR> = {
+      name: "fake-server",
+      kind: "server",
+      language: "fake",
+      files: () => [{ path: "server/R.txt", template: "fake/model", data: { model: { name: "R" } } }],
+    };
+    const run = (dir: string) =>
+      runPipeline({ program, outputDir: out, language, targets: [{ target, options: {} }, { target: server, options: {}, outputDir: dir }] });
+    const x = resolveVirtualPath("x");
+    const y = resolveVirtualPath("y");
+    await run(x);
+    expect((await program.host.readFile(resolvePath(x, "server/R.txt"))).text).toBe("model R");
+    await run(y);
+    await expect(program.host.readFile(resolvePath(x, "server/R.txt"))).rejects.toThrow();
+    expect((await program.host.readFile(resolvePath(y, "server/R.txt"))).text).toBe("model R");
+  });
+
   it("treats a directory with a trailing slash as the same directory", async () => {
     const { program } = await Tester.compile(spec);
     const out = resolveVirtualPath("out");
@@ -146,6 +166,7 @@ describe("runPipeline", () => {
     expect((await program.host.readFile(resolvePath(out, "server/R.txt"))).text).toBe("model R");
     const manifest = JSON.parse((await program.host.readFile(resolvePath(out, ".generated-manifest.json"))).text);
     expect(manifest.files).toEqual(["models/Owner.txt", "models/Pet.txt", "server/R.txt"]);
+    expect(Object.keys(manifest.owners)).toEqual(["fake"]);
   });
 
   it("allows the same relative path in different output dirs", async () => {

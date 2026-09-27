@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { modelsPrefix, renderImports } from "../src/imports.js";
 import { emitter, HEADER } from "./tester.js";
 
 const spec = `
@@ -221,3 +222,15 @@ export * from "./results";
     expect(Object.keys(outputs).some((k) => k.startsWith("api/"))).toBe(false);
   });
 });
+
+describe("modelsPrefix", () => {
+  it("rebases models-rooted imports for targets writing elsewhere", () => {
+    const prefix = modelsPrefix("/p/web/src", "/p/shared");
+    expect(prefix).toBe("../../shared");
+    expect(renderImports("client/a", [{ name: "Pet", from: "models/Pet", typeOnly: true, root: "models" }], "", prefix)).toEqual([
+      `import type { Pet } from "../../../shared/models/Pet";`,
+    ]);
+    expect(modelsPrefix("/p/out", "/p/out")).toBe("");
+  });
+});
+

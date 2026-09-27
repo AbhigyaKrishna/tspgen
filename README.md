@@ -74,8 +74,10 @@ Implement the generated `…Service` interfaces outside the output directory.
 `models-output-dir` (language option) and `output-dir` (any target's options) move those files to another
 directory, e.g. models into a shared contract module and routes into the feature module. Paths are relative
 to the project root and may use `{project-root}` / `{emitter-output-dir}`; paths inside each directory are
-unchanged (`models/…`, `server/…`), and every directory gets its own `.generated-manifest.json`. The Next.js
-client rewrites its imports of the models when they live elsewhere.
+unchanged (`models/…`, `server/…`), and every directory gets its own `.generated-manifest.json` with an entry
+per emitter, so the Kotlin and TypeScript emitters can share a directory. A directory a target no longer
+writes to is cleaned up on the next run. The Next.js client rewrites its imports of the models when they live
+elsewhere (other TypeScript targets: see `TargetContext.modelsOutputDir`).
 
 **Generics.** A template model is generated once as a generic class and every use passes its arguments:
 `model Page<T> { items: T[]; total: int64 }` → `data class Page<T>(val items: List<T>, val total: Long)` and
@@ -88,7 +90,8 @@ discriminated union, and everything with `generics: false`.
 **Date and time.** With `date-time: java.time` (the default) `utcDateTime`, `offsetDateTime`, `plainDate`,
 `plainTime` and `duration` map to `java.time.Instant`, `OffsetDateTime`, `LocalDate`, `LocalTime` and
 `Duration`. kotlinx.serialization has no serializers for them, so `models/<pkg>/models/JavaTimeSerializers.kt`
-holds ISO-8601 serializers for the ones in use and each model file using them declares
+holds ISO-8601 serializers for the ones in use (a java.time class is written qualified, e.g.
+`java.time.Duration`, when a generated type has the same name) and each model file using them declares
 `@file:UseSerializers(...)`; Ktor parameters and headers of these types use `X.parse` / `toString()`. The
 same file declares `javaTimeSerializersModule`, which the generated server module and client defaults put in
 their `Json` so bodies that are java.time values themselves (`List<Instant>`) work; with `module: false`, use

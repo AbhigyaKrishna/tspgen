@@ -99,6 +99,19 @@ data class Slot(
     expect(serializers).toContain("object DurationSerializer : KSerializer<Duration> {");
   });
 
+  it("writes java.time types qualified when a generated type has the same name", async () => {
+    const { outputs } = await emitter().compile(`
+      @service namespace S;
+      model Duration { minutes: int32 }
+      model W { d: duration; x: Duration }
+    `);
+    const w = outputs["models/com/acme/models/W.kt"];
+    expect(w).toContain("    val d: java.time.Duration,\n    val x: Duration,\n");
+    expect(w).not.toContain("import java.time.Duration");
+    expect(w).toContain("@file:UseSerializers(DurationSerializer::class)");
+    expect(outputs["models/com/acme/models/JavaTimeSerializers.kt"]).toContain("object DurationSerializer");
+  });
+
   it("keeps kotlin.time and kotlinx.datetime with date-time: kotlin.time", async () => {
     const { outputs } = await emitter({ "date-time": "kotlin.time" }).compile(`
       @service namespace S;
@@ -210,6 +223,21 @@ sealed interface Pet {
     const shape = outputs["models/com/acme/models/Shape.kt"];
     expect(shape).toContain("    data class ShapeA(");
     expect(shape).toContain("    data class Other(");
+  });
+
+  it("keeps a variant top-level when nesting would move it away from its sealed base's package", async () => {
+    const { outputs } = await emitter({ packages: [{ namespace: "S.Base", package: "com.acme.base" }] }).compile(`
+      @service namespace S;
+      namespace Base {
+        @discriminator("type") model Animal { type: string }
+        model Cat extends Animal { type: "cat"; lives: int32 }
+      }
+      model Other { y: int32 }
+      @discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
+      union Pick { cat: Base.Cat, other: Other }
+    `);
+    expect(outputs["models/com/acme/base/Cat.kt"]).toContain("data class Cat(");
+    expect(outputs["models/com/acme/models/Pick.kt"]).toContain("    data class Other(");
   });
 
   it("keeps every variant top-level with union-variants: top-level", async () => {

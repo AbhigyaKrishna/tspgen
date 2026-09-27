@@ -1,4 +1,4 @@
-import { posix, relative, sep } from "node:path";
+import { isAbsolute, posix, relative, sep } from "node:path";
 
 /** An imported name; `from` is an output-relative path without extension, or a module when `external`. */
 export interface TsImport {
@@ -20,7 +20,12 @@ export function relativeSpecifier(fromFile: string, toFile: string, extension: s
  * Both are absolute; the result uses posix separators.
  */
 export function modelsPrefix(outputDir: string, modelsOutputDir: string): string {
-  return relative(outputDir, modelsOutputDir).split(sep).join("/");
+  const rel = relative(outputDir, modelsOutputDir);
+  // On Windows, directories on different drives have no relative path, so no relative import can work.
+  if (isAbsolute(rel)) {
+    throw new Error(`models output dir '${modelsOutputDir}' cannot be imported relatively from '${outputDir}' (different drives)`);
+  }
+  return rel.split(sep).join("/");
 }
 
 /** `from` of a models-rooted path as seen from a target whose models live at `prefix` (see `modelsPrefix`). */
