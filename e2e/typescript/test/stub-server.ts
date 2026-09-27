@@ -36,6 +36,29 @@ async function describeFiles(form: FormData, name: string): Promise<string[]> {
   return Promise.all(form.getAll(name).map(async (f) => (typeof f === "string" ? `${name}:::${f}` : `${name}:${f.name}:${f.type}:${await f.text()}`)));
 }
 
+/** The pet feed as written: CRLF, CR and LF line ends, a comment, retry, an unknown event and one after the end. */
+const FEED = [
+  ": feed start\r\nretry: 1000\r\n\r\n",
+  'event: added\r\ndata: {"id":1,"name":"Rex","species":"dog","born_at":"2020-01-01T00:00:00Z"}\r\n\r\n',
+  "event: unknown\ndata: skipped\n\n",
+  "event: note\rdata: line one\rdata: line two\r\r",
+  "event: count\ndata: 3\n\n",
+  'event: seen\ndata: "2026-09-27T10:00:00.123Z"\n\n',
+  "data: [done]\n\n",
+  "event: count\ndata: 99\n\n",
+];
+
+/** Streams the feed a few bytes at a time (so lines and UTF-8 characters are split across chunks). */
+async function streamFeed(res: ServerResponse): Promise<void> {
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+  const bytes = Buffer.from(FEED.join(""));
+  for (let i = 0; i < bytes.length; i += 7) {
+    res.write(bytes.subarray(i, i + 7));
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  res.end();
+}
+
 /** In-memory pet store matching e2e/kotlin/petstore.tsp. Pet 13 is returned malformed on purpose. */
 export async function startStubServer(): Promise<{ url: string; server: Server; requests: string[] }> {
   const pets = new Map<number, Json>();
@@ -96,6 +119,33 @@ export async function startStubServer(): Promise<{ url: string; server: Server; 
       return url.searchParams.get("api_key") === "k" ? send(res, 200, { message: `key ${url.searchParams.get("q")}` }) : send(res, 401);
     }
     if (url.pathname === "/secure/public") return send(res, 200, { message: req.headers.authorization ?? "anonymous" });
+    if (url.pathname === "/feed" && req.method === "GET") {
+      const fail = url.searchParams.get("fail");
+      if (fail === "404") return send(res, 404, { message: "no feed" });
+      if (fail === "400") return send(res, 400, { code: "bad_feed", message: "bad feed" });
+      if (url.searchParams.get("endless") === "true") {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        let n = 0;
+        const timer = setInterval(() => res.write(`event: count\ndata: ${n++}\n\n`), 5);
+        res.on("close", () => {
+          clearInterval(timer);
+          requests.push("closed /feed");
+        });
+        return;
+      }
+      return streamFeed(res);
+    }
+    if (url.pathname === "/feed/plugin" && req.method === "POST") {
+      const filter = await readJson(req);
+      if (filter.species === "parrot") return send(res, 404, { message: "no birds" });
+      return streamFeed(res);
+    }
+    if (url.pathname === "/feed/raw" && req.method === "GET") {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      const count = Number(url.searchParams.get("count"));
+      for (let i = 0; i < count; i++) res.write(`${i === 1 ? "event: custom\n" : ""}id: ${i}\ndata: message ${i}\n\n`);
+      return res.end();
+    }
     send(res, 404, { message: "no route" });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

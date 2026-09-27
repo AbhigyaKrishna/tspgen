@@ -15,11 +15,14 @@ dependencies {
     implementation("io.ktor:ktor-server-status-pages:$ktor")
     implementation("io.ktor:ktor-server-auth:$ktor")
     implementation("io.ktor:ktor-server-resources:$ktor")
+    implementation("io.ktor:ktor-server-sse:$ktor")
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktor")
     implementation("io.ktor:ktor-client-core:$ktor")
     implementation("io.ktor:ktor-client-content-negotiation:$ktor")
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
     testImplementation("io.ktor:ktor-server-test-host:$ktor")
+    testImplementation("io.ktor:ktor-server-cio:$ktor")
+    testImplementation("io.ktor:ktor-client-cio:$ktor")
     testImplementation(kotlin("test"))
 }
 
@@ -43,6 +46,9 @@ kotlin {
             "build/generated/versioned/v2/models",
             "build/generated/versioned/v2/server",
             "build/generated/versioned/v2/client",
+            "build/generated/tspgen-clash/models",
+            "build/generated/tspgen-clash/server",
+            "build/generated/tspgen-clash/client",
         )
     }
 }

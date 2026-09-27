@@ -1,4 +1,6 @@
 import "@typespec/http";
+import "@typespec/events";
+import "@typespec/sse";
 
 using Http;
 
@@ -153,4 +155,45 @@ interface Uploads {
   @post @route("/raw") raw(@header contentType: "multipart/form-data", @multipartBody body: PhotoUpload): UploadReceipt;
   @put @route("/file") file(@bodyRoot file: File): FileReceipt;
   @put @route("/file-stream") fileStream(@bodyRoot file: File): FileReceipt;
+}
+
+/** Events of the pet feed: one per variant, sent as server-sent events. */
+@TypeSpec.Events.events
+union PetEvents {
+  /** A pet was added. */
+  added: Pet,
+
+  /** Free text; may span several lines. */
+  @TypeSpec.Events.contentType("text/plain")
+  note: string,
+
+  count: int32,
+
+  /** When the feed was last read: a bare java.time payload in Kotlin. */
+  seen: utcDateTime,
+
+  /** Ends the stream. */
+  @TypeSpec.Events.contentType("text/plain")
+  @TypeSpec.SSE.terminalEvent
+  "[done]",
+}
+
+model FeedFilter {
+  species?: Species;
+  endless?: boolean;
+}
+
+/** Server-sent event streams: typed (text writer and SSE plugin, see kotlin.tsp) and untyped. */
+@route("/feed")
+interface Feed {
+  /** `fail` answers 404 / 400 before streaming; `endless` streams until the client stops. */
+  @get watch(@query fail?: int32, @query endless?: boolean): TypeSpec.SSE.SSEStream<PetEvents> | NotFound | ApiError;
+
+  @post @route("/plugin") watchPlugin(@body filter: FeedFilter): TypeSpec.SSE.SSEStream<PetEvents> | NotFound;
+
+  /** Untyped: `count` messages with an id each. */
+  @get @route("/raw") raw(@query count: int32): {
+    @header contentType: "text/event-stream";
+    @body body: string;
+  };
 }

@@ -1,6 +1,10 @@
 import "@typespec/http";
+import "@typespec/events";
+import "@typespec/sse";
+import "@abhigyakrishna/tspgen-kotlin";
 
 using Http;
+using TspGen;
 
 // Generated auth (Kotlin-only): a second service whose routes get authenticate(...) wrappers from @useAuth.
 // Compiled with kotlin.tsp (dsl routing) and on its own with tspconfig.resources.yaml (Resources routing) and
@@ -55,4 +59,18 @@ namespace SecureStore {
     @post create(): Greeting;
     @delete @useAuth([BearerAuth, PartnerKey]) purge(): Greeting;
   }
+
+  @TypeSpec.Events.events
+  union Ticks {
+    tick: int32,
+  }
+
+  /** Server-sent event streams behind the service-level BearerAuth: the text writer and the SSE plugin. */
+  @route("/stream")
+  interface Stream {
+    @get @route("/ticks") ticks(): TypeSpec.SSE.SSEStream<Ticks>;
+    @get @route("/ticks-plugin") ticksPlugin(): TypeSpec.SSE.SSEStream<Ticks>;
+  }
 }
+
+@@meta(SecureStore.Stream.ticksPlugin, "kotlin:ktor-server", #{ sse: "plugin" });

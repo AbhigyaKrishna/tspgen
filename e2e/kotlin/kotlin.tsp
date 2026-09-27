@@ -11,6 +11,7 @@ using Http;
 @@meta(PetStore.Uploads.streaming, "kotlin:ktor-server", #{ multipart: "streaming" });
 @@meta(PetStore.Uploads.raw, "kotlin:ktor-server", #{ multipart: "raw" });
 @@meta(PetStore.Uploads.fileStream, "kotlin:ktor-server", #{ multipart: "streaming" });
+@@meta(PetStore.Feed.watchPlugin, "kotlin:ktor-server", #{ sse: "plugin" });
 
 // Kotlin-only upload edge cases (the TypeScript e2e shares petstore.tsp, not this file).
 namespace PetStore {

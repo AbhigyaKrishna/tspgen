@@ -1,0 +1,9 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../build/generated/tspgen-clash"
+    package: "com.example.clash"
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server": {}
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client": {}

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "tsp compile kotlin.tsp && tsp compile secure.tsp --config tspconfig.resources.yaml && tsp compile secure.tsp --config tspconfig.nest.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml",
+    "generate": "tsp compile kotlin.tsp && tsp compile secure.tsp --config tspconfig.resources.yaml && tsp compile secure.tsp --config tspconfig.nest.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml && tsp compile clash",
     "test": "pnpm generate && ./gradlew test --console=plain"
   },
   "dependencies": {
@@ -11,7 +11,10 @@
     "@abhigyakrishna/tspgen-kotlin-ktor-client": "workspace:*",
     "@abhigyakrishna/tspgen-kotlin-ktor-server": "workspace:*",
     "@typespec/compiler": "1.16.0",
+    "@typespec/events": "0.86.0",
     "@typespec/http": "1.16.0",
+    "@typespec/sse": "0.86.0",
+    "@typespec/streams": "0.86.0",
     "@typespec/versioning": "0.86.0"
   }
 }

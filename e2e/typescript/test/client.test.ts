@@ -132,6 +132,48 @@ describe("generated Next.js client against a stub server", () => {
     await expect(noToken.secure.secret()).rejects.toMatchObject({ status: 401 });
   });
 
+  it("streams server-sent events as async iterables", async () => {
+    const collect = async <T>(iterable: AsyncIterable<T>): Promise<T[]> => {
+      const out: T[] = [];
+      for await (const item of iterable) out.push(item);
+      return out;
+    };
+    const feed = [
+      { event: "added", data: { id: 1, name: "Rex", species: "dog", born_at: "2020-01-01T00:00:00Z" } },
+      { event: "note", data: "line one\nline two" },
+      { event: "count", data: 3 },
+      { event: "seen", data: "2026-09-27T10:00:00.123Z" },
+      { event: "message", data: "[done]" },
+    ];
+    expect(await collect(api.feed.watch())).toEqual(feed);
+    expect(await collect(api.feed.watchPlugin({ filter: {} }))).toEqual(feed);
+    expect(await collect(api.feed.raw({ count: 3 }))).toEqual([
+      { data: "message 0", id: "0" },
+      { data: "message 1", event: "custom", id: "1" },
+      { data: "message 2", id: "2" },
+    ]);
+
+    const missing = await collect(api.feed.watch({ fail: 404 })).catch((e: unknown) => e);
+    expect(missing).toBeInstanceOf(NotFoundError);
+    expect((missing as NotFoundError).error.message).toBe("no feed");
+    await expect(collect(api.feed.watch({ fail: 400 }))).rejects.toBeInstanceOf(ApiErrorError);
+    await expect(collect(api.feed.watchPlugin({ filter: { species: "parrot" } }))).rejects.toBeInstanceOf(NotFoundError);
+
+    // Stopping early closes the connection; so does aborting.
+    const counts: unknown[] = [];
+    for await (const event of api.feed.watch({ endless: true })) {
+      counts.push(event);
+      if (counts.length === 3) break;
+    }
+    expect(counts).toEqual([0, 1, 2].map((n) => ({ event: "count", data: n })));
+    const controller = new AbortController();
+    const aborted = (async () => {
+      for await (const _ of api.feed.watch({ endless: true }, { signal: controller.signal })) controller.abort();
+    })();
+    await expect(aborted).rejects.toMatchObject({ name: "AbortError" });
+    await expect.poll(() => requests.filter((r) => r === "closed /feed").length).toBe(2);
+  });
+
   it("runs server actions with validation and serializable errors", async () => {
     const created = await petsCreateAction({ pet: { id: 7, name: "Tom", species: "cat" } });
     expect(created).toEqual({

@@ -147,6 +147,7 @@ class UploadEdgesE2ETest {
                 toysService = InMemoryToys(),
                 accessoriesService = InMemoryAccessories(),
                 uploadsService = RecordingUploads(),
+                feedService = DemoFeed(),
             )
         }
         block(PetStoreApiClient(createClient { petStoreDefaults() }, "http://localhost"))

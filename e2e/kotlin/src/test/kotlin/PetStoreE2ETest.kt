@@ -173,6 +173,7 @@ class PetStoreE2ETest {
                 toysService = InMemoryToys(),
                 accessoriesService = InMemoryAccessories(),
                 uploadsService = RecordingUploads(),
+                feedService = DemoFeed(),
             )
         }
         val api = PetStoreApiClient(
@@ -239,6 +240,7 @@ class PetStoreE2ETest {
                 toysService = InMemoryToys(),
                 accessoriesService = InMemoryAccessories(),
                 uploadsService = RecordingUploads(),
+                feedService = DemoFeed(),
             )
         }
         val api = PetStoreApiClient(createClient { petStoreDefaults() }, "http://localhost")

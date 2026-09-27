@@ -4,9 +4,11 @@ import com.example.petstore.api.ApiException
 import com.example.petstore.client.SecureStoreApiClient
 import com.example.petstore.client.secureStoreDefaults
 import com.example.petstore.models.Greeting
+import com.example.petstore.models.Ticks
 import com.example.petstore.server.LobbyService
 import com.example.petstore.server.PartnerService
 import com.example.petstore.server.SecureService
+import com.example.petstore.server.StreamService
 import com.example.petstore.server.secureStoreModule
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.defaultRequest
@@ -23,6 +25,8 @@ import io.ktor.server.auth.UserIdPrincipal
 import io.ktor.server.auth.bearer
 import io.ktor.server.response.respond
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -32,12 +36,16 @@ import com.example.secure.nest.server.ItemsService as NestItems
 import com.example.secure.nest.server.LobbyService as NestLobby
 import com.example.secure.nest.server.PartnerService as NestPartner
 import com.example.secure.nest.server.SecureService as NestSecure
+import com.example.secure.nest.server.StreamService as NestStream
+import com.example.secure.nest.models.Ticks as NestTicks
 import com.example.secure.nest.server.secureStoreModule as nestModule
 import com.example.secure.resources.models.Greeting as ResGreeting
 import com.example.secure.resources.server.ItemsService as ResItems
 import com.example.secure.resources.server.LobbyService as ResLobby
 import com.example.secure.resources.server.PartnerService as ResPartner
 import com.example.secure.resources.server.SecureService as ResSecure
+import com.example.secure.resources.server.StreamService as ResStream
+import com.example.secure.resources.models.Ticks as ResTicks
 import com.example.secure.resources.server.secureStoreModule as resourcesModule
 
 class Greetings : SecureService {
@@ -56,6 +64,12 @@ class PartnerGreetings : PartnerService {
 class LobbyGreetings : LobbyService {
     override suspend fun index() = Greeting("lobby")
     override suspend fun members() = Greeting("members")
+}
+
+/** Server-sent event streams behind BearerAuth: the text writer (ticks) and the SSE plugin (ticksPlugin). */
+class TickStream : StreamService {
+    override suspend fun ticks() = flowOf<Ticks>(Ticks.Tick(1), Ticks.Tick(2))
+    override suspend fun ticksPlugin() = flowOf<Ticks>(Ticks.Tick(3))
 }
 
 class ItemGreetings : DslItems {
@@ -125,6 +139,9 @@ private val MATRIX: List<Triple<Pair<HttpMethod, String>, Creds, Int>> = buildLi
     expect(get, "/items", ANONYMOUS to 200)
     expect(HttpMethod.Post, "/items", BEARER to 200, ANONYMOUS to 401, PARTNER to 401)
     expect(HttpMethod.Delete, "/items", BOTH to 200, BEARER to 401, PARTNER to 401)
+    // Server-sent event streams (text writer and SSE plugin) inside the same authenticate(...) wrapper.
+    expect(get, "/stream/ticks", BEARER to 200, ANONYMOUS to 401, BAD_BEARER to 401, PARTNER to 401)
+    expect(get, "/stream/ticks-plugin", BEARER to 200, ANONYMOUS to 401, BAD_BEARER to 401)
 }
 
 private suspend fun HttpClient.checkMatrix(mode: String) {
@@ -146,7 +163,7 @@ class SecureE2ETest {
     fun useAuthDrivesAuthenticateWrappers() = testApplication {
         application {
             installSecureAuth()
-            secureStoreModule(Greetings(), PartnerGreetings(), LobbyGreetings(), ItemGreetings())
+            secureStoreModule(Greetings(), PartnerGreetings(), LobbyGreetings(), ItemGreetings(), TickStream())
         }
         fun api(token: String?, partner: String? = null) = SecureStoreApiClient(
             createClient {
@@ -195,13 +212,19 @@ class SecureE2ETest {
         assertEquals(Greeting("items"), anonymous.items.list())
         assertEquals(Greeting("purged"), both.items.purge())
         assertEquals(401, assertFailsWith<ApiException> { authed.items.purge() }.status)
+
+        // Streams: 401 before any event without a (valid) token; the events with one, through both writers.
+        assertEquals(listOf<Ticks>(Ticks.Tick(1), Ticks.Tick(2)), authed.stream.ticks().toList())
+        assertEquals(listOf<Ticks>(Ticks.Tick(3)), authed.stream.ticksPlugin().toList())
+        assertEquals(401, assertFailsWith<ApiException> { anonymous.stream.ticks().toList() }.status)
+        assertEquals(401, assertFailsWith<ApiException> { wrong.stream.ticksPlugin().toList() }.status)
     }
 
     @Test
     fun dslRoutingAuthMatrix() = testApplication {
         application {
             installSecureAuth()
-            secureStoreModule(Greetings(), PartnerGreetings(), LobbyGreetings(), ItemGreetings())
+            secureStoreModule(Greetings(), PartnerGreetings(), LobbyGreetings(), ItemGreetings(), TickStream())
         }
         client.checkMatrix("dsl")
     }
@@ -230,6 +253,10 @@ class SecureE2ETest {
                     override suspend fun list() = ResGreeting("items")
                     override suspend fun create() = ResGreeting("created")
                     override suspend fun purge() = ResGreeting("purged")
+                },
+                object : ResStream {
+                    override suspend fun ticks() = flowOf<ResTicks>(ResTicks.Tick(1))
+                    override suspend fun ticksPlugin() = flowOf<ResTicks>(ResTicks.Tick(2))
                 },
             )
         }
@@ -260,6 +287,10 @@ class SecureE2ETest {
                     override suspend fun list() = NestGreeting("items")
                     override suspend fun create() = NestGreeting("created")
                     override suspend fun purge() = NestGreeting("purged")
+                },
+                object : NestStream {
+                    override suspend fun ticks() = flowOf<NestTicks>(NestTicks.Tick(1))
+                    override suspend fun ticksPlugin() = flowOf<NestTicks>(NestTicks.Tick(2))
                 },
             )
         }
