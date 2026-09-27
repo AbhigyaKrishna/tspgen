@@ -128,7 +128,7 @@ emit:
   - "@abhigyakrishna/tspgen-typescript"
 options:
   "@abhigyakrishna/tspgen-typescript":
-    zod: true                         # emit PetSchema: z.ZodType<Pet> next to each type (default false)
+    zod: true                         # emit PetSchema: z.ZodType<Pet> next to each type, with constraint decorators as refinements (default false; requires zod ≥ 4.3)
     import-extension: none            # none (Next.js/bundlers) | .js (Node ESM)
     layout: per-type                  # per-type (models/<Name>.ts + barrel) | single-file (types.ts, namespace banners)
     errors: typed                     # typed | thrown (no <Body>Error classes; success unions unchanged; api/errors.ts keeps HttpError)
@@ -140,6 +140,7 @@ options:
           base-url-env: API_BASE_URL  # env var read by the actions' server-side client
           error-class: ApiError       # flat: error class name
           error-model: ErrorResponse  # flat: model whose fields the error class exposes (optional)
+          validate: false             # flat only: check body/query/constrained path params with the zod schemas before fetch (needs zod: true); rejects with ZodError. Grouped style warns (validate-flat-only)
 ```
 
 Output: `models/` (one file per type + `index.ts`), `api/` (`HttpError` + typed `<Body>Error` classes,
@@ -176,8 +177,24 @@ if (!result.ok) console.error(result.status, result.error);
 
 The fetch client throws `HttpError` subclasses (`NotFoundError` has a typed `.error`); with zod on,
 responses are validated (`validate: false` in `ClientConfig` turns it off) and Server Action input is
-checked first (`{ ok: false, status: 400, error: { issues } }`). Property names match the JSON wire
-names; dates are ISO strings.
+checked first (`{ ok: false, status: 400, error: { issues } }`; not affected by `validate: false`). Direct
+`<Group>Client` calls don't check their params. Property names match the JSON wire names; dates are ISO
+strings.
+
+**Constraints in zod.** With `zod: true`, TypeSpec constraint decorators on model properties and operation
+parameters become refinements on the generated schemas: `@minLength`/`@maxLength` → `.min(n)`/`.max(n)` on
+strings, `@pattern` → `.regex(new RegExp("…", "u"))`, `@minItems`/`@maxItems` → `.min`/`.max` on arrays,
+`@minValue`/`@maxValue` → `.gte`/`.lte` on numbers, and `notBlank: true` in meta scope `*` or `typescript` →
+`.regex(/\S/, "must not be blank")`. Constraints that don't fit the property's type are ignored, and a
+property with a `@TS.type` override gets none. Optional properties use zod's `.exactOptional()` instead of
+`.optional()`, so schemas type-check under `exactOptionalPropertyTypes`; when parsing responses or models,
+an optional key present with value `undefined` (e.g. `{ note: undefined }`) fails — omit the key instead.
+Request checks (Server Action input, flat `validate` bodies) drop `undefined`-valued keys first, as JSON
+does when sending. Not applied: numeric bounds (`@minValue`/`@maxValue`) on `decimal`/`decimal128` (zod
+strings, so string constraints such as `@pattern` do apply), `@minValueExclusive`/`@maxValueExclusive`, and
+scalar-level constraints on array items (`Slug[]`); `notBlank` applies to model properties only. `@pattern`
+is compiled with the `u` flag when valid there (else without flags), and a pattern JavaScript can't parse is
+skipped with an `invalid-pattern` warning.
 
 **Flat client** (`client-style: flat`) — one class per service, for projects that want a thin typed `fetch`
 wrapper instead of the grouped client/hooks/actions tree:
@@ -203,9 +220,16 @@ has all of that model's required fields, else `undefined`; without `error-model`
 the model's other identifier-named fields (nullable types kept as-is), and
 `isUnauthorized`/`isForbidden`/`isNotFound`/`isConflict`.
 
-The flat client does not validate responses with zod, even with `zod: true` on the `@abhigyakrishna/tspgen-typescript`
-options — that option only adds `<Type>Schema` exports alongside the models. It also ignores `errors: typed`
-for its own error handling: `<error-class>` is always the flat client's single thrown error type, so the
+The flat client does not validate responses. With `validate: true` (requires `zod: true` on the
+`@abhigyakrishna/tspgen-typescript` options), each method checks its body (skipped when an optional body is
+`undefined`; `undefined`-valued keys are ignored), its query object, and any path parameters that carry
+constraints against the generated zod schemas before calling `fetch`; on failure the returned promise
+rejects with zod's `ZodError` — not `<error-class>` — and the original value is still sent, not zod's
+parsed copy. A path parameter or body named `z` is renamed inside the method so it does not shadow the zod
+import (parameters are positional, so callers are unaffected), and a generated type named `z` is reported as
+a name clash. The grouped client style validates responses and Server Action input (not direct
+`<Group>Client` calls) on its own; setting `validate` there has no effect and warns (`validate-flat-only`).
+The flat client also ignores `errors: typed` for its own error handling: `<error-class>` is always the flat client's single thrown error type, so the
 `api/` `<Body>Error` classes are still generated but go unused; set `errors: thrown` to skip generating them.
 
 React Query hooks and Server Actions have no schema default: unset, the grouped client treats them as on; under
@@ -284,7 +308,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `kotlin` | `imports: string[]` | types | extra imports |
 | `kotlin` | `implements: string[]` | models, sealed hierarchies | extra supertypes (FQN; qualified automatically on name clashes) |
 | `kotlin` | `checks: string[]` | models | statements appended to the data class `init { }` block (`init` is reserved in TypeSpec) |
-| `kotlin` (or `*`) | `notBlank: boolean` | string properties | `require(x.isNotBlank())`, emitted with or without `validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract |
+| `kotlin` / `typescript` (or `*`) | `notBlank: boolean` | string properties | `require(x.isNotBlank())`, emitted with or without `validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract; TypeScript: `.regex(/\S/)` on the zod schema |
 | `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`) |
 | `kotlin:ktor-server` / `kotlin:ktor-client` | `annotations: string[]` | operations, groups | annotations on service / client methods |
 | `kotlin:ktor-server` | `wrap: string[]` | namespaces, groups, operations | route-builder calls wrapped around routes, outermost first (dsl style); duplicates within one chain are dropped and shared prefixes share one block |
@@ -399,6 +423,17 @@ and vitest.
 - **New language:** create an emitter package with a `LanguageModule` (`transform(apiIR) → YourIR`,
   base `templates`, `helpers`, optional `format`) and a built-in models target, and call `runPipeline`
   from `$onEmit`. Core (IR, plugins, templates, targets, manifest) is reused unchanged.
+
+## Upgrading from 0.1.3
+
+| Change | Restore 0.1.3 behaviour |
+|---|---|
+| zod schemas include constraint decorators, so the grouped client rejects responses that violate them | `validate: false` in `ClientConfig` (turns off response validation) |
+| Optional properties use `.exactOptional()`: a present key with value `undefined` fails response/model parsing (request checks drop such keys first) | omit the key instead |
+| Server Action input violating constraint decorators returns `{ ok: false, status: 400 }` instead of calling the API | none (`validate: false` only covers response parsing) |
+| Kotlin `validation: true` also checks scalar-level constraints on `Scalar \| null` properties | `validation: false`, or move the constraint off the scalar |
+| Generated zod schemas use `.exactOptional()`, so zod ≥ 4.3 is required (declared as an optional peer dependency) | none (upgrade zod) |
+| `notBlank` in scope `*` now also affects TypeScript | scope it to `kotlin` |
 
 ## Upgrading from 0.1.2
 
