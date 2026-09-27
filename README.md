@@ -141,7 +141,7 @@ options:
     targets:
       - "@abhigyakrishna/tspgen-ts-nextjs-client":
           client-style: grouped       # grouped (client/…, hooks, actions) | flat (client.ts: one <Service>Client class)
-          react-query: true           # grouped only; no schema default — unset behaves as true (flat: error if set true)
+          react-query: true           # no schema default — grouped: unset behaves as true; flat: unset behaves as false (true adds queries.ts + hooks.ts)
           server-actions: true        # grouped only; no schema default — unset behaves as true (flat: error if set true)
           base-url-env: API_BASE_URL  # env var read by the actions' server-side client
           error-class: ApiError       # flat: error class name
@@ -208,19 +208,25 @@ wrapper instead of the grouped client/hooks/actions tree:
 ```
 types.ts / models/…   models (per layout)
 client.ts             ClientOptions, <error-class>, <Service>Client (one method per operation)
-index.ts              export * from ./types (or ./models/index) and ./client
+index.ts              export * from ./types (or ./models/index), ./client (and ./queries with react-query)
+queries.ts            react-query: true only — <Op>Vars, <service>Keys, <service>Queries (server-safe)
+hooks.ts              react-query: true only — "use client": <Service>ClientProvider, use<Service>Client,
+                      use<Op>Query / use<Op>Mutation (not re-exported from index.ts; import from ./hooks)
 ```
 
 ```ts
 const api = new ShopClient({ baseUrl: "/api", headers: { authorization: token } });
 const page = await api.listNodes({ kind: "DATABASE", limit: 10 });   // path params, then body, then a query object
 try { await api.readNode(id); } catch (e) { if (e instanceof ApiError && e.isNotFound) … }
+await api.readNode(id, { signal: controller.signal });              // optional trailing init: cancellation
 ```
 
 Methods are named after operations (names must be unique across the service) and take path parameters
 positionally, then the body, then a query object (named `query`, or `queryParams`/`params` if that name is
-already taken); array query values are comma-joined into one value unless the param has `explode: true`, in
-which case the key repeats. Void operations don't read the response body; others decode an empty body as
+already taken), then an optional `init?: { signal?: AbortSignal }` whose signal is passed to `fetch` (named
+`init`, or `requestInit`/`options`/`init2`… if a parameter already uses the name); array query values are comma-joined into one value unless the param has `explode: true`, in
+which case the key repeats. A path parameter or body named like a reserved word (`class`, `default`, …) is
+renamed inside the method (`classValue`); parameters are positional, so callers are unaffected. Void operations don't read the response body; others decode an empty body as
 `undefined`. `<error-class>` exposes `status`, `body` (the `error-model`, decoded only when the JSON error body
 has all of that model's required fields, else `undefined`; without `error-model` it's the raw decoded body),
 the model's other identifier-named fields (nullable types kept as-is), and
@@ -238,16 +244,66 @@ a name clash. The grouped client style validates responses and Server Action inp
 The flat client also ignores `errors: typed` for its own error handling: `<error-class>` is always the flat client's single thrown error type, so the
 `api/` `<Body>Error` classes are still generated but go unused; set `errors: thrown` to skip generating them.
 
-React Query hooks and Server Actions have no schema default: unset, the grouped client treats them as on; under
-`client-style: flat` setting either to `true` is an error (`unsupported-in-flat-style`). The flat style also
+**Flat client + TanStack Query** (`react-query: true`; off by default for the flat style):
+
+```ts
+// queries.ts (server-safe, re-exported from index.ts) — prefetch on the server
+await queryClient.prefetchQuery(shopQueries.nodes.readNode(api, { id }));
+
+// app/providers.tsx — a class instance can't cross from a Server Component, so create the client here, once
+"use client";
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient());
+  // with @useAuth, credentials are configured here too: { baseUrl: "/api", auth: { BearerAuth: () => getToken() } }
+  const [api] = useState(() => new ShopClient({ baseUrl: "/api" }));
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ShopClientProvider client={api}>{children}</ShopClientProvider>
+    </QueryClientProvider>
+  );
+}
+
+// Client Components (hooks from ./hooks, "use client") — every hook takes one <Op>Vars object
+const { data } = useReadNodeQuery({ id });
+const nodes = useListNodesQuery({ query: { kind: "DATABASE" } }, { staleTime: 5_000 });
+const update = useUpdateNodeMutation({ onSuccess: () => queryClient.invalidateQueries({ queryKey: shopKeys.nodes.all }) });
+update.mutate({ id, body: { name: "db" }, query: { dryRun: true } });
+```
+
+`<Op>Vars` (for operations with inputs) holds the path parameters under the generated parameter names
+(camelCased, e.g. `@path node_id` → `nodeId`; a parameter renamed inside the method — `z` with `validate`, a
+reserved word such as `class` — keeps that name here), `body` (optional when the body is; documented with the
+body parameter's doc comment), and `query` (the method's query object; optional unless a query parameter is
+required); operations without inputs get no Vars type and their hooks take none (`useRefreshMutation()`,
+variables `void`). A void GET/HEAD query resolves `null` (TanStack Query rejects `undefined` data), so its data
+type is `null`; the grouped client's void queries do the same. Keys and query options of deprecated
+operations are marked `@deprecated`, like their hooks. Keys are
+`<service>Keys.all` (`[Service]`), `<service>Keys.<group>.all` (`[Service, group]`) and, per GET/HEAD
+operation, `<service>Keys.<group>.<op>(vars)` (`[Service, group, op, vars]`); `<service>Queries.<group>.<op>(client,
+vars)` returns `queryOptions` whose `queryFn` passes TanStack's `signal` to the method (cancelled queries abort
+the fetch) and applies `staleTime` from `@meta(…, "typescript:ts-nextjs-client", #{ staleTime })`. GET/HEAD
+operations get `use<Op>Query(vars, options?)`; all others, uploads included, get `use<Op>Mutation(options?)`
+whose `mutate` takes the Vars object (mutations are not cancellable). `use<Service>Client()` throws outside
+`<Service>ClientProvider`. Hooks and query options call the provided client's methods, so `@useAuth` credentials
+(the client's `auth` option) and the query's `signal` both reach `fetch`. An operation with a path parameter named `body` (and a body) or `query` (and query
+parameters), which would collide with those Vars keys, gets no hooks, keys or Vars — only its client method —
+with a `flat-react-query-skipped` warning. With react-query the flat style also reports a hook, Vars type or query key generated twice — the same operation name in two services, a query operation
+named `all`, a group named `All` (`flat-react-query-name-clash`); and generated types named like the new
+exports or like the TanStack Query / React names the two files use (`queryOptions`, `useQuery`,
+`useMutation`, `UseQueryOptions`, `UseMutationOptions`, `createContext`, `createElement`, `useContext`,
+`ReactNode`, `Omit`, `ReturnType`, `<Service>ClientContext`) (`flat-client-name-clash`).
+
+React Query hooks and Server Actions have no schema default: unset, the grouped client treats them as on and
+the flat client treats React Query as off; under `client-style: flat` setting `server-actions: true` is an
+error (`unsupported-in-flat-style`). The flat style also
 rejects, per operation, several success responses or response headers, header/cookie parameters, non-JSON
 bodies other than multipart and file uploads, non-JSON responses, optional path parameters, and operation
 names that clash with client members (`flat-client-unsupported`); rejects duplicate operation names
 (`duplicate-operation-name`); rejects an `error-model` that isn't a generated model (`unknown-error-model`);
 and rejects a generated type named like the error class, `ClientOptions`, `<Service>Client` or, with `@useAuth`,
 `<Service>Auth` (`flat-client-name-clash`, since `index.ts` re-exports both), or like a name `client.ts` uses
-internally — a global such as `Response`, `Promise` or `RequestInit`, with uploads `BodyInit`, `RawBody`,
-`PartSpec` or `toFormData`, with `@useAuth` `AuthScheme`, `AuthEntries`, `resolveAuth` or `base64`, with
+internally — a global such as `Response`, `Promise`, `RequestInit` or `AbortSignal`, with uploads `BodyInit`,
+`RawBody`, `PartSpec` or `toFormData`, with `@useAuth` `AuthScheme`, `AuthEntries`, `resolveAuth` or `base64`, with
 `validate` zod's `z` (same code, its own message) — rename it with `@TS.name`. With `@useAuth`, an operation
 named `auth` clashes with a client member. `Headers`,
 `Blob`, `File` and `FormData` are read through `globalThis`, so models may use those names.
@@ -635,6 +691,11 @@ and vitest.
 | Specs using `@useAuth` get `authenticate(...)` route wrappers on the Ktor server (providers named after the scheme ids, see Authentication); a route whose `wrap` meta already calls `authenticate(...)` gets both, and then accepts either provider | `generate-auth: false` on the Ktor server target |
 | `ServerOpExtras` (routes template data `extras[op.id]`): `authenticate` still lists the provider names of the route's `authenticate(...)` wrapper, now also those generated from `@useAuth` (the scheme ids); the full wrapper call is in the new `auth` (and `authProviders`, `authStrategy`, `authOptional`). A plugin routing style or overridden routes template rendering `authenticate` alone keeps routes protected, but loses `strategy`/`optional`/`auth-providers` expressions: warning `auth-wrapper-not-rendered` | render `extras[op.id].auth[0]` as the wrapper, or `generate-auth: false` |
 | Specs using `@useAuth` get a `<Service>Auth` type and `auth` option in the Next.js clients (`ClientConfig<Auth>` / `ClientOptions<Auth>` become generic); in the flat client a model named `<Service>Auth`, `AuthScheme`, `AuthEntries`, `resolveAuth` or `base64`, or an operation named `auth`, is now a clash | none needed for the runtime (no `auth` → no credentials added); rename clashing names with `@TS.name` |
+| Every flat client method has a new optional trailing parameter `init?: { signal?: AbortSignal }` (after the query object; named `requestInit`/`options`/`init2`… when a parameter already uses `init`), and `fetch` gets `signal` when one is passed; positional calls are unaffected, but code relying on the exact parameter list (e.g. `Parameters<typeof api.readNode>`, wrappers spreading `...args`) sees the extra parameter | none (ignore the parameter) |
+| A flat method whose path parameter or body is named like a reserved word (`class`) — previously an invalid signature — now names it `classValue` | none (the previous output did not compile) |
+| A generated type named `AbortSignal` is reported as a flat-client name clash (`flat-client-name-clash`), since the new `init` parameter uses the global | rename it with `@TS.name` |
+| The grouped client's React Query options for void GET/HEAD operations resolve `null` instead of `undefined` (which TanStack Query v5 rejects, so those queries always failed); their hook data type is `null` | none (the previous queries could not succeed) |
+| `react-query: true` with `client-style: flat` generates `queries.ts` and `hooks.ts` instead of failing with `unsupported-in-flat-style` (unset or `false` still generates neither) | leave `react-query` unset |
 | The flat client (JSON-only APIs too) passes fetch a `Headers` object (`new globalThis.Headers(options.headers)`) instead of a plain object, and its JSON `content-type` replaces a `Content-Type` from `ClientOptions.headers` in any letter case; a custom `fetch` reading `init.headers` as a plain object (`init.headers["authorization"]`) must read it through `new Headers(init.headers).get(…)` | none (adapt the custom fetch) |
 
 ## Upgrading from 0.1.2
