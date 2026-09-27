@@ -34,11 +34,11 @@ describe("generated flat client (house style)", () => {
     const page = await api.listNodes({ kind: "DATABASE", limit: 10 });
     expect(page.items).toEqual([node]);
     expect(calls[0]?.url).toBe("http://api/graph/nodes?kind=DATABASE&limit=10");
-    expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe("Bearer t");
+    expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer t");
 
     expect(await api.createNode({ name: "db", kind: "DATABASE" })).toEqual(node);
     expect(calls[1]?.init?.body).toBe(JSON.stringify({ name: "db", kind: "DATABASE" }));
-    expect((calls[1]?.init?.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    expect(new Headers(calls[1]?.init?.headers).get("content-type")).toBe("application/json");
 
     expect(await api.deleteNode("n 1")).toBeUndefined();
     expect(calls[2]?.url).toBe("http://api/graph/nodes/n%201");

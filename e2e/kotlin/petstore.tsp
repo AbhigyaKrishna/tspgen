@@ -110,3 +110,47 @@ interface Accessories {
   @get page(@query offset?: int32): Page<Accessory>;
   @post add(@body accessory: Accessory): void;
 }
+
+/** A photo upload: text, JSON and file parts. */
+model PhotoUpload {
+  caption: HttpPart<string>;
+  rating?: HttpPart<int32>;
+  pet: HttpPart<Pet>;
+  photo: HttpPart<File>;
+  extras?: HttpPart<File>[];
+}
+
+/** What the server read from a multipart upload. */
+model UploadReceipt {
+  caption: string;
+  rating?: int32;
+  petName: string;
+
+  /** `<part>:<filename>:<content type>:<text>` per file part, in arrival order. */
+  files: string[];
+}
+
+/** What the server read from a file body. */
+model FileReceipt {
+  filename?: string;
+  contentType?: string;
+  text: string;
+}
+
+/** One operation per server multipart mode (kotlin.tsp sets the modes). */
+@route("/uploads")
+interface Uploads {
+  @post @route("/buffered") buffered(
+    @header contentType: "multipart/form-data",
+    @multipartBody body: PhotoUpload,
+  ): UploadReceipt;
+
+  @post @route("/streaming") streaming(
+    @header contentType: "multipart/form-data",
+    @multipartBody body: PhotoUpload,
+  ): UploadReceipt;
+
+  @post @route("/raw") raw(@header contentType: "multipart/form-data", @multipartBody body: PhotoUpload): UploadReceipt;
+  @put @route("/file") file(@bodyRoot file: File): FileReceipt;
+  @put @route("/file-stream") fileStream(@bodyRoot file: File): FileReceipt;
+}

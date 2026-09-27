@@ -81,6 +81,36 @@ describe("generated Next.js client against a stub server", () => {
     expect(defaults.next).toEqual({ revalidate: 60, tags: ["pets"] });
   });
 
+  it("uploads multipart bodies as FormData and file bodies as-is", async () => {
+    const upload = {
+      caption: "Rex at the park",
+      rating: 5,
+      pet: { id: 1, name: "Rex", species: "dog" } as const,
+      photo: new File(["png-bytes"], "rex.png", { type: "image/png" }),
+      extras: [new Blob(["extra"])],
+    };
+    const expected = {
+      caption: "Rex at the park",
+      rating: 5,
+      petName: "Rex",
+      files: ["photo:rex.png:image/png:png-bytes", "extras:extras:application/octet-stream:extra"],
+    };
+    expect(await api.uploads.buffered({ body: upload })).toEqual(expected);
+    expect(await api.uploads.raw({ body: { ...upload, rating: undefined, extras: undefined } })).toEqual({
+      ...expected,
+      rating: undefined,
+      files: ["photo:rex.png:image/png:png-bytes"],
+    });
+    expect(await api.uploads.file({ file: new Blob(["hello"], { type: "text/plain" }) })).toEqual({
+      contentType: "text/plain",
+      text: "hello",
+    });
+    expect(await api.uploads.fileStream({ file: new Blob(["raw bytes"]) })).toEqual({
+      contentType: "application/octet-stream",
+      text: "raw bytes",
+    });
+  });
+
   it("runs server actions with validation and serializable errors", async () => {
     const created = await petsCreateAction({ pet: { id: 7, name: "Tom", species: "cat" } });
     expect(created).toEqual({

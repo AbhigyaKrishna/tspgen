@@ -14,6 +14,28 @@ async function readJson(req: IncomingMessage): Promise<Json> {
   return JSON.parse(raw) as Json;
 }
 
+async function readBytes(req: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks);
+}
+
+/** Parses a multipart/form-data request with the platform's FormData parser (fails without a boundary). */
+async function readForm(req: IncomingMessage): Promise<FormData> {
+  const body = await readBytes(req);
+  return new Response(new Uint8Array(body), { headers: { "content-type": req.headers["content-type"] ?? "" } }).formData();
+}
+
+async function text(value: FormDataEntryValue | null): Promise<string | undefined> {
+  if (value === null) return undefined;
+  return typeof value === "string" ? value : value.text();
+}
+
+/** `<part>:<filename>:<content type>:<text>` for every file of a part, like the Kotlin e2e service. */
+async function describeFiles(form: FormData, name: string): Promise<string[]> {
+  return Promise.all(form.getAll(name).map(async (f) => (typeof f === "string" ? `${name}:::${f}` : `${name}:${f.name}:${f.type}:${await f.text()}`)));
+}
+
 /** In-memory pet store matching e2e/kotlin/petstore.tsp. Pet 13 is returned malformed on purpose. */
 export async function startStubServer(): Promise<{ url: string; server: Server; requests: string[] }> {
   const pets = new Map<number, Json>();
@@ -52,6 +74,20 @@ export async function startStubServer(): Promise<{ url: string; server: Server; 
     if (url.pathname === "/toys" && req.method === "POST") {
       toys.push(await readJson(req));
       return send(res, 204);
+    }
+    if (url.pathname.startsWith("/uploads/") && req.method === "POST") {
+      const form = await readForm(req);
+      const rating = await text(form.get("rating"));
+      return send(res, 200, {
+        caption: await text(form.get("caption")),
+        ...(rating === undefined ? {} : { rating: Number(rating) }),
+        petName: (JSON.parse((await text(form.get("pet"))) ?? "{}") as Json).name,
+        files: [...(await describeFiles(form, "photo")), ...(await describeFiles(form, "extras"))],
+      });
+    }
+    if (url.pathname.startsWith("/uploads/file") && req.method === "PUT") {
+      const body = await readBytes(req);
+      return send(res, 200, { contentType: req.headers["content-type"], text: body.toString("utf8") });
     }
     send(res, 404, { message: "no route" });
   });

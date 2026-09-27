@@ -14,23 +14,41 @@ import com.example.petstore.models.Page
 import com.example.petstore.models.Pet
 import com.example.petstore.models.Rope
 import com.example.petstore.models.Species
+import com.example.petstore.models.FileReceipt
+import com.example.petstore.models.HttpFile
+import com.example.petstore.models.PhotoUpload
 import com.example.petstore.models.Toy
+import com.example.petstore.models.UploadReceipt
+import com.example.petstore.server.PhotoUploadPart
+import com.example.petstore.server.UploadsService
 import com.example.petstore.server.AccessoriesService
 import com.example.petstore.server.PetsService
 import com.example.petstore.server.ToysService
 import com.example.petstore.server.petStoreModule
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.forms.MultiPartFormDataContent
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.MultiPartData
+import io.ktor.http.content.PartData
+import io.ktor.http.content.forEachPart
 import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.UserIdPrincipal
 import io.ktor.server.auth.bearer
 import io.ktor.server.testing.testApplication
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.toByteArray
+import kotlinx.serialization.json.Json
 import java.io.Serializable
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
 class InMemoryPets : PetsService {
@@ -84,6 +102,62 @@ class InMemoryAccessories : AccessoriesService {
     }
 }
 
+private fun describeFile(part: String, filename: String?, contentType: String?, bytes: ByteArray): String =
+    "$part:$filename:$contentType:${bytes.decodeToString()}"
+
+class RecordingUploads : UploadsService {
+    override suspend fun buffered(body: PhotoUpload): UploadReceipt =
+        UploadReceipt(
+            caption = body.caption,
+            rating = body.rating,
+            petName = body.pet.name,
+            files = (listOf("photo" to body.photo) + body.extras.orEmpty().map { "extras" to it })
+                .map { (part, file) -> describeFile(part, file.filename, file.contentType, file.bytes) },
+        )
+
+    override suspend fun streaming(parts: Flow<PhotoUploadPart>): UploadReceipt {
+        var caption = ""
+        var rating: Int? = null
+        var petName = ""
+        val files = mutableListOf<String>()
+        parts.collect { part ->
+            when (part) {
+                is PhotoUploadPart.Caption -> caption = part.value
+                is PhotoUploadPart.Rating -> rating = part.value
+                is PhotoUploadPart.Pet -> petName = part.value.name
+                is PhotoUploadPart.Photo -> files += describeFile("photo", part.filename, part.contentType, part.channel.toByteArray())
+                is PhotoUploadPart.Extras -> files += describeFile("extras", part.filename, part.contentType, part.channel.toByteArray())
+            }
+        }
+        return UploadReceipt(caption, rating, petName, files)
+    }
+
+    override suspend fun raw(data: MultiPartData): UploadReceipt {
+        val fields = mutableMapOf<String, String>()
+        val files = mutableListOf<String>()
+        data.forEachPart { part ->
+            when (part) {
+                is PartData.FormItem -> fields[part.name!!] = part.value
+                is PartData.FileItem ->
+                    files += describeFile(part.name!!, part.originalFileName, part.contentType?.toString(), part.provider().toByteArray())
+                else -> Unit
+            }
+            part.release()
+        }
+        return UploadReceipt(
+            caption = fields.getValue("caption"),
+            rating = fields["rating"]?.toInt(),
+            petName = Json.decodeFromString<Pet>(fields.getValue("pet")).name,
+            files = files,
+        )
+    }
+
+    override suspend fun file(file: HttpFile): FileReceipt = FileReceipt(file.filename, file.contentType, file.bytes.decodeToString())
+
+    override suspend fun fileStream(contentType: String?, channel: ByteReadChannel): FileReceipt =
+        FileReceipt(null, contentType, channel.toByteArray().decodeToString())
+}
+
 class PetStoreE2ETest {
     @Test
     fun generatedClientTalksToGeneratedServer() = testApplication {
@@ -93,7 +167,13 @@ class PetStoreE2ETest {
                     authenticate { credential -> if (credential.token == "secret") UserIdPrincipal("tester") else null }
                 }
             }
-            petStoreModule(InMemoryPets(), InMemoryToys(), InMemoryAccessories())
+            petStoreModule(
+                extrasService = RecordingExtras(),
+                petsService = InMemoryPets(),
+                toysService = InMemoryToys(),
+                accessoriesService = InMemoryAccessories(),
+                uploadsService = RecordingUploads(),
+            )
         }
         val api = PetStoreApiClient(
             createClient {
@@ -147,5 +227,55 @@ class PetStoreE2ETest {
         api.accessories.add(Accessory.Tag(text = "Rex"))
         assertEquals(Page(listOf(Accessory.Collar(3), Accessory.Tag("Rex")), 2), api.accessories.page())
         assertEquals(Page(listOf<Accessory>(Accessory.Tag("Rex")), 2), api.accessories.page(offset = 1))
+    }
+
+    @Test
+    fun uploadsReachEveryServerMode() = testApplication {
+        application {
+            install(Authentication) { bearer("api") { authenticate { null } } }
+            petStoreModule(
+                extrasService = RecordingExtras(),
+                petsService = InMemoryPets(),
+                toysService = InMemoryToys(),
+                accessoriesService = InMemoryAccessories(),
+                uploadsService = RecordingUploads(),
+            )
+        }
+        val api = PetStoreApiClient(createClient { petStoreDefaults() }, "http://localhost")
+        val rex = Pet(id = 1, name = "Rex", species = Species.DOG)
+        val upload = PhotoUpload(
+            caption = "Rex at the park",
+            rating = 5,
+            pet = rex,
+            photo = HttpFile("rex.png", "image/png", "png-bytes".encodeToByteArray()),
+            extras = listOf(HttpFile(null, null, "extra".encodeToByteArray())),
+        )
+        val expected = UploadReceipt(
+            caption = "Rex at the park",
+            rating = 5,
+            petName = "Rex",
+            files = listOf("photo:rex.png:image/png:png-bytes", "extras:extras:application/octet-stream:extra"),
+        )
+        assertEquals(expected, api.uploads.buffered(upload))
+        assertEquals(expected, api.uploads.streaming(upload))
+        assertEquals(expected, api.uploads.raw(upload))
+        assertEquals(
+            UploadReceipt("Rex at the park", null, "Rex", listOf("photo:rex.png:image/png:png-bytes")),
+            api.uploads.buffered(upload.copy(rating = null, extras = null)),
+        )
+
+        assertEquals(
+            FileReceipt("notes.txt", "text/plain", "hello"),
+            api.uploads.file(HttpFile("notes.txt", "text/plain", "hello".encodeToByteArray())),
+        )
+        assertEquals(
+            FileReceipt(null, "application/octet-stream", "raw bytes"),
+            api.uploads.fileStream(HttpFile(null, null, "raw bytes".encodeToByteArray())),
+        )
+
+        val missingPhoto = client.post("/uploads/buffered") {
+            setBody(MultiPartFormDataContent(formData { append("caption", "x") }))
+        }
+        assertEquals(HttpStatusCode.BadRequest, missingPhoto.status)
     }
 }
