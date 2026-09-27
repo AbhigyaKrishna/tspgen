@@ -45,6 +45,8 @@ options:
           service-suffix: Service       # interface name suffix, e.g. Api → PetsApi
           module: true                  # false: no <Service>Module.kt (you install ContentNegotiation/StatusPages, and Resources if routing-style: resources)
           nest-routes: false            # true: route("/common/prefix") { get { } get("/{id}") { } } (dsl style)
+          multipart: buffered           # buffered | streaming | raw — how multipart/file bodies reach the service (see Uploads)
+          max-upload-size: 52428800     # bytes per multipart part, per buffered request / file body; larger → 413 (see Uploads)
       - "@abhigyakrishna/tspgen-kotlin-ktor-client": {}
     naming:
       enum-members: UPPER_SNAKE         # UPPER_SNAKE | PascalCase
@@ -235,11 +237,94 @@ The flat client also ignores `errors: typed` for its own error handling: `<error
 React Query hooks and Server Actions have no schema default: unset, the grouped client treats them as on; under
 `client-style: flat` setting either to `true` is an error (`unsupported-in-flat-style`). The flat style also
 rejects, per operation, several success responses or response headers, header/cookie parameters, non-JSON
-bodies or responses, optional path parameters, and operation names that clash with client members
-(`flat-client-unsupported`); rejects duplicate operation names (`duplicate-operation-name`); rejects an
-`error-model` that isn't a generated model (`unknown-error-model`); and rejects a generated type named like
-the error class, `ClientOptions`, or `<Service>Client` (`flat-client-name-clash`, since `index.ts` re-exports
-both) — rename it with `@TS.name`.
+bodies other than multipart and file uploads, non-JSON responses, optional path parameters, and operation
+names that clash with client members (`flat-client-unsupported`); rejects duplicate operation names
+(`duplicate-operation-name`); rejects an `error-model` that isn't a generated model (`unknown-error-model`);
+and rejects a generated type named like the error class, `ClientOptions`, or `<Service>Client`
+(`flat-client-name-clash`, since `index.ts` re-exports both), or like a name `client.ts` uses internally — a
+global such as `Response`, `Promise` or `RequestInit`, with uploads `BodyInit`, `RawBody`, `PartSpec` or
+`toFormData`, with `validate` zod's `z` (same code, its own message) — rename it with `@TS.name`. `Headers`,
+`Blob`, `File` and `FormData` are read through `globalThis`, so models may use those names.
+
+## Uploads (multipart and file bodies)
+
+```tsp
+model PhotoUpload {
+  caption: HttpPart<string>;
+  rating?: HttpPart<int32>;
+  pet: HttpPart<Pet>;             // JSON part
+  photo: HttpPart<File>;
+  extras?: HttpPart<File>[];      // repeated part
+}
+
+@route("/uploads") interface Uploads {
+  @post upload(@header contentType: "multipart/form-data", @multipartBody body: PhotoUpload): UploadReceipt;
+  @put @route("/avatar") avatar(@bodyRoot file: File<"image/png">): void;
+}
+```
+
+A part is `text` (scalars, enums and literals, also nullable — encoded like a query parameter, even when TypeSpec
+gives it an `application/json` content type), `json` (models, arrays, records, tuples and unions with such a
+variant, e.g. `HttpPart<Cat | Dog>` or `HttpPart<Meta | null>` — sent as `application/json`) or `file`
+(`Http.File`, a model extending it, or `bytes`: `HttpPart<bytes>` is a file part too). A part declared with an
+envelope, `HttpPart<{ @header contentType: "application/vnd.x+json"; @body value: Meta }>`, is a `Meta` part with
+that content type (no wrapper model). The `contentType` header parameter of a multipart or file operation is
+dropped from every generated signature (the HTTP runtime sets it, with the multipart boundary), and a plain
+`Http.File`'s `*/*` content type counts as none declared.
+
+| Target | Multipart body | File body |
+|---|---|---|
+| Kotlin models | `PhotoUpload` (and any model declaring `HttpPart`s) is a plain (non-`@Serializable`) data class; file parts are `HttpFile(filename, contentType, bytes)` / `List<HttpFile>`; `HttpFile.kt` is generated only when a file is used | `HttpFile` |
+| Ktor server `buffered` (default) | `upload(body: PhotoUpload)`; the declared parts read into memory (others skipped unread); a missing required part → 400 | `avatar(file: HttpFile)` (filename from `Content-Disposition`, else `null`) |
+| Ktor server `streaming` | `upload(parts: Flow<PhotoUploadPart>)` with `PhotoUploadPart.Caption(value)`, …, `PhotoUploadPart.Photo(filename, contentType, channel)`; one `PhotoUploadPart.kt` per model in the server package (a model with the same simple name from another package gets a package-prefixed name) | `avatar(contentType: String?, channel: ByteReadChannel)` |
+| Ktor server `raw` | `upload(data: MultiPartData)` | `avatar(channel: ByteReadChannel)` |
+| Ktor client | `upload(body: PhotoUpload)` → `MultiPartFormDataContent`, same `PhotoUpload`/`HttpFile` shape as the buffered server | `avatar(file: HttpFile)` → the bytes with `file.contentType`, else the declared type |
+| TypeScript models | file parts are `globalThis.Blob` (a DOM `File` is one; `globalThis` so a model named `Blob` cannot shadow it), zod `z.instanceof(globalThis.Blob)` | `globalThis.Blob` |
+| Next.js grouped / flat client | the body object is sent as `FormData`; fetch sets the content type (with the boundary), not the client, replacing any `Content-Type` from the client headers | the `Blob` is sent as-is with `blob.type`, else the declared type |
+
+Pick the server mode with the `multipart` target option, or per operation / interface / namespace with
+`@@meta(PetStore.Uploads.upload, "kotlin:ktor-server", #{ multipart: "streaming" })` (other values warn
+`invalid-meta` and fall back to the option).
+
+- Size limit (`max-upload-size`, default 50 MiB, Ktor's default `formFieldLimit`; override it per operation /
+  interface / namespace with `#{ maxUploadSize: 1048576 }` in the same `@meta("kotlin:ktor-server", …)`):
+  - every multipart part, in all modes (via `receiveMultipart(formFieldLimit)`), may hold at most that many bytes;
+  - `buffered` multipart additionally caps the total it buffers for one request (the declared parts together) at
+    that many bytes, and a `buffered` file body too;
+  - `streaming` and `raw` multipart hand the parts to the service as they arrive, without a total cap, and
+    `streaming`/`raw` file bodies hand the service the request channel unbounded.
+
+  Over a limit → **413 Payload Too Large**. Only Ktor's multipart parser failing on the limit becomes 413: an
+  exception the service (or a `streaming` collector) throws itself propagates unchanged, whatever its message.
+- `buffered` holds the declared parts in memory; use `streaming` or `raw` for large files. It also answers 400
+  when a part that is not a list (`HttpPart<T>`, not `HttpPart<T>[]`) is sent more than once
+  (`Part 'photo' must be sent at most once`).
+- A streaming `Flow` can be collected once (a second collection throws `IllegalStateException`); a file part's
+  `channel` is readable only until the collector returns for that part; unlike `buffered`, required parts are
+  not checked. Undeclared parts are skipped.
+- The Ktor server needs file parts sent **with a filename** (`Content-Disposition: form-data; name="photo";
+  filename="…"`): Ktor reads a part without one as UTF-8 text, which would corrupt binary content, so
+  `buffered` and `streaming` answer 400 (`File part 'photo' must be sent with a filename`). The generated
+  clients always send one.
+- JSON parts are read and written with the models' JSON configuration (the java.time serializers included).
+- A file part is always sent with a filename (the part name when the file value has none) and a content type
+  (its own, else the part's declared type, else `application/octet-stream`). JSON parts are sent with the part's
+  declared JSON content type (`application/json` unless it declares another), which the Ktor server reads like
+  text parts.
+- In the Next.js clients, a JSON part is a `Blob` in the `FormData` typed with the part's declared JSON content
+  type (`application/json` unless it declares another, e.g. `application/vnd.meta+json`), so fetch sends it with
+  `filename="blob"`: fine for Ktor, but frameworks that treat every part with a filename as a file upload (multer,
+  FastAPI, …) see it as a file. A `multipart/mixed` operation is sent as `multipart/form-data` (all `FormData`
+  can encode).
+- Not supported: file or multipart **responses** (downloads), tuple-form `@multipartBody` (error
+  `unsupported-multipart-tuple`; the operation is skipped), React Query hooks and Server Actions for upload
+  operations (skipped — call the client directly), and `Http.File` used inside a JSON model.
+- Diagnostics: a multipart body model that `extends` a model with parts is an error
+  (`unsupported-multipart-base` — TypeSpec ignores inherited parts; spread the base with `...Base` instead) and
+  its operation is skipped; `Http.File` inside a JSON model or as a response body warns `file-in-json`; a model
+  with parts also used as JSON (a response, a JSON body, a JSON model's property) warns
+  `multipart-model-in-json`. In Kotlin, a model of your own named `HttpFile` in the models package clashes with
+  the file class (`http-file-conflict`; rename it with `@Kotlin.name`).
 
 ## Decorators
 
@@ -315,6 +400,8 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `kotlin:ktor-server` | `imports: string[]` | namespaces, groups, operations | imports added to the routes file (for names used in `wrap`/`context`; a `wrap` call to `authenticate(...)` needs `io.ktor.server.auth.authenticate` here — only the `authenticate` key adds it automatically) |
 | `kotlin:ktor-server` | `context: { name, type, expr, replaces? }[]` | namespaces, groups, operations | service parameters supplied by `expr` in the route handler (`call` in scope); `replaces` (string or list) hides those HTTP parameters from the service signature — never a path parameter — and the entry applies only where they all exist; names are backtick-escaped if they are Kotlin keywords, `call`/`service`/`resource` are reserved, and later entries with the same name win |
 | `kotlin:ktor-server` | `routeSet: string` | namespaces, groups, operations | move routes into `fun Route.<unit><RouteSet>Routes(service)` (dsl style); with `module: true` the generated module mounts every route function, including per-routeSet ones; a name that isn't a valid Kotlin identifier fails the target |
+| `kotlin:ktor-server` | `multipart: "buffered" \| "streaming" \| "raw"` | namespaces, groups, operations | how multipart and file bodies reach the service (see Uploads); overrides the `multipart` option |
+| `kotlin:ktor-server` | `maxUploadSize: integer` | namespaces, groups, operations | largest multipart part / buffered multipart request / buffered file body in bytes (larger → 413); overrides the `max-upload-size` option |
 | `typescript` | `readonly: boolean` | models, properties | `readonly` properties |
 | `typescript` | `supertypes: { name, from? }[]` | models | `interface X extends A` (zod schema cast; inherited members not validated) |
 | `typescript` | `jsdoc: string[]` | declarations, properties | extra JSDoc lines |
@@ -434,6 +521,9 @@ and vitest.
 | Kotlin `validation: true` also checks scalar-level constraints on `Scalar \| null` properties | `validation: false`, or move the constraint off the scalar |
 | Generated zod schemas use `.exactOptional()`, so zod ≥ 4.3 is required (declared as an optional peer dependency) | none (upgrade zod) |
 | `notBlank` in scope `*` now also affects TypeScript | scope it to `kotlin` |
+| `Http.File` bodies and multipart operations previously generated broken output: `Http.File` was emitted as a plain model (`File`) and multipart/file bodies were JSON-encoded regardless of target; both now generate working uploads (see Uploads) | none (the previous output could not upload) |
+| The flat client no longer rejects an operation for having a multipart or file body (`flat-client-unsupported`), and the `non-json-body` warning no longer fires for one | none |
+| The flat client (JSON-only APIs too) passes fetch a `Headers` object (`new globalThis.Headers(options.headers)`) instead of a plain object, and its JSON `content-type` replaces a `Content-Type` from `ClientOptions.headers` in any letter case; a custom `fetch` reading `init.headers` as a plain object (`init.headers["authorization"]`) must read it through `new Headers(init.headers).get(…)` | none (adapt the custom fetch) |
 
 ## Upgrading from 0.1.2
 
