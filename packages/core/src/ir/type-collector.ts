@@ -43,7 +43,10 @@ export class TypeCollector {
   private readonly types = new Map<string, TypeIR>();
   private readonly ids = new Map<Type, string>();
 
-  constructor(private readonly program: Program) {}
+  constructor(
+    private readonly program: Program,
+    private readonly options: { generics: boolean } = { generics: true },
+  ) {}
 
   getTypes(): TypeIR[] {
     return [...this.types.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -54,7 +57,8 @@ export class TypeCollector {
     navigateTypesInNamespace(ns, {
       model: (m) => {
         if (m.name && !isTemplateDeclaration(m) && !this.isCollection(m) && !this.isHttpEnvelope(m)) {
-          this.collectModel(m, m.name);
+          // A template instance that can be generic contributes its declaration, not a model of its own.
+          if (!(this.options.generics && this.genericRef(m, m.name))) this.collectModel(m, m.name);
         }
       },
       enum: (e) => {
@@ -87,6 +91,8 @@ export class TypeCollector {
       case "Intrinsic":
         if (type.name === "unknown") return UNKNOWN;
         break;
+      case "TemplateParameter":
+        return { kind: "typeParam", name: (type.node as { id: { sv: string } }).id.sv };
     }
     reportDiagnostic(this.program, { code: "unsupported-type", format: { kind: type.kind }, target: type ?? NoTarget });
     return UNKNOWN;
@@ -108,7 +114,53 @@ export class TypeCollector {
     if (isRecordModelType(model) && model.name === "Record") {
       return { kind: "map", of: this.ref(model.indexer.value, `${hint}Value`) };
     }
-    return { kind: "named", id: this.collectModel(this.spreadSource(model) ?? model, hint) };
+    // Inside a template declaration `T[]` / `Record<T>` have a template-parameter argument and no indexer yet.
+    const [element] = this.stdCollectionArgs(model);
+    if (element) {
+      return model.name === "Array"
+        ? { kind: "array", of: this.ref(element, `${hint}Item`) }
+        : { kind: "map", of: this.ref(element, `${hint}Value`) };
+    }
+    const source = this.spreadSource(model) ?? model;
+    if (this.options.generics) {
+      const generic = this.genericRef(source, hint);
+      if (generic) return generic;
+    }
+    return { kind: "named", id: this.collectModel(source, hint) };
+  }
+
+  private stdCollectionArgs(model: Model): Type[] {
+    if ((model.name !== "Array" && model.name !== "Record") || !model.namespace) return [];
+    if (getNamespaceFullName(model.namespace) !== "TypeSpec") return [];
+    return (model.templateMapper?.args ?? []).filter((a): a is Type => (a as { entityKind?: string }).entityKind === "Type");
+  }
+
+  /** `Page<Pet>` → the generic `Page` (collected once) with args [Pet], when the template can be generic. */
+  private genericRef(instance: Model, hint: string): TypeRef | undefined {
+    const args = instance.templateMapper?.args ?? [];
+    if (args.length === 0 || !instance.templateNode) return undefined;
+    const declaration = this.program.checker.getTypeForNode(instance.templateNode);
+    if (declaration.kind !== "Model" || !isTemplateDeclaration(declaration)) return undefined;
+    const types = args.filter(
+      (arg): arg is Type =>
+        (arg as { entityKind?: string }).entityKind === "Type" &&
+        ((arg as Type).kind !== "Intrinsic" || (arg as { name?: string }).name === "unknown"),
+    );
+    if (types.length !== args.length || !this.expressible(instance, declaration)) return undefined;
+    const id = this.collectModel(declaration, declaration.name);
+    return { kind: "named", id, args: types.map((arg, i) => this.ref(arg, `${hint}Arg${i + 1}`)) };
+  }
+
+  /**
+   * A template is generic unless it needs per-instance models: a base model or discriminator, HTTP
+   * metadata, `...T` spreads (instance and declaration properties differ) or a @friendlyName.
+   */
+  private expressible(instance: Model, declaration: Model): boolean {
+    if (declaration.baseModel || getDiscriminator(this.program, declaration)) return false;
+    if (getFriendlyName(this.program, instance) || getFriendlyName(this.program, declaration)) return false;
+    if (this.isHttpEnvelope(declaration) || this.isHttpEnvelope(instance)) return false;
+    const names = (m: Model) => [...m.properties.keys()].join("\0");
+    return names(instance) === names(declaration);
   }
 
   /**
@@ -168,6 +220,7 @@ export class TypeCollector {
       decorators: collectDecorators(model),
       properties: [],
     };
+    if (isTemplateDeclaration(model)) ir.typeParameters = model.node!.templateParameters.map((p) => p.id.sv);
     this.types.set(id, ir);
     for (const prop of model.properties.values()) {
       if (isMetadata(this.program, prop)) continue;

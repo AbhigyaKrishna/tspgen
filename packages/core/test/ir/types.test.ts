@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { buildApiIR, type ApiIR, type TypeIR } from "../../src/index.js";
 import { Tester } from "../tester.js";
 
-async function build(code: string): Promise<ApiIR> {
+async function build(code: string, options: { generics?: boolean } = {}): Promise<ApiIR> {
   const { program } = await Tester.compile(code);
-  return buildApiIR(program);
+  return buildApiIR(program, options);
 }
 
 function find(ir: ApiIR, id: string): TypeIR {
@@ -136,14 +136,66 @@ describe("type IR", () => {
     expect(find(ir, "Zoo.Dog")).toMatchObject({ baseId: "Zoo.Animal" });
   });
 
-  it("names template instances from their arguments", async () => {
-    const ir = await build(`
+  it("names template instances from their arguments with generics: false", async () => {
+    const ir = await build(
+      `
       @service namespace Pets;
       model Page<T> { items: T[] }
       model Pet { id: int64 }
       model Holder { page: Page<Pet> }
-    `);
+    `,
+      { generics: false },
+    );
     expect(find(ir, "Pets.Page<Pets.Pet>")).toMatchObject({ kind: "model", name: "PagePet" });
+  });
+
+  it("collects template models once as generics; uses carry their arguments", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      model Page<T> { items: T[]; total: int64 }
+      model Pair<K, V> { key: K; value: V; pages: Page<V>[] }
+      model Pet { id: int64 }
+      model Holder { page: Page<Pet>; names: Page<string>; pair: Pair<string, Pet> }
+    `);
+    const pages = ir.types.filter((t) => t.name === "Page");
+    expect(pages).toHaveLength(1);
+    const page = pages[0];
+    expect(page).toMatchObject({ kind: "model", typeParameters: ["T"] });
+    if (page.kind !== "model") throw new Error("expected model");
+    expect(page.properties[0].type).toEqual({ kind: "array", of: { kind: "typeParam", name: "T" } });
+    const pair = ir.types.find((t) => t.name === "Pair");
+    if (pair?.kind !== "model") throw new Error("expected Pair");
+    expect(pair.typeParameters).toEqual(["K", "V"]);
+    expect(pair.properties[2].type).toEqual({
+      kind: "array",
+      of: { kind: "named", id: page.id, args: [{ kind: "typeParam", name: "V" }] },
+    });
+    const holder = find(ir, "Pets.Holder");
+    if (holder.kind !== "model") throw new Error("expected model");
+    expect(holder.properties.map((p) => p.type)).toEqual([
+      { kind: "named", id: page.id, args: [{ kind: "named", id: "Pets.Pet" }] },
+      { kind: "named", id: page.id, args: [{ kind: "scalar", name: "string" }] },
+      { kind: "named", id: pair.id, args: [{ kind: "scalar", name: "string" }, { kind: "named", id: "Pets.Pet" }] },
+    ]);
+    expect(ir.types.some((t) => t.name === "PagePet")).toBe(false);
+  });
+
+  it("keeps per-instance models for templates that cannot be generic", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      model Pet { id: int64 }
+      model Base { id: string }
+      model Spread<T> { ...T; extra: string }
+      model Derived<T> extends Base { item: T }
+      @friendlyName("{name}Named", T) model Named<T> { item: T }
+      model Holder { a: Spread<Pet>; b: Derived<Pet>; c: Named<Pet> }
+    `);
+    const holder = find(ir, "Pets.Holder");
+    if (holder.kind !== "model") throw new Error("expected model");
+    for (const p of holder.properties) expect(p.type).toMatchObject({ kind: "named" });
+    for (const p of holder.properties) expect("args" in p.type).toBe(false);
+    expect(ir.types.map((t) => t.name)).toEqual(expect.arrayContaining(["SpreadPet", "DerivedPet", "PetNamed"]));
+    expect(ir.types.some((t) => t.kind === "model" && t.typeParameters)).toBe(false);
   });
 
   it("captures custom decorator applications as plain data", async () => {

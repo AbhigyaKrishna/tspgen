@@ -79,6 +79,22 @@ export function declUse(name: string, file: string): TsTypeUse {
   };
 }
 
+/** A generated generic interface applied to `args`: `Page<Pet>`, validated by `PageSchema(PetSchema)`. */
+export function genericDeclUse(name: string, file: string, args: readonly TsTypeUse[]): TsTypeUse {
+  const base = declUse(name, file);
+  return {
+    text: `${name}<${args.map((a) => a.text).join(", ")}>`,
+    imports: [...base.imports, ...args.flatMap((a) => a.imports)],
+    schema: `z.lazy(() => ${name}Schema(${args.map((a) => a.schema).join(", ")}))`,
+    schemaImports: [...base.schemaImports, ...args.flatMap((a) => a.schemaImports)],
+  };
+}
+
+/** A type parameter inside a generic interface; its schema is the schema function's parameter. */
+export function typeParamUse(name: string): TsTypeUse {
+  return simple(name, `${name}Schema`);
+}
+
 function wrap(text: string): string {
   return / \| | & /.test(text) ? `(${text})` : text;
 }

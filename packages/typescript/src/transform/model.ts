@@ -41,6 +41,8 @@ export interface TsInterface extends TsDeclBase {
   kind: "interface";
   properties: TsProperty[];
   extends: TsTypeUse[];
+  /** Type parameters of a generic interface (`Page<T>` → ["T"]); its zod schema is then a function. */
+  typeParameters?: string[];
 }
 
 export interface TsAlias extends TsDeclBase {

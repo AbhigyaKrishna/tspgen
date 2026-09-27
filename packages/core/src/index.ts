@@ -1,7 +1,7 @@
 export { $lib, reportDiagnostic, createDiagnostic, errorMessage } from "./lib.js";
 export { pascal } from "./naming.js";
 export * from "./ir/types.js";
-export { buildApiIR } from "./ir/build.js";
+export { buildApiIR, type BuildOptions } from "./ir/build.js";
 export { collectDecorators, decoratorArg, decoratorArgs } from "./ir/decorators.js";
 export { TemplateEngine, TemplateNotFoundError, type TemplateLayer } from "./templates/engine.js";
 export { ExtensionRegistry } from "./plugins/registry.js";

@@ -100,15 +100,13 @@ export class DeclarationBuilder {
   typeUse(ref: TypeRef): KtTypeUse {
     switch (ref.kind) {
       case "named": {
-        const mapped = this.mapped.get(ref.id);
-        if (mapped) return mapped;
         const generic = this.generic.get(ref.id);
         if (generic) return genericOf(fqnTypeUse(generic.fqn), generic.args.map((arg) => this.typeUse(arg)));
-        const nested = this.nested.get(ref.id);
-        if (nested) return { text: `${nested.parent.name}.${nested.decl.name}`, imports: [nested.parent.fqn], nullable: false };
-        const decl = this.decls.get(ref.id);
-        return decl ? { text: decl.name, imports: [decl.fqn], nullable: false } : JSON_ELEMENT;
+        const base = this.namedTypeUse(ref.id);
+        return ref.args?.length && base !== JSON_ELEMENT ? genericOf(base, ref.args.map((arg) => this.typeUse(arg))) : base;
       }
+      case "typeParam":
+        return { text: ref.name, imports: [], nullable: false };
       case "array":
         return listOf(this.typeUse(ref.of));
       case "map":
@@ -132,6 +130,16 @@ export class DeclarationBuilder {
       case "unknown":
         return JSON_ELEMENT;
     }
+  }
+
+  /** A named type without its type arguments: mapped, nested in a sealed union, or its own declaration. */
+  private namedTypeUse(id: string): KtTypeUse {
+    const mapped = this.mapped.get(id);
+    if (mapped) return mapped;
+    const nested = this.nested.get(id);
+    if (nested) return { text: `${nested.parent.name}.${nested.decl.name}`, imports: [nested.parent.fqn], nullable: false };
+    const decl = this.decls.get(id);
+    return decl ? { text: decl.name, imports: [decl.fqn], nullable: false } : JSON_ELEMENT;
   }
 
   /** True if a model-level declaration already uses this simple name. */
@@ -176,7 +184,14 @@ export class DeclarationBuilder {
       case "model":
         return t.discriminator
           ? { ...base, kind: "sealed-interface", discriminator: t.discriminator.property, properties: [], implements: [...implementsMeta], variants: [] }
-          : { ...base, kind: "data-class", properties: [], implements: [...implementsMeta], checks: [] };
+          : {
+              ...base,
+              kind: "data-class",
+              properties: [],
+              implements: [...implementsMeta],
+              checks: [],
+              ...(t.typeParameters?.length ? { typeParameters: t.typeParameters } : {}),
+            };
       case "enum":
         return t.members.every((m) => typeof m.value === "string")
           ? { ...base, kind: "enum", members: [] }
@@ -201,7 +216,10 @@ export class DeclarationBuilder {
     if (stringLiterals > 0 && stringLiterals + strings === types.length) return "string-alias";
     if (
       u.discriminator?.envelope === "none" &&
-      types.every((t) => t.kind === "named" && this.types.get(t.id)?.kind === "model")
+      types.every((t) => {
+        const model = t.kind === "named" && !t.args?.length ? this.types.get(t.id) : undefined;
+        return model?.kind === "model" && !model.typeParameters?.length;
+      })
     ) {
       return "sealed-interface";
     }
@@ -478,6 +496,7 @@ function countNamedUses(api: ApiIR): Map<string, number> {
     switch (ref.kind) {
       case "named":
         count(ref.id);
+        ref.args?.forEach(visit);
         return;
       case "array":
       case "map":

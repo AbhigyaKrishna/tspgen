@@ -73,4 +73,20 @@ describe("generated TypeScript", () => {
     `);
     expect(typecheck(outputs)).toBe("");
   });
+
+  it("type-checks generic models and their zod schema functions", async () => {
+    for (const layout of ["per-type", "single-file"]) {
+      const { outputs } = await emitter({ zod: true, layout }).compile(`
+        @service namespace Shop;
+        model Page<T> { items: T[]; total: int64; next?: T }
+        model Pair<K, V> { key: K; value: V; pages: Page<V>[] }
+        model Pet { id: int64 }
+        @route("/pets") interface Pets {
+          @get list(): Page<Pet>;
+          @get @route("/pairs") pairs(): Pair<string, Page<Pet>>;
+        }
+      `);
+      expect(typecheck(outputs)).toBe("");
+    }
+  });
 });

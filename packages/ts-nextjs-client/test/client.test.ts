@@ -94,6 +94,26 @@ export function createPetStoreClient(config: ClientConfig): PetStoreApiClient {
     expect(typecheck(outputs)).toBe("");
   });
 
+  it("type-checks generic responses, with and without zod, in both client styles", async () => {
+    const spec = `
+      @service namespace Shop;
+      model Page<T> { items: T[]; total: int64 }
+      model Pet { id: int64; name: string }
+      @route("/pets") interface Pets {
+        @get listPets(@query offset?: int32): Page<Pet>;
+        @post createPet(@body pet: Pet): Pet;
+      }
+    `;
+    for (const zod of [false, true]) {
+      for (const style of [fetchOnly, { "client-style": "flat" }] as Record<string, unknown>[]) {
+        const { outputs } = await nextjs(style, { zod }).compile(spec);
+        const client = outputs["client/pets.ts"] ?? outputs["client.ts"];
+        expect(client).toContain("Page<Pet>");
+        expect(typecheck(outputs)).toBe("");
+      }
+    }
+  });
+
   it("type-checks without and with zod", async () => {
     for (const zod of [false, true]) {
       const { outputs } = await nextjs(fetchOnly, { zod }).compile(petSpec);

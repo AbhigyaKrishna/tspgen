@@ -24,6 +24,7 @@ import {
   arrayOf,
   declUse,
   externalUse,
+  genericDeclUse,
   genericOf,
   literalUse,
   nullable,
@@ -31,6 +32,7 @@ import {
   recordOf,
   scalarUse,
   simple,
+  typeParamUse,
   unionOf,
   UNKNOWN,
 } from "./type-map.js";
@@ -136,13 +138,17 @@ export class DeclarationBuilder {
   typeUse(ref: TypeRef): TsTypeUse {
     switch (ref.kind) {
       case "named": {
-        const mapped = this.mapped.get(ref.id);
-        if (mapped) return mapped;
         const generic = this.generic.get(ref.id);
         if (generic) return genericOf(generic.base, generic.args.map((arg) => this.typeUse(arg)));
+        const args = ref.args?.map((arg) => this.typeUse(arg)) ?? [];
+        const mapped = this.mapped.get(ref.id);
+        if (mapped) return args.length > 0 ? genericOf(mapped, args) : mapped;
         const decl = this.decls.get(ref.id);
-        return decl ? declUse(decl.name, decl.file) : UNKNOWN;
+        if (!decl) return UNKNOWN;
+        return args.length > 0 ? genericDeclUse(decl.name, decl.file, args) : declUse(decl.name, decl.file);
       }
+      case "typeParam":
+        return typeParamUse(ref.name);
       case "array":
         return arrayOf(this.typeUse(ref.of));
       case "map":
@@ -186,7 +192,13 @@ export class DeclarationBuilder {
       return { ...base, kind: "enum", members: [], ...(validValues ? { values: validValues } : {}) };
     }
     if (t.kind === "model" && !(t.discriminator && Object.keys(t.discriminator.mapping).length > 0)) {
-      return { ...base, kind: "interface", properties: [], extends: this.extendsOf(meta, t.id) };
+      return {
+        ...base,
+        kind: "interface",
+        properties: [],
+        extends: this.extendsOf(meta, t.id),
+        ...(t.typeParameters?.length ? { typeParameters: t.typeParameters } : {}),
+      };
     }
     return { ...base, kind: "alias", type: UNKNOWN };
   }

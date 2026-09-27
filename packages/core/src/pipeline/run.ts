@@ -49,7 +49,10 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
     if (guard("plugin-failed", plugin.name, "setup", () => plugin.setup?.(ctx)) === FAILED) return;
   }
 
-  let ir = language.transform(buildApiIR(program), { program, options: emitterOptions });
+  let ir = language.transform(buildApiIR(program, { generics: emitterOptions.generics !== false }), {
+    program,
+    options: emitterOptions,
+  });
   for (const plugin of plugins) {
     if (!plugin.transformIR) continue;
     const result = guard("plugin-failed", plugin.name, "transformIR", () => plugin.transformIR!(ir, ctx));

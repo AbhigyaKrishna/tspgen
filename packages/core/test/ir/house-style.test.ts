@@ -28,17 +28,31 @@ describe("IR facts for house-style features", () => {
     expect(root.namespaceDecorators).toEqual([]);
   });
 
-  it("records template arguments of template instances", async () => {
+  it("records template arguments of decorated template instances (generics: false)", async () => {
     const { program } = await MetaTester.compile(`
       @service namespace S;
       @meta("*", #{}) model Page<T> { items: T[] }
       model Node { id: string }
       model Holder { page: Page<Node> }
     `);
-    const ir = buildApiIR(program);
+    const ir = buildApiIR(program, { generics: false });
     const page = ir.types.find((t) => t.name === "PageNode") as ModelIR;
     expect(page.templateArgs).toEqual([{ kind: "named", id: "S.Node" }]);
     expect((ir.types.find((t) => t.id === "S.Node") as ModelIR).templateArgs).toBeUndefined();
+  });
+
+  it("keeps decorators of a generic template declaration", async () => {
+    const { program } = await MetaTester.compile(`
+      @service namespace S;
+      @meta("*", #{ tag: "page" }) model Page<T> { items: T[] }
+      model Node { id: string }
+      model Holder { page: Page<Node> }
+    `);
+    const ir = buildApiIR(program);
+    const page = ir.types.find((t) => t.name === "Page") as ModelIR;
+    expect(page.typeParameters).toEqual(["T"]);
+    expect(Object.keys(page.decorators)).toContain("TspGen.meta");
+    expect(page.templateArgs).toBeUndefined();
   });
 
   it("records constraint decorators from properties and their scalars", async () => {
@@ -78,27 +92,27 @@ describe("IR facts for house-style features", () => {
     expect(diagnostics.filter((d) => d.code.includes("unsupported-type"))).toEqual([]);
   });
 
-  it("does not record template arguments of undecorated instances", async () => {
+  it("does not record template arguments of undecorated instances (generics: false)", async () => {
     const { program } = await MetaTester.compile(`
       namespace Lib { model Tag { t: string } model Wrapper<T> { x: string } }
       @service namespace S {
         @route("/w") @get op w(): Lib.Wrapper<Lib.Tag>;
       }
     `);
-    const ir = buildApiIR(program);
+    const ir = buildApiIR(program, { generics: false });
     expect(ir.types.find((t) => t.id === "Lib.Tag")).toBeUndefined();
     const wrapper = ir.types.find((t) => t.name === "WrapperTag") as ModelIR;
     expect(wrapper).toBeDefined();
     expect(wrapper.templateArgs).toBeUndefined();
   });
 
-  it("resolves template arguments after properties so inline-model args keep property-based names", async () => {
+  it("resolves template arguments after properties so inline-model args keep property-based names (generics: false)", async () => {
     const { program } = await MetaTester.compile(`
       @service namespace S;
       @meta("*", #{}) model Page<T> { items: T[] }
       model H { p: Page<{ x: string }> }
     `);
-    const ir = buildApiIR(program);
+    const ir = buildApiIR(program, { generics: false });
     const inline = ir.types.find((t) => t.name === "PageItemsItem") as ModelIR;
     expect(inline).toBeDefined();
     expect(inline.templateArgs).toBeUndefined();

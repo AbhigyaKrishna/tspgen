@@ -6,13 +6,16 @@ import com.example.petstore.api.CreateResult
 import com.example.petstore.api.NotFoundException
 import com.example.petstore.client.PetStoreApiClient
 import com.example.petstore.client.petStoreDefaults
+import com.example.petstore.models.Accessory
 import com.example.petstore.models.ApiError
 import com.example.petstore.models.Ball
 import com.example.petstore.models.NotFound
+import com.example.petstore.models.Page
 import com.example.petstore.models.Pet
 import com.example.petstore.models.Rope
 import com.example.petstore.models.Species
 import com.example.petstore.models.Toy
+import com.example.petstore.server.AccessoriesService
 import com.example.petstore.server.PetsService
 import com.example.petstore.server.ToysService
 import com.example.petstore.server.petStoreModule
@@ -68,6 +71,17 @@ class InMemoryToys : ToysService {
     }
 }
 
+class InMemoryAccessories : AccessoriesService {
+    private val accessories = mutableListOf<Accessory>()
+
+    override suspend fun page(offset: Int?): Page<Accessory> =
+        Page(accessories.drop(offset ?: 0), accessories.size)
+
+    override suspend fun add(accessory: Accessory) {
+        accessories += accessory
+    }
+}
+
 class PetStoreE2ETest {
     @Test
     fun generatedClientTalksToGeneratedServer() = testApplication {
@@ -77,7 +91,7 @@ class PetStoreE2ETest {
                     authenticate { credential -> if (credential.token == "secret") UserIdPrincipal("tester") else null }
                 }
             }
-            petStoreModule(InMemoryPets(), InMemoryToys())
+            petStoreModule(InMemoryPets(), InMemoryToys(), InMemoryAccessories())
         }
         val api = PetStoreApiClient(
             createClient {
@@ -121,5 +135,10 @@ class PetStoreE2ETest {
         api.toys.add(Rope(name = "long", length = 2))
         assertEquals(listOf(Ball("red", 3.5f), Rope("long", 2)), api.toys.list())
         assertTrue(Ball("x", 1f) is Serializable)
+
+        api.accessories.add(Accessory.Collar(size = 3))
+        api.accessories.add(Accessory.Tag(text = "Rex"))
+        assertEquals(Page(listOf(Accessory.Collar(3), Accessory.Tag("Rex")), 2), api.accessories.page())
+        assertEquals(Page(listOf<Accessory>(Accessory.Tag("Rex")), 2), api.accessories.page(offset = 1))
     }
 }

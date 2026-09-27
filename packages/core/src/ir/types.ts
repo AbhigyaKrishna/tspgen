@@ -2,7 +2,10 @@
 export type DecoratorData = Record<string, unknown[][]>;
 
 export type TypeRef =
-  | { kind: "named"; id: string }
+  /** `args`: type arguments of a generic model (one with `typeParameters`). */
+  | { kind: "named"; id: string; args?: TypeRef[] }
+  /** A type parameter of the enclosing generic model. */
+  | { kind: "typeParam"; name: string }
   | { kind: "array"; of: TypeRef }
   | { kind: "map"; of: TypeRef }
   | { kind: "scalar"; name: string; custom?: CustomScalarIR }
@@ -47,8 +50,13 @@ export interface ModelIR extends NamedTypeBase {
   additionalProperties?: TypeRef;
   /** mapping: discriminator value → model id */
   discriminator?: { property: string; mapping: Record<string, string> };
-  /** Template-instance arguments (`Page<Pet>` → [Pet]); absent for non-instances. */
+  /**
+   * Template-instance arguments (`Page<Pet>` → [Pet]) of a mapped instance collected per use
+   * (`generics: false`, or a template that cannot be generic); absent otherwise.
+   */
   templateArgs?: TypeRef[];
+  /** Type parameter names of a generic model (`Page<T>` → ["T"]); its uses are `named` refs with `args`. */
+  typeParameters?: string[];
 }
 
 export interface PropertyIR extends DocInfo {

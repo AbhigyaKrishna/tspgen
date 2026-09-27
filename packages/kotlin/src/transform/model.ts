@@ -44,6 +44,8 @@ export interface KtDataClass extends KtDeclBase {
   implements: string[];
   /** Kotlin statements for the `init` block (validation checks, @meta checks lines). */
   checks: string[];
+  /** Type parameters of a generic class (`Page<T>` → ["T"]). */
+  typeParameters?: string[];
 }
 
 export interface KtSealedInterface extends KtDeclBase {

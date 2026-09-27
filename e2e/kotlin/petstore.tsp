@@ -37,6 +37,27 @@ model Rope extends Toy {
   length: int32;
 }
 
+/** One page of results; generated once as a generic class. */
+model Page<T> {
+  items: T[];
+  total: int32;
+}
+
+model Collar {
+  size: int32;
+}
+
+model NameTag {
+  text: string;
+}
+
+/** Variants only this union uses are generated inside it (Accessory.Collar, Accessory.Tag). */
+@discriminated(#{ envelope: "none", discriminatorPropertyName: "type" })
+union Accessory {
+  collar: Collar,
+  tag: NameTag,
+}
+
 @error
 model ApiError {
   code: string;
@@ -79,4 +100,10 @@ interface Pets {
 interface Toys {
   @get list(): Toy[];
   @post add(@body toy: Toy): void;
+}
+
+@route("/accessories")
+interface Accessories {
+  @get page(@query offset?: int32): Page<Accessory>;
+  @post add(@body accessory: Accessory): void;
 }

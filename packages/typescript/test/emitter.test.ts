@@ -33,6 +33,44 @@ const apiSpec = `
 `;
 
 describe("@abhigyakrishna/tspgen-typescript", () => {
+  it("emits template models once as generic interfaces with schema functions", async () => {
+    const { outputs } = await emitter({ zod: true }).compile(`
+      @service namespace Shop;
+      model Page<T> { items: T[]; total: int64 }
+      model Pet { id: int64 }
+      model Holder { pets: Page<Pet>; names: Page<string> }
+    `);
+    expect(outputs["models/Page.ts"]).toContain(`export interface Page<T> {
+  items: T[];
+  total: number;
+}
+
+export function PageSchema<T>(TSchema: z.ZodType<T>): z.ZodType<Page<T>> {
+  return z.object({
+    items: z.array(TSchema),
+    total: z.number().int(),
+  }) as unknown as z.ZodType<Page<T>>;
+}`);
+    const holder = outputs["models/Holder.ts"];
+    expect(holder).toContain(`  pets: Page<Pet>;\n  names: Page<string>;`);
+    expect(holder).toContain(`pets: z.lazy(() => PageSchema(z.lazy(() => PetSchema))),`);
+    expect(holder).toContain(`names: z.lazy(() => PageSchema(z.string())),`);
+    expect(Object.keys(outputs).some((p) => p.includes("PagePet"))).toBe(false);
+  });
+
+  it("maps generic templates with @TS.type to the mapped type with arguments", async () => {
+    const { outputs } = await emitter().compile(`
+      @service namespace Shop;
+      @TS.type("Page", "../page") model Page<T> { items: T[] }
+      model Pet { id: int64 }
+      model Holder { pets: Page<Pet> }
+    `);
+    const holder = outputs["models/Holder.ts"];
+    expect(holder).toContain(`import type { Page } from "../../page";`);
+    expect(holder).toContain(`pets: Page<Pet>;`);
+    expect(outputs["models/Page.ts"]).toBeUndefined();
+  });
+
   it("emits interfaces", async () => {
     const { outputs } = await emitter().compile(spec);
     expect(outputs["models/Pet.ts"]).toBe(`${HEADER}

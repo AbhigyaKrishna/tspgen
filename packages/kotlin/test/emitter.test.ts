@@ -202,6 +202,55 @@ sealed interface Pet {
     expect(outputs["models/com/acme/models/Pet.kt"]).toContain("sealed interface Pet\n");
   });
 
+  it("emits template models once as generic data classes", async () => {
+    const { outputs } = await emitter().compile(`
+      @service namespace S;
+      model Page<T> { items: T[]; total: int64 }
+      model Pair<K, V> { key: K; value: V }
+      model Pet { id: int64 }
+      model Holder { pets: Page<Pet>; names: Page<string>; pair: Pair<string, Page<Pet>> }
+      @route("/pets") op list(): Page<Pet>;
+    `);
+    expect(outputs["models/com/acme/models/Page.kt"]).toBe(`${HEADER}
+package com.acme.models
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class Page<T>(
+    val items: List<T>,
+    val total: Long,
+)
+`);
+    expect(outputs["models/com/acme/models/Holder.kt"]).toContain(`    val pets: Page<Pet>,
+    val names: Page<String>,
+    val pair: Pair<String, Page<Pet>>,`);
+    expect(Object.keys(outputs).some((p) => p.includes("PagePet"))).toBe(false);
+  });
+
+  it("maps generic templates with @Kotlin.type to the mapped class with arguments", async () => {
+    const { outputs } = await emitter().compile(`
+      @service namespace S;
+      @Kotlin.type("com.acme.core.Page") model Page<T> { items: T[] }
+      model Pet { id: int64 }
+      model Holder { pets: Page<Pet> }
+    `);
+    const holder = outputs["models/com/acme/models/Holder.kt"];
+    expect(holder).toContain("import com.acme.core.Page\n");
+    expect(holder).toContain("    val pets: Page<Pet>,");
+    expect(outputs["models/com/acme/models/Page.kt"]).toBeUndefined();
+  });
+
+  it("emits one model per template instance with generics: false", async () => {
+    const { outputs } = await emitter({ generics: false }).compile(`
+      @service namespace S;
+      model Page<T> { items: T[] }
+      model Pet { id: int64 }
+      model Holder { pets: Page<Pet> }
+    `);
+    expect(outputs["models/com/acme/models/PagePet.kt"]).toContain("data class PagePet(\n    val items: List<Pet>,\n)");
+  });
+
   it("emits enums", async () => {
     const { outputs } = await emitter().compile(petSpec);
     expect(outputs["models/com/acme/models/Color.kt"]).toBe(`${HEADER}
