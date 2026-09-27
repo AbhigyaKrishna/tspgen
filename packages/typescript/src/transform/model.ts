@@ -1,4 +1,4 @@
-import type { ApiIR, HttpVerb, MetaScopes, StatusCodes } from "@abhigyakrishna/tspgen-core";
+import type { ApiIR, AuthIR, AuthRequirementIR, HttpVerb, MetaScopes, StatusCodes } from "@abhigyakrishna/tspgen-core";
 import type { TsImport } from "../imports.js";
 
 /** A TypeScript type at a use site, with its zod schema expression and the imports each needs. */
@@ -157,6 +157,8 @@ export interface TsOperation {
   body?: TsBody;
   result: TsResult;
   errors: TsError[];
+  /** Resolved `@useAuth` requirement (see `AuthRequirementIR`); absent without one. */
+  auth?: AuthRequirementIR;
 }
 
 export interface TsGroup {
@@ -171,6 +173,8 @@ export interface TsService {
   id: string;
   name: string;
   docs?: string;
+  /** Every auth scheme the service or its operations use. */
+  auth: AuthIR[];
   groups: TsGroup[];
 }
 

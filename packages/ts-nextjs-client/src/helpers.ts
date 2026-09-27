@@ -1,5 +1,6 @@
 import type { StatusCodes } from "@abhigyakrishna/tspgen-core";
 import type { TsGroup, TsHeader, TsOperation, TsPart, TsResultVariant, TsTypeUse } from "@abhigyakrishna/tspgen-typescript";
+import { memberType } from "./auth.js";
 import { names } from "./names.js";
 
 export interface Field {
@@ -98,6 +99,7 @@ export const nextjsHelpers = {
   isUpload,
   partsExpr,
   key,
+  memberType,
 
   hasParams(op: TsOperation): boolean {
     return fields(op).length > 0;
@@ -126,8 +128,8 @@ export const nextjsHelpers = {
     return dynamic ? `\`${path}\`` : str(path);
   },
 
-  /** Extra `RequestSpec` properties (query, headers, cookies, body) as `key: value,` lines. */
-  specLines(op: TsOperation): string[] {
+  /** Extra `RequestSpec` properties (query, headers, cookies, body, auth descriptor) as `key: value,` lines. */
+  specLines(op: TsOperation, auth?: string): string[] {
     const lines: string[] = [];
     const query = op.params.filter((p) => p.location === "query");
     if (query.length > 0) {
@@ -146,6 +148,7 @@ export const nextjsHelpers = {
     } else if (body) {
       lines.push(`body: params.${body.name},`, `contentType: ${str(body.contentType)},`);
     }
+    if (auth) lines.push(`auth: ${auth},`);
     return lines;
   },
 

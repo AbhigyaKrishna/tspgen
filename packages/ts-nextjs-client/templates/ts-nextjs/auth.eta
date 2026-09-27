@@ -1,0 +1,60 @@
+/** One scheme of an operation's auth requirement: how its credential is sent (`RequestSpec.auth`). */
+<%= it.exported ? "export " : "" %>interface AuthScheme {
+  id: string;
+  kind: "bearer" | "basic" | "apiKey";
+  in?: "header" | "query" | "cookie";
+  name?: string;
+}
+
+/** Credentials as request entries: `[name, value]` headers, query parameters and cookies. */
+interface AuthEntries {
+  headers: [string, string][];
+  query: [string, string][];
+  cookies: [string, string][];
+}
+
+/**
+ * Asks the providers (by scheme id) for the credentials of the first alternative they all supply, and returns how
+ * to send them; nothing when no alternative is satisfied (the server decides). A provider is called at most once;
+ * undefined, null and "" count as no credential.
+ */
+async function resolveAuth(
+  providers: object | undefined,
+  alternatives: readonly (readonly AuthScheme[])[],
+): Promise<AuthEntries> {
+  const entries: AuthEntries = { headers: [], query: [], cookies: [] };
+  if (providers === undefined) return entries;
+  const lookup = providers as Record<string, (() => unknown) | undefined>;
+  const values: Record<string, unknown> = Object.create(null);
+  const credential = async (id: string): Promise<unknown> => {
+    if (!(id in values)) values[id] = Object.prototype.hasOwnProperty.call(lookup, id) ? await lookup[id]?.() : undefined;
+    return values[id];
+  };
+  for (const alternative of alternatives) {
+    const found: [AuthScheme, unknown][] = [];
+    for (const scheme of alternative) {
+      const value = await credential(scheme.id);
+      if (value === undefined || value === null || value === "") break;
+      found.push([scheme, value]);
+    }
+    if (found.length < alternative.length) continue;
+    for (const [scheme, value] of found) {
+      if (scheme.kind === "bearer") entries.headers.push(["authorization", `Bearer ${String(value)}`]);
+      else if (scheme.kind === "basic") {
+        const { username, password } = value as { username: string; password: string };
+        entries.headers.push(["authorization", `Basic ${base64(`${username}:${password}`)}`]);
+      } else {
+        const target = scheme.in === "query" ? entries.query : scheme.in === "cookie" ? entries.cookies : entries.headers;
+        target.push([scheme.name ?? scheme.id, String(value)]);
+      }
+    }
+    break;
+  }
+  return entries;
+}
+
+/** Base64 of the UTF-8 bytes of `text` (btoa alone only takes Latin-1). */
+function base64(text: string): string {
+  const bytes = new globalThis.TextEncoder().encode(text);
+  return globalThis.btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
+}

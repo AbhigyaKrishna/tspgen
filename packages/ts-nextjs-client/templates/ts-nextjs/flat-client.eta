@@ -1,10 +1,22 @@
 <% const e = it.error; -%>
+<% if (it.usesAuth) { -%>
+/** `Auth`: the client's `<Service>Auth` credential providers. */
+export interface ClientOptions<Auth extends object = object> {
+<% } else { -%>
 export interface ClientOptions {
+<% } -%>
   baseUrl: string;
   /** Custom fetch implementation (defaults to the global fetch). */
   fetch?: typeof fetch;
   /** Headers sent with every request. */
   headers?: Record<string, string>;
+<% if (it.usesAuth) { -%>
+  /**
+   * Credential providers by auth scheme id: an operation's `@useAuth` credentials are sent (after `headers`, so
+   * they win) when its providers return them.
+   */
+  auth?: Auth;
+<% } -%>
 }
 
 /** Thrown for every non-2xx response. */
@@ -48,16 +60,32 @@ export class <%= e.name %> extends Error {
   }
 }
 <% for (const c of it.clients) { -%>
+<% if (c.auth) { -%>
+
+/** Credential providers of the <%= c.auth.service %> API, by auth scheme id (`auth` in ClientOptions). */
+export interface <%= c.auth.name %> {
+<% for (const m of c.auth.members) { -%>
+  /** <%~ m.docs %> */
+  <%~ m.key %>?: <%~ m.type %>;
+<% } -%>
+}
+<% } -%>
 
 export class <%= c.name %> {
   private readonly baseUrl: string;
   private readonly doFetch: typeof fetch;
   private readonly headers: Record<string, string>;
+<% if (c.auth) { -%>
+  private readonly auth: <%= c.auth.name %> | undefined;
+<% } -%>
 
-  constructor(options: ClientOptions) {
+  constructor(options: ClientOptions<% if (c.auth) { %><<%= c.auth.name %>><% } %>) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.headers = options.headers ?? {};
+<% if (c.auth) { -%>
+    this.auth = options.auth;
+<% } -%>
   }
 <% for (const g of c.groups) { -%>
 
@@ -78,15 +106,24 @@ export class <%= c.name %> {
 <% } -%>
 <% if (c.usesSend) { -%>
 
+<% if (c.auth) { -%>
+  private async send<T>(method: string, path: string, body?: unknown, auth?: readonly (readonly AuthScheme[])[]): Promise<T> {
+    const response = await this.request(method, path, body, auth);
+<% } else { -%>
   private async send<T>(method: string, path: string, body?: unknown): Promise<T> {
     const response = await this.request(method, path, body);
+<% } -%>
     const text = await response.text();
     // An empty body (204 and the like) decodes to undefined.
     return (text ? JSON.parse(text) : undefined) as T;
   }
 <% } -%>
 
+<% if (c.auth) { -%>
+  private async request(method: string, path: string, body?: unknown, auth?: readonly (readonly AuthScheme[])[]): Promise<Response> {
+<% } else { -%>
   private async request(method: string, path: string, body?: unknown): Promise<Response> {
+<% } -%>
     const headers = new globalThis.Headers(this.headers);
 <% if (it.usesUploads) { -%>
     const raw = body instanceof RawBody;
@@ -97,7 +134,27 @@ export class <%= c.name %> {
 <% } else { -%>
     if (body !== undefined) headers.set("content-type", "application/json");
 <% } -%>
+<% if (c.auth) { -%>
+    let url = `${this.baseUrl}${path}`;
+    if (auth) {
+      const credentials = await resolveAuth(this.auth, auth);
+      for (const [name, value] of credentials.headers) headers.set(name, value);
+      if (credentials.query.length > 0) {
+        const index = url.indexOf("?");
+        const search = new URLSearchParams(index < 0 ? "" : url.slice(index + 1));
+        for (const [name, value] of credentials.query) search.set(name, value);
+        url = `${index < 0 ? url : url.slice(0, index)}?${search.toString()}`;
+      }
+      if (credentials.cookies.length > 0) {
+        const cookies = credentials.cookies.map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join("; ");
+        const existing = headers.get("cookie");
+        headers.set("cookie", existing ? `${existing}; ${cookies}` : cookies);
+      }
+    }
+    const response = await this.doFetch(url, {
+<% } else { -%>
     const response = await this.doFetch(`${this.baseUrl}${path}`, {
+<% } -%>
       method,
       headers,
       ...(body === undefined ? {} : { body: <%~ it.usesUploads ? "raw ? body.body : JSON.stringify(body)" : "JSON.stringify(body)" %> }),
@@ -155,6 +212,9 @@ function toFormData(value: object, parts: readonly PartSpec[]): globalThis.FormD
   return form;
 }
 
+<% } -%>
+<% if (it.usesAuth) { -%>
+<%~ include("ts-nextjs/auth", { exported: false }) %>
 <% } -%>
 async function toError(response: Response): Promise<<%= e.name %>> {
   const body: unknown = await response.json().catch(() => undefined);

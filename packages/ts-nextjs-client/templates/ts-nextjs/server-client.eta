@@ -1,12 +1,12 @@
 <% const n = it.h.nextjs; -%>
-<% it.services.forEach((s, i) => { const client = n.names.apiClient(s); -%>
+<% it.services.forEach((s, i) => { const client = n.names.apiClient(s); const config = it.auth[s.id] ? `ClientConfig<${n.names.auth(s)}>` : "ClientConfig"; -%>
 <% if (i > 0) { -%>
 
 <% } -%>
-let <%= n.names.serverClient(s) %>Overrides: Partial<ClientConfig> = {};
+let <%= n.names.serverClient(s) %>Overrides: Partial<<%~ config %>> = {};
 
 /** Customizes the client used by the generated <%= s.name %> Server Actions (e.g. auth headers). */
-export function <%= n.names.configureActions(s) %>(config: Partial<ClientConfig>): void {
+export function <%= n.names.configureActions(s) %>(config: Partial<<%~ config %>>): void {
   <%= n.names.serverClient(s) %>Overrides = config;
 }
 

@@ -29,7 +29,7 @@ export const <%= name %>Schema: z.ZodType<<%= name %>> = z.object({
       {
         method: "<%= op.verb.toUpperCase() %>",
         path: <%~ n.pathExpr(op) %>,
-<% for (const line of n.specLines(op)) { -%>
+<% for (const line of n.specLines(op, it.auth?.descriptor(op))) { -%>
         <%~ line %>
 <% } -%>
       },

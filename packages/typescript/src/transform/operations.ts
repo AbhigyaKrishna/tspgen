@@ -51,6 +51,7 @@ export class ApiBuilder {
       id: s.id,
       name: typeName(s.name),
       ...(s.docs ? { docs: s.docs } : {}),
+      auth: s.auth,
       groups: s.groups.map((g) => {
         const name = decoratorArg(g.decorators, "TS.name") ?? typeName(g.name);
         const groupScopes = metaScopes(g.decorators);
@@ -107,6 +108,7 @@ export class ApiBuilder {
       params,
       result: this.result(name, groupName, responses.filter((r) => !r.isError)),
       errors: this.options.errors === "thrown" ? [] : responses.filter((r) => r.isError).map((r) => this.error(r)),
+      ...(op.auth ? { auth: op.auth } : {}),
     };
     if (op.body) {
       const preferred = camel(op.body.name ?? "body");

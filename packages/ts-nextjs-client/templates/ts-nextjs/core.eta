@@ -1,12 +1,34 @@
 export type HeadersInput = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
+<% if (it.auth) { -%>
+
+/** Supplies a credential, or undefined when there is none; may be async (e.g. a token read from cookies()). */
+export type AuthProvider<T> = () => T | undefined | Promise<T | undefined>;
+
+/** Credentials of an http Basic scheme. */
+export interface BasicCredentials {
+  username: string;
+  password: string;
+}
+
+/** `Auth`: the service's `<Service>Auth` credential providers (see the service's client factory). */
+export interface ClientConfig<Auth extends object = object> {
+<% } else { -%>
 
 export interface ClientConfig {
+<% } -%>
   /** Absolute API URL, or a path such as "/api" when running in the browser. */
   baseUrl: string;
   /** Custom fetch implementation (defaults to the global fetch). */
   fetch?: typeof fetch;
   /** Headers sent with every request; may be async (e.g. auth read from cookies()). */
   headers?: HeadersInput;
+<% if (it.auth) { -%>
+  /**
+   * Credential providers by auth scheme id: an operation's `@useAuth` credentials are sent when its providers
+   * return them, overriding `headers` (per-call `RequestOptions.headers` override them in turn).
+   */
+  auth?: Auth;
+<% } -%>
   /** Validate response bodies with the generated zod schemas when available (default true). */
   validate?: boolean;
 }
@@ -50,6 +72,10 @@ export interface RequestSpec {
   /** File body: `body` is a Blob sent as-is. */
   file?: boolean;
 <% } -%>
+<% if (it.auth) { -%>
+  /** Auth alternatives: the first one whose credentials are all provided is sent. */
+  auth?: readonly (readonly AuthScheme[])[];
+<% } -%>
 }
 
 /** Minimal schema contract, satisfied by zod schemas. */
@@ -92,6 +118,11 @@ export function toFormData(value: object, parts: readonly PartSpec[]): FormData 
 }
 <% } -%>
 
+<% if (it.auth) { -%>
+
+<%~ include("ts-nextjs/auth", { exported: true }).trimEnd() %>
+<% } -%>
+
 function resolveUrl(baseUrl: string, path: string): URL {
   const origin = (globalThis as { location?: { origin: string } }).location?.origin;
   return new URL(baseUrl.replace(/\/+$/, "") + path, origin);
@@ -108,6 +139,11 @@ export async function request(config: ClientConfig, spec: RequestSpec, options: 
     if (encoded !== undefined) url.searchParams.append(name, encoded);
   }
   const headers = new Headers(typeof config.headers === "function" ? await config.headers() : config.headers);
+<% if (it.auth) { -%>
+  // Credentials override the configured headers; per-call headers override credentials.
+  const credentials = spec.auth ? await resolveAuth(config.auth, spec.auth) : undefined;
+  for (const [name, headerValue] of credentials?.headers ?? []) headers.set(name, headerValue);
+<% } -%>
   new Headers(options.headers).forEach((headerValue, headerName) => headers.set(headerName, headerValue));
   for (const [name, headerValue] of Object.entries(spec.headers ?? {})) {
     const encoded = encode(headerValue);
@@ -117,6 +153,12 @@ export async function request(config: ClientConfig, spec: RequestSpec, options: 
     const encoded = encode(cookieValue);
     return encoded === undefined ? [] : [`${name}=${encodeURIComponent(encoded)}`];
   });
+<% if (it.auth) { -%>
+  if (credentials) {
+    for (const [name, queryValue] of credentials.query) url.searchParams.set(name, queryValue);
+    for (const [name, cookieValue] of credentials.cookies) cookies.push(`${name}=${encodeURIComponent(cookieValue)}`);
+  }
+<% } -%>
   if (cookies.length > 0) headers.append("cookie", cookies.join("; "));
 <% if (it.uploads) { -%>
   let body: BodyInit | undefined;

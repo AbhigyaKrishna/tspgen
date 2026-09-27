@@ -2,7 +2,17 @@
 <% for (const spec of it.exports) { -%>
 export * from "<%= spec %>";
 <% } -%>
-<% for (const s of it.services) { -%>
+<% for (const s of it.services) { const auth = it.auth[s.id]; const config = auth ? `ClientConfig<${n.names.auth(s)}>` : "ClientConfig"; -%>
+<% if (auth) { -%>
+
+/** Credential providers of the <%= s.name %> API, by auth scheme id (`auth` in the client config). */
+export interface <%= n.names.auth(s) %> {
+<% for (const m of auth.members) { -%>
+  /** <%~ m.docs %> */
+  <%~ m.key %>?: <%~ n.memberType(m.kind, "grouped") %>;
+<% } -%>
+}
+<% } -%>
 
 /** Entry point for the <%= s.name %> API. */
 export class <%= n.names.apiClient(s) %> {
@@ -10,14 +20,14 @@ export class <%= n.names.apiClient(s) %> {
   readonly <%= n.names.groupProperty(g) %>: <%= n.names.groupClass(g) %>;
 <% } -%>
 
-  constructor(config: ClientConfig) {
+  constructor(config: <%~ config %>) {
 <% for (const g of s.groups) { -%>
     this.<%= n.names.groupProperty(g) %> = new <%= n.names.groupClass(g) %>(config);
 <% } -%>
   }
 }
 
-export function <%= n.names.factory(s) %>(config: ClientConfig): <%= n.names.apiClient(s) %> {
+export function <%= n.names.factory(s) %>(config: <%~ config %>): <%= n.names.apiClient(s) %> {
   return new <%= n.names.apiClient(s) %>(config);
 }
 <% } -%>

@@ -12,6 +12,7 @@ import {
   type TsParam,
 } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
+import { clientAuth, memberType, type AuthMember, type ClientAuth } from "./auth.js";
 import { nextjsHelpers } from "./helpers.js";
 import type { NextClientOptions } from "./options.js";
 
@@ -48,6 +49,8 @@ const TEMPLATE_GLOBALS = new Set([
  * uses when an operation uploads (multipart or file body); a generated type with one of these names clashes too.
  */
 const UPLOAD_GLOBALS = ["BodyInit", "RawBody", "PartSpec", "toFormData"];
+/** Module-local helpers client.ts declares when a service uses `@useAuth` (TextEncoder and btoa via globalThis). */
+const AUTH_LOCALS = ["AuthScheme", "AuthEntries", "resolveAuth", "base64"];
 /** Names tried, in order, for a method's query-object parameter. */
 const QUERY_NAMES = ["query", "queryParams", "params"];
 const ARRAY_TYPE = /\[\]( \| null)?$|^(readonly )?Array</;
@@ -77,10 +80,10 @@ export interface FlatErrorClass {
   message: string;
 }
 
-function unsupported(op: TsOperation): string | undefined {
+function unsupported(op: TsOperation, auth: boolean): string | undefined {
   if (op.result.kind === "union") return "multiple success responses or response headers";
   if (op.result.contentType && !op.result.contentType.includes("json")) return "a non-JSON response";
-  if (CLIENT_MEMBERS.has(op.name)) return "its name clashes with a client member";
+  if (CLIENT_MEMBERS.has(op.name) || (auth && op.name === "auth")) return "its name clashes with a client member";
   if (op.params.some((p) => p.location === "path" && p.optional)) return "optional path parameters";
   if (op.params.some((p) => p.location === "header" || p.location === "cookie")) return "header or cookie parameters";
   if (op.body?.kind === "single" && !op.body.contentType.includes("json")) return "a non-JSON body";
@@ -106,7 +109,7 @@ function localNames(op: TsOperation, validate: boolean): { path: TsParam[]; body
   return { path, body: op.body?.name };
 }
 
-function method(op: TsOperation, validate: boolean): FlatMethod {
+function method(op: TsOperation, validate: boolean, auth: string | undefined): FlatMethod {
   const { path, body: bodyName } = localNames(op, validate);
   const query = op.params.filter((p) => p.location === "query");
   const params = path.map((p) => `${p.name}: ${p.type.text}`);
@@ -150,7 +153,12 @@ function method(op: TsOperation, validate: boolean): FlatMethod {
     params: params.join(", "),
     returnType: op.result.type.text,
     void: op.result.type.text === "void",
-    args: [JSON.stringify(op.verb.toUpperCase()), urlExpr, ...(bodyName ? [bodyArg(op, bodyName)] : [])].join(", "),
+    args: [
+      JSON.stringify(op.verb.toUpperCase()),
+      urlExpr,
+      ...(bodyName ? [bodyArg(op, bodyName)] : auth ? ["undefined"] : []),
+      ...(auth ? [auth] : []),
+    ].join(", "),
     checks,
     ...(op.docs ? { docs: op.docs } : {}),
     ...(op.deprecated ? { deprecated: op.deprecated } : {}),
@@ -189,6 +197,11 @@ function errorClass(name: string, model: TsInterface | undefined): FlatErrorClas
   };
 }
 
+/** `<Service>Auth` members with their spelled-out provider types. */
+function flatMembers(members: AuthMember[]): (AuthMember & { type: string })[] {
+  return members.map((m) => ({ ...m, type: memberType(m.kind, "flat") }));
+}
+
 /** client.ts (one class per service + error class) and index.ts; nothing when a limitation is hit. */
 export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
   const fail = (code: Parameters<typeof reportDiagnostic>[1]["code"], format: Record<string, string>, messageId?: string): FileSpec[] => {
@@ -212,9 +225,20 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
 
   const clientNames = services.map((s) => `${s.name}Client`);
   const usesUploads = services.some((s) => s.groups.some((g) => g.operations.some(isUpload)));
-  const exported = new Set([options["error-class"], "ClientOptions", ...clientNames]);
+  const auths = new Map<string, ClientAuth>();
+  for (const s of services) {
+    const found = clientAuth(ctx.program, s, "the flat client");
+    if (found) auths.set(s.id, found);
+  }
+  const authNames = services.filter((s) => auths.has(s.id)).map((s) => `${s.name}Auth`);
+  const exported = new Set([options["error-class"], "ClientOptions", ...clientNames, ...authNames]);
   // With validate, client.ts imports zod's `z`, which a generated type named z would clash with.
-  const internal = new Set([...TEMPLATE_GLOBALS, ...(usesUploads ? UPLOAD_GLOBALS : []), ...(validate ? ["z"] : [])]);
+  const internal = new Set([
+    ...TEMPLATE_GLOBALS,
+    ...(usesUploads ? UPLOAD_GLOBALS : []),
+    ...(validate ? ["z"] : []),
+    ...(auths.size > 0 ? AUTH_LOCALS : []),
+  ]);
   // index.ts re-exports both the types and client.ts, so any shared name is ambiguous there.
   const clash = ir.declarations.find((d) => exported.has(d.name) || internal.has(d.name));
   if (clash) return fail("flat-client-name-clash", { name: clash.name }, exported.has(clash.name) ? undefined : "local");
@@ -222,6 +246,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   const imports: TsImport[] = [];
   const clients = [];
   for (const service of services) {
+    const auth = auths.get(service.id);
     const seen = new Map<string, string>();
     const groups = [];
     for (const group of service.groups) {
@@ -230,14 +255,14 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         const first = seen.get(op.name);
         if (first) return fail("duplicate-operation-name", { first, second: op.id, name: op.name });
         seen.set(op.name, op.id);
-        const reason = unsupported(op);
+        const reason = unsupported(op, auth !== undefined);
         if (reason) return fail("flat-client-unsupported", { operation: op.id, reason });
         imports.push(
           ...op.params.flatMap((p) => p.type.imports),
           ...(op.body?.type.imports ?? []),
           ...op.result.type.imports,
         );
-        const m = method(op, validate);
+        const m = method(op, validate, auth?.descriptor(op));
         if (m.checks.length > 0) {
           imports.push(
             Z,
@@ -250,7 +275,12 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
       groups.push({ title: group.name, methods });
     }
     const usesSend = groups.some((g) => g.methods.some((m) => !m.void));
-    clients.push({ name: `${service.name}Client`, groups, usesSend });
+    clients.push({
+      name: `${service.name}Client`,
+      groups,
+      usesSend,
+      ...(auth ? { auth: { name: `${service.name}Auth`, service: service.name, members: flatMembers(auth.members) } } : {}),
+    });
   }
   if (model) {
     imports.push({ name: model.name, from: model.file, typeOnly: true, root: "models" }, ...model.properties.flatMap((p) => p.type.imports));
@@ -271,6 +301,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         error: errorClass(options["error-class"], model),
         usesQuery: queryParams.length > 0,
         usesUploads,
+        usesAuth: auths.size > 0,
         /** toQuery comma-joins arrays and takes the list of exploded keys. */
         usesArrays: queryParams.some(isArray),
         /** Body checks validate a copy without undefined-valued keys. */

@@ -11,6 +11,7 @@ import {
   type TsOperation,
   type TsService,
 } from "@abhigyakrishna/tspgen-typescript";
+import { clientAuth, type ClientAuth } from "./auth.js";
 import { planFlatFiles } from "./flat.js";
 import { nextjsHelpers as h } from "./helpers.js";
 import { names } from "./names.js";
@@ -109,21 +110,41 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
   const withoutUndefined = ir.zod && actions && groups.some((g) => actionOps(g).some(h.hasParams));
   // PartSpec, toFormData and the multipart/file request branches only when an operation uploads.
   const uploads = groups.some((g) => g.operations.some(h.isUpload));
-  const files: FileSpec[] = [file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", { withoutUndefined, uploads })];
-  for (const g of groups) {
-    files.push(file(names.groupFile(g), ir, groupImports(ir, g), "ts-nextjs/group", { group: g, extras }));
+  // Services using @useAuth schemes the client can send, by service id; the auth runtime only when there is one.
+  const auth: Record<string, ClientAuth> = {};
+  for (const s of services) {
+    const found = clientAuth(ctx.program, s, "the Next.js client");
+    if (found) auth[s.id] = found;
+  }
+  const auths = Object.values(auth);
+  const files: FileSpec[] = [
+    file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", { withoutUndefined, uploads, auth: auths.length > 0 }),
+  ];
+  for (const s of services) {
+    for (const g of s.groups) {
+      files.push(file(names.groupFile(g), ir, groupImports(ir, g), "ts-nextjs/group", { group: g, extras, auth: auth[s.id] }));
+    }
   }
   files.push(
     file(
       "client/index",
       ir,
-      [type("ClientConfig", CORE), ...groups.map((g) => value(names.groupClass(g), names.groupFile(g)))],
+      [
+        type("ClientConfig", CORE),
+        ...(auths.length > 0 ? [type("AuthProvider", CORE)] : []),
+        ...(auths.some((a) => a.basic) ? [type("BasicCredentials", CORE)] : []),
+        ...groups.map((g) => value(names.groupClass(g), names.groupFile(g))),
+      ],
       "ts-nextjs/index",
-      { services, exports: [CORE, ...groups.map(names.groupFile)].map((f) => relativeSpecifier("client/index", f, ir.importExtension)) },
+      {
+        services,
+        auth,
+        exports: [CORE, ...groups.map(names.groupFile)].map((f) => relativeSpecifier("client/index", f, ir.importExtension)),
+      },
     ),
   );
   if (options["react-query"] ?? true) files.push(...reactQueryFiles(ir, services, extras));
-  if (actions) files.push(...actionFiles(ir, services, options));
+  if (actions) files.push(...actionFiles(ir, services, options, auth));
   return files;
 }
 
@@ -178,15 +199,19 @@ const SERVER_CLIENT = "client/actions/server-client";
 
 const actionOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isJson(op));
 
-function actionFiles(ir: TsIR, services: TsService[], options: NextClientOptions): FileSpec[] {
+function actionFiles(ir: TsIR, services: TsService[], options: NextClientOptions, auth: Record<string, ClientAuth>): FileSpec[] {
   const files: FileSpec[] = [
     file(RESULT, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/action-result"),
     file(
       SERVER_CLIENT,
       ir,
-      [type("ClientConfig", CORE), ...services.map((s) => value(names.apiClient(s), "client/index"))],
+      [
+        type("ClientConfig", CORE),
+        ...services.map((s) => value(names.apiClient(s), "client/index")),
+        ...services.filter((s) => auth[s.id]).map((s) => type(names.auth(s), "client/index")),
+      ],
       "ts-nextjs/server-client",
-      { services, env: options["base-url-env"] },
+      { services, env: options["base-url-env"], auth },
     ),
   ];
   for (const s of services) {

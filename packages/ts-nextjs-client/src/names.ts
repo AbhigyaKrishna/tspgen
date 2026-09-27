@@ -6,6 +6,7 @@ export const names = {
   groupProperty: (g: TsGroup) => camel(g.name),
   params: (g: TsGroup, op: TsOperation) => `${g.name}${typeName(op.name)}Params`,
   apiClient: (s: TsService) => `${s.name}ApiClient`,
+  auth: (s: TsService) => `${s.name}Auth`,
   factory: (s: TsService) => `create${s.name}Client`,
   keys: (s: TsService) => `${camel(s.name)}Keys`,
   queries: (s: TsService) => `${camel(s.name)}Queries`,
