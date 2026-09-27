@@ -1,4 +1,4 @@
-import type { ApiIR } from "@abhigyakrishna/tspgen-core";
+import { apiVersionConstants, type ApiIR } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
@@ -66,6 +66,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     services,
     api,
     javaTime,
+    apiVersions: apiVersionConstants(api),
     ...(builder.fileUsed ? { httpFile: builder.httpFileFqn } : {}),
     ...(javaTime.length > 0 ? { javaTimeModule: `${modelsPackage}.javaTimeSerializersModule` } : {}),
   };

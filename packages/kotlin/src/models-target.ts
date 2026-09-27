@@ -61,6 +61,21 @@ function httpFileFile(ir: KotlinIR): FileSpec[] {
   ];
 }
 
+/**
+ * `const val API_VERSION` (one per versioned service) in the models package, when a service is versioned. The
+ * file is `ApiVersionConstants.kt`: version enums are often named `ApiVersion` (`ApiVersion.kt`).
+ */
+function apiVersionFile(ir: KotlinIR): FileSpec[] {
+  if (ir.apiVersions.length === 0) return [];
+  return [
+    {
+      path: `models/${ir.modelsPackage.replaceAll(".", "/")}/ApiVersionConstants.kt`,
+      template: "kotlin/file",
+      data: { package: ir.modelsPackage, imports: [], body: "kotlin/model/api-version", constants: ir.apiVersions },
+    },
+  ];
+}
+
 /** Built-in target: one Kotlin file per declaration under `models/`. */
 export const modelsTarget: Target<KotlinIR> = {
   name: "kotlin-models",
@@ -94,7 +109,7 @@ export const modelsTarget: Target<KotlinIR> = {
         },
       };
     });
-    return [...declFiles, ...httpFileFile(ir), ...javaTimeSerializersFile(ir), ...apiFiles(ir)];
+    return [...declFiles, ...httpFileFile(ir), ...javaTimeSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
   },
 };
 

@@ -1,4 +1,13 @@
-import type { ApiIR, AuthIR, AuthRequirementIR, HttpVerb, MetaScopes, ServerIR, StatusCodes } from "@abhigyakrishna/tspgen-core";
+import type {
+  ApiIR,
+  ApiVersionConstant,
+  AuthIR,
+  AuthRequirementIR,
+  HttpVerb,
+  MetaScopes,
+  ServerIR,
+  StatusCodes,
+} from "@abhigyakrishna/tspgen-core";
 
 /** A Kotlin type as written at a use site, with the imports it needs. */
 export interface KtTypeUse {
@@ -180,6 +189,8 @@ export interface KotlinIR {
   apiDeclarations: KtApiDecl[];
   services: KtService[];
   api: ApiIR;
+  /** `const val` version constants of the versioned services (`ApiVersionConstants.kt` in the models package). */
+  apiVersions: ApiVersionConstant[];
   /** FQN of the generated `HttpFile` class, when any type uses `Http.File`. */
   httpFile?: string;
   /** java.time classes used anywhere (models, parameters, bodies); each gets a generated serializer. */
