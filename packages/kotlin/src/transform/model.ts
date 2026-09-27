@@ -1,4 +1,4 @@
-import type { ApiIR, AuthIR, HttpVerb, MetaScopes, ServerIR, StatusCodes } from "@abhigyakrishna/tspgen-core";
+import type { ApiIR, AuthIR, AuthRequirementIR, HttpVerb, MetaScopes, ServerIR, StatusCodes } from "@abhigyakrishna/tspgen-core";
 
 /** A Kotlin type as written at a use site, with the imports it needs. */
 export interface KtTypeUse {
@@ -146,6 +146,8 @@ export interface KtOperation {
   result: KtResult;
   /** Error responses and the exception type carrying each. */
   errors: KtError[];
+  /** Resolved `@useAuth` requirement (see `AuthRequirementIR`); absent without one. */
+  auth?: AuthRequirementIR;
 }
 
 export interface KtGroup {

@@ -8,6 +8,8 @@ export interface KtorServerOptions {
   "nest-routes": boolean;
   multipart: "buffered" | "streaming" | "raw";
   "max-upload-size": number;
+  "generate-auth": boolean;
+  "auth-providers": Record<string, string>;
   package?: string;
 }
 
@@ -43,6 +45,18 @@ export const ktorServerOptionsSchema = {
       default: 52428800,
       description:
         'Largest multipart part and buffered file body, in bytes (default 50 MiB, Ktor\'s formFieldLimit); larger ones answer 413. Per operation via @meta("kotlin:ktor-server", #{ maxUploadSize }).',
+    },
+    "generate-auth": {
+      type: "boolean",
+      default: true,
+      description: "Wrap routes in authenticate(...) per the operations' @useAuth (false: only the authenticate/wrap meta keys).",
+    },
+    "auth-providers": {
+      type: "object",
+      additionalProperties: { type: "string", minLength: 1 },
+      default: {},
+      description:
+        'Auth scheme id → Kotlin expression naming its Ktor authentication provider (e.g. { BearerAuth: "JWT_AUTH" }); unmapped ids are used as string literals.',
     },
     package: { type: "string", description: 'Server package (default "<package>.server").' },
   },

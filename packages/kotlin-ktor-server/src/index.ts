@@ -5,14 +5,20 @@ import { ktorServerHelpers } from "./helpers.js";
 import { ktorServerOptionsSchema, type KtorServerOptions } from "./options.js";
 import { planServerFiles } from "./plan.js";
 
+const TEMPLATES = resolve(import.meta.dirname, "../templates");
+
 export const ktorServerTarget: Target<KotlinIR> = {
   name: "@abhigyakrishna/tspgen-kotlin-ktor-server",
   kind: "server",
   language: "kotlin",
-  templates: resolve(import.meta.dirname, "../templates"),
+  templates: TEMPLATES,
   helpers: { ktorServer: ktorServerHelpers },
   optionsSchema: ktorServerOptionsSchema,
-  files: (ir, ctx) => planServerFiles(ir, ctx.options as unknown as KtorServerOptions, ctx.registry, ctx.program),
+  files: (ir, ctx) =>
+    planServerFiles(ir, ctx.options as unknown as KtorServerOptions, ctx.registry, ctx.program, (template) => {
+      const path = ctx.resolveTemplate?.(template);
+      return path !== undefined && resolve(path) !== resolve(TEMPLATES, `${template}.eta`);
+    }),
 };
 
 export default ktorServerTarget;

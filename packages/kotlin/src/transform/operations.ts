@@ -168,6 +168,7 @@ export class ApiBuilder {
       result: this.result(plain(name), groupName, responses.filter((r) => !r.isError)),
       errors:
         this.options.errors === "thrown" ? [] : responses.filter((r) => r.isError).map((r) => this.error(r)),
+      ...(op.auth ? { auth: op.auth } : {}),
     };
     if (op.body) {
       const taken = new Set(params.map((p) => p.name));

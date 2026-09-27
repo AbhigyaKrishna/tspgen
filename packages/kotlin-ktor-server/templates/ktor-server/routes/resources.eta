@@ -11,9 +11,9 @@ object <%= u.resourcesObject %> {
 }
 
 fun Route.<%= u.routesFn %>(service: <%= u.serviceName %>) {
-<% for (const op of u.operations) { const auth = it.extras[op.id].authenticate; const route = include("ktor-server/routes/resources-route", { op, unit: u, options: it.options, h: it.h }); -%>
-<% if (auth.length) { -%>
-    authenticate(<%~ auth.map((a) => it.h.str(a)).join(", ") %>) {
+<% for (const op of u.operations) { const [auth] = it.extras[op.id].auth; const route = include("ktor-server/routes/resources-route", { op, unit: u, options: it.options, h: it.h }); -%>
+<% if (auth) { -%>
+    <%~ auth %> {
 <%~ it.h.indent(route, "    ") %>
     }
 <% } else { -%>

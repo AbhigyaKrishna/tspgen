@@ -1,5 +1,5 @@
-import { metaStrings, type ExtensionRegistry, type FileSpec } from "@abhigyakrishna/tspgen-core";
-import type { Program } from "@typespec/compiler";
+import { metaStrings, reportDiagnostic, type AuthRequirementIR, type ExtensionRegistry, type FileSpec } from "@abhigyakrishna/tspgen-core";
+import { NoTarget, type Program, type Type } from "@typespec/compiler";
 import {
   camel,
   kotlinString,
@@ -11,9 +11,11 @@ import {
 import { withContext, type ServerOperation } from "./context.js";
 import type { KtorServerOptions } from "./options.js";
 import { commonPrefix, routeTree, type RouteFunction } from "./routes.js";
-import { resolveStyle, type RoutingStyle } from "./styles.js";
+import { builtinStyles, resolveStyle, type RoutingStyle } from "./styles.js";
 import { buildUnits, type ServerUnit } from "./units.js";
 import { multipartMode, PartClasses, planUpload, uploadLimit, type SupportNeed } from "./uploads.js";
+
+const TARGET_NAME = "@abhigyakrishna/tspgen-kotlin-ktor-server";
 
 /** Ktor's default `formFieldLimit`. */
 const DEFAULT_UPLOAD_LIMIT = 52428800;
@@ -149,37 +151,204 @@ export interface KtorServerMeta {
 
 export interface ServerOpExtras {
   annotations: string[];
+  /**
+   * Provider names of the route's `authenticate(...)` wrapper, empty without one: the `authenticate` meta key,
+   * else the scheme ids of the wrapper generated from `@useAuth`. A routing style or routes template rendering
+   * `authenticate(<names as strings>)` from this keeps protecting routes, but only `auth` (or `authProviders`,
+   * `authStrategy` and `authOptional`) says everything the wrapper needs.
+   */
   authenticate: string[];
-  /** Full wrapper chain, outermost first: `authenticate(...)` from the `authenticate` key, then `wrap`. */
+  /** Kotlin expressions naming those providers: string literals, or the `auth-providers` expressions. */
+  authProviders: string[];
+  /** `AuthenticationStrategy` member the wrapper passes as `strategy` (import `io.ktor.server.auth.AuthenticationStrategy`). */
+  authStrategy?: "Required";
+  /** The wrapper passes `optional = true`. */
+  authOptional?: boolean;
+  /** The route's `authenticate(...)` wrapper call (at most one), rendered from the fields above. */
+  auth: string[];
+  /** Full wrapper chain, outermost first: `auth`, then `wrap`. */
   wrap: string[];
   /** Extra imports for the routes file (`imports` key). */
   imports: string[];
   routeSet?: string;
 }
 
-function serverExtras(program: Program, units: ServerUnit[]): Record<string, ServerOpExtras> {
+/** A route's `authenticate(...)` wrapper: provider names and expressions (parallel), and its arguments. */
+interface AuthWrapper {
+  names: string[];
+  providers: string[];
+  strategy?: "Required";
+  optional?: boolean;
+}
+
+function renderAuth(wrapper: AuthWrapper): string {
+  const args = [
+    ...wrapper.providers,
+    ...(wrapper.strategy ? [`strategy = AuthenticationStrategy.${wrapper.strategy}`] : []),
+    ...(wrapper.optional ? ["optional = true"] : []),
+  ];
+  return `authenticate(${args.join(", ")})`;
+}
+
+function serverExtras(program: Program, units: ServerUnit[], options: KtorServerOptions): Record<string, ServerOpExtras> {
   const extras: Record<string, ServerOpExtras> = {};
   for (const unit of units) {
     for (const op of unit.operations) {
       const meta = op.meta["kotlin:ktor-server"] ?? {};
-      const authenticate = metaStrings(program, meta, "authenticate", op.id);
+      const names = metaStrings(program, meta, "authenticate", op.id);
       const [routeSet] = metaStrings(program, meta, "routeSet", op.id);
+      const wrapper: AuthWrapper | undefined =
+        names.length > 0 ? { names, providers: names.map((n) => kotlinString(n)) } : generatedAuth(program, op, options);
+      const auth = wrapper ? [renderAuth(wrapper)] : [];
       extras[op.id] = {
         annotations: metaStrings(program, meta, "annotations", op.id),
-        authenticate,
+        authenticate: wrapper?.names ?? [],
+        authProviders: wrapper?.providers ?? [],
+        ...(wrapper?.strategy ? { authStrategy: wrapper.strategy } : {}),
+        ...(wrapper?.optional ? { authOptional: true } : {}),
+        auth,
         // A wrapper declared both on the namespace and on the operation renders once.
-        wrap: [
-          ...new Set([
-            ...(authenticate.length > 0 ? [`authenticate(${authenticate.map((a) => kotlinString(a)).join(", ")})`] : []),
-            ...metaStrings(program, meta, "wrap", op.id),
-          ]),
-        ],
+        wrap: [...new Set([...auth, ...metaStrings(program, meta, "wrap", op.id)])],
         imports: metaStrings(program, meta, "imports", op.id),
         ...(routeSet ? { routeSet } : {}),
       };
     }
   }
   return extras;
+}
+
+/** `A & B | C` notation of a requirement, for diagnostics. */
+function describeAuth(auth: AuthRequirementIR): string {
+  return auth.options
+    .map((option) => (option.length === 0 ? "NoAuth" : option.length === 1 ? option[0] : `(${option.join(" & ")})`))
+    .join(" | ");
+}
+
+/**
+ * The `authenticate(...)` wrapper for an operation's `@useAuth`: one scheme or alternatives of one scheme each →
+ * `authenticate(a, b)` (the first valid credential wins); one alternative of several schemes → `strategy = Required`
+ * (Ktor merges nested `authenticate` blocks into one set, so nesting would accept any of them); any alternative
+ * with `NoAuth` → every scheme mentioned, `optional = true`: anonymous calls pass, the first valid credential wins
+ * (the others are not checked) and only credentials that are all invalid are rejected; an alternative needing
+ * several schemes is thereby loosened (warned as `auth-combination-approximated`). Several alternatives of which
+ * some need more than one scheme cannot be expressed: they are reported and fail closed, requiring every scheme
+ * mentioned (`strategy = Required`).
+ */
+function generatedAuth(program: Program, op: ServerOperation, options: KtorServerOptions): AuthWrapper | undefined {
+  if (options["generate-auth"] === false || !op.auth) return undefined;
+  const alternatives = op.auth.options.map((option) => [...new Set(option)]);
+  const required = alternatives.filter((option) => option.length > 0);
+  if (required.length === 0) return undefined;
+  const of = (ids: string[]) => ({
+    names: ids,
+    providers: ids.map((id) => options["auth-providers"]?.[id] ?? kotlinString(id)),
+  });
+  if (required.length < alternatives.length) {
+    const wrapper: AuthWrapper = { ...of([...new Set(required.flat())]), optional: true };
+    // Ktor accepts the first valid credential of the set, so an alternative needing several schemes is loosened.
+    if (required.some((option) => option.length > 1)) {
+      reportDiagnostic(program, {
+        code: "auth-combination-approximated",
+        format: {
+          operation: op.id,
+          requirement: describeAuth(op.auth),
+          target: "the Ktor server",
+          wrapper: renderAuth(wrapper),
+          hint: '@meta("kotlin:ktor-server", #{ authenticate: … })',
+        },
+        target: operationTarget(program, op.id),
+      });
+    }
+    return wrapper;
+  }
+  if (required.length === 1 && required[0].length > 1) return { ...of(required[0]), strategy: "Required" };
+  if (required.every((option) => option.length === 1)) return of(required.flat());
+  // Fail closed: the strictest wrapper covering every scheme mentioned, so the route is never left unprotected.
+  const all = [...new Set(required.flat())];
+  reportDiagnostic(program, {
+    code: "unsupported-auth-combination",
+    format: {
+      operation: op.id,
+      requirement: describeAuth(op.auth),
+      target: "the Ktor server",
+      fallback: `every scheme (${all.join(" & ")})`,
+      hint: '@meta("kotlin:ktor-server", #{ authenticate: … })',
+    },
+    target: operationTarget(program, op.id),
+  });
+  return { ...of(all), strategy: "Required" };
+}
+
+/**
+ * Templates rendering `authenticate(...)` wrappers per built-in style. A routing style from a plugin, or one of these
+ * templates overridden, may render only `ServerOpExtras.authenticate` (provider names, as before generated auth),
+ * which drops a wrapper's `strategy`/`optional` and `auth-providers` expressions: warn for routes needing them.
+ */
+const WRAPPER_TEMPLATES: Record<string, string[]> = {
+  dsl: ["ktor-server/routes/dsl", "ktor-server/routes/dsl-nodes"],
+  resources: ["ktor-server/routes/resources"],
+};
+
+function checkAuthRendering(
+  program: Program,
+  options: KtorServerOptions,
+  style: RoutingStyle,
+  units: ServerUnit[],
+  extras: Record<string, ServerOpExtras>,
+  overridden: (template: string) => boolean,
+): void {
+  const name = options["routing-style"];
+  const where =
+    builtinStyles[name] !== style
+      ? `routing style '${name}'`
+      : WRAPPER_TEMPLATES[name]?.filter(overridden).map((t) => `overridden template '${t}'`)[0];
+  if (!where) return;
+  for (const op of units.flatMap((u) => u.operations)) {
+    const e = extras[op.id];
+    const mapped = e.authProviders.some((p, i) => p !== kotlinString(e.authenticate[i]));
+    if (!e.authStrategy && !e.authOptional && !mapped) continue;
+    reportDiagnostic(program, {
+      code: "auth-wrapper-not-rendered",
+      format: { operation: op.id, wrapper: e.auth[0], where },
+      target: operationTarget(program, op.id),
+    });
+  }
+}
+
+/** The TypeSpec operation an operation id names, for diagnostics; `NoTarget` when it does not resolve. */
+function operationTarget(program: Program, id: string): Type | typeof NoTarget {
+  const [type] = program.resolveTypeReference(id);
+  return type?.kind === "Operation" ? type : NoTarget;
+}
+
+/**
+ * `auth-providers` expressions must not be blank (an error: `authenticate(, …)` would not compile); a key naming
+ * no auth scheme of any service is likely a typo or a scheme renamed by deduplication (`ApiKeyAuth_`): warn.
+ */
+function checkAuthProviders(program: Program, ir: KotlinIR, options: KtorServerOptions): boolean {
+  const providers = options["auth-providers"] ?? {};
+  const blank = Object.keys(providers).filter((key) => providers[key].trim() === "");
+  if (blank.length > 0) {
+    reportDiagnostic(program, {
+      code: "invalid-target-options",
+      format: {
+        name: TARGET_NAME,
+        errors: blank.map((key) => `auth-providers.${key} must be a Kotlin expression, not blank`).join("; "),
+      },
+      target: NoTarget,
+    });
+    return false;
+  }
+  const ids = [...new Set(ir.services.flatMap((s) => s.auth.filter((a) => a.type !== "noAuth").map((a) => a.id)))];
+  for (const key of Object.keys(providers)) {
+    if (ids.includes(key)) continue;
+    reportDiagnostic(program, {
+      code: "unknown-auth-provider",
+      format: { key, ids: ids.length > 0 ? ids.join(", ") : "none" },
+      target: NoTarget,
+    });
+  }
+  return true;
 }
 
 /** `wrap`, `routeSet` and `nest-routes` are dsl-only; other styles must not silently drop guards. */
@@ -190,7 +359,7 @@ function checkDslOnly(options: KtorServerOptions, units: ServerUnit[], extras: R
     units.some((u) =>
       u.operations.some((op) => {
         const e = extras[op.id];
-        return e.routeSet !== undefined || e.wrap.length > (e.authenticate.length > 0 ? 1 : 0);
+        return e.routeSet !== undefined || e.wrap.length > e.auth.length;
       }),
     );
   if (used) {
@@ -229,8 +398,11 @@ export function planServerFiles(
   options: KtorServerOptions,
   registry: ExtensionRegistry,
   program: Program,
+  /** Whether a logical template is rendered by a file other than this target's own (template-dir, plugin). */
+  overridden: (template: string) => boolean = () => false,
 ): FileSpec[] {
   if (ir.services.length === 0) return [];
+  if (!checkAuthProviders(program, ir, options)) return [];
   const style = resolveStyle(options["routing-style"], registry);
   const supportPkg = options.package ?? `${ir.basePackage}.server`;
   const dirOf = (pkg: string) => `server/${pkg.replaceAll(".", "/")}`;
@@ -267,8 +439,9 @@ export function planServerFiles(
   }
   for (const [index, service] of ir.services.entries()) {
     const units = serviceUnits[index];
-    const extras = serverExtras(program, units);
+    const extras = serverExtras(program, units, options);
     checkDslOnly(options, units, extras);
+    checkAuthRendering(program, options, style, units, extras, overridden);
     const functions = new Map(units.map((unit) => [unit, routeFunctions(unit, options, extras)]));
     for (const unit of units) {
       const pkg = unit.package ?? supportPkg;
@@ -323,7 +496,8 @@ function routesFile(
     ...style.imports(unit, options),
     ...support,
     ...unit.operations.flatMap((op) => extras[op.id].imports),
-    ...(unit.operations.some((op) => extras[op.id].authenticate.length > 0) ? ["io.ktor.server.auth.authenticate"] : []),
+    ...(unit.operations.some((op) => extras[op.id].auth.length > 0) ? ["io.ktor.server.auth.authenticate"] : []),
+    ...(unit.operations.some((op) => extras[op.id].authStrategy) ? ["io.ktor.server.auth.AuthenticationStrategy"] : []),
     ...(functions.some((f) => f.prefix) ? ["io.ktor.server.routing.route"] : []),
   ];
   return {
