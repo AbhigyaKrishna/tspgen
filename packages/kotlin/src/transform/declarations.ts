@@ -14,7 +14,7 @@ import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { camel, identifier, typeName, upperSnake } from "../naming.js";
 import { decoratorArg, decoratorArgs } from "./decorators.js";
-import type { KtDataClass, KtDecl, KtEnumMember, KtProperty, KtTypeUse } from "./model.js";
+import type { KtDataClass, KtDecl, KtEnumMember, KtProperty, KtSealedInterface, KtTypeUse } from "./model.js";
 import { mappedPackage } from "./packages.js";
 import {
   fqnTypeUse,
@@ -32,6 +32,8 @@ type UnionShape = "enum" | "string-alias" | "sealed-interface" | "json";
 export interface DeclarationOptions {
   modelsPackage: string;
   dateTime?: DateTimeMapping;
+  /** nested: variant models only a sealed union uses are declared inside it. */
+  unionVariants?: "nested" | "top-level";
   enumMemberNaming: EnumMemberNaming;
   packages?: Record<string, string>;
   validation?: boolean;
@@ -50,6 +52,8 @@ function isEmptyObject(value: unknown): boolean {
 /** Builds Kotlin declarations for every IR type and resolves TypeRefs to Kotlin type uses. */
 export class DeclarationBuilder {
   private readonly decls = new Map<string, KtDecl>();
+  /** Variant data classes moved inside their sealed union, by IR id. */
+  private readonly nested = new Map<string, { parent: KtSealedInterface; decl: KtDataClass }>();
   private readonly mapped = new Map<string, KtTypeUse>();
   /** Template instances mapped with @Kotlin.type: rendered as `<fqn><args>`. */
   private readonly generic = new Map<string, { fqn: string; args: TypeRef[] }>();
@@ -85,6 +89,10 @@ export class DeclarationBuilder {
     for (const t of own) if (t.kind === "model") this.fillModel(t);
     for (const t of own) if (t.kind === "union" && this.unionShape(t) === "sealed-interface") this.fillUnion(t);
     this.fillChecks();
+    if (this.options.unionVariants !== "top-level") {
+      const uses = countNamedUses(this.api);
+      for (const t of own) if (t.kind === "union" && this.unionShape(t) === "sealed-interface") this.nestVariants(t, uses);
+    }
     this.checkDuplicates();
     return [...this.decls.values()];
   }
@@ -96,6 +104,8 @@ export class DeclarationBuilder {
         if (mapped) return mapped;
         const generic = this.generic.get(ref.id);
         if (generic) return genericOf(fqnTypeUse(generic.fqn), generic.args.map((arg) => this.typeUse(arg)));
+        const nested = this.nested.get(ref.id);
+        if (nested) return { text: `${nested.parent.name}.${nested.decl.name}`, imports: [nested.parent.fqn], nullable: false };
         const decl = this.decls.get(ref.id);
         return decl ? { text: decl.name, imports: [decl.fqn], nullable: false } : JSON_ELEMENT;
       }
@@ -165,7 +175,7 @@ export class DeclarationBuilder {
     switch (t.kind) {
       case "model":
         return t.discriminator
-          ? { ...base, kind: "sealed-interface", discriminator: t.discriminator.property, properties: [], implements: [...implementsMeta] }
+          ? { ...base, kind: "sealed-interface", discriminator: t.discriminator.property, properties: [], implements: [...implementsMeta], variants: [] }
           : { ...base, kind: "data-class", properties: [], implements: [...implementsMeta], checks: [] };
       case "enum":
         return t.members.every((m) => typeof m.value === "string")
@@ -176,7 +186,7 @@ export class DeclarationBuilder {
           case "enum":
             return { ...base, kind: "enum", members: [] };
           case "sealed-interface":
-            return { ...base, kind: "sealed-interface", discriminator: t.discriminator!.property, properties: [], implements: [...implementsMeta] };
+            return { ...base, kind: "sealed-interface", discriminator: t.discriminator!.property, properties: [], implements: [...implementsMeta], variants: [] };
           default:
             return { ...base, kind: "typealias", target: JSON_ELEMENT };
         }
@@ -253,6 +263,28 @@ export class DeclarationBuilder {
         decl.target = JSON_ELEMENT;
         reportDiagnostic(this.program, { code: "unsupported-union", format: { id: u.id }, target: NoTarget });
       }
+    }
+  }
+
+  /**
+   * Moves the variants of a sealed union that nothing else references inside it, named after their
+   * variant key (`catalog` → `Catalog`) unless @Kotlin.name renames the model.
+   */
+  private nestVariants(u: UnionIR, uses: Map<string, number>): void {
+    const parent = this.decls.get(u.id);
+    if (parent?.kind !== "sealed-interface") return;
+    for (const variant of u.variants) {
+      if (variant.type.kind !== "named" || uses.get(variant.type.id) !== 1) continue;
+      const decl = this.decls.get(variant.type.id);
+      const source = this.types.get(variant.type.id);
+      if (decl?.kind !== "data-class" || source?.kind !== "model") continue;
+      const name = decoratorArg(source.decorators, "Kotlin.name") ?? (variant.name ? typeName(variant.name) : decl.name);
+      decl.name = name;
+      decl.package = parent.package;
+      decl.fqn = `${parent.fqn}.${name}`;
+      this.decls.delete(variant.type.id);
+      this.nested.set(variant.type.id, { parent, decl });
+      parent.variants.push(decl);
     }
   }
 
@@ -433,4 +465,46 @@ export class DeclarationBuilder {
       }
     }
   }
+}
+
+/** How often each named type is referenced across the IR's types and services. */
+function countNamedUses(api: ApiIR): Map<string, number> {
+  const uses = new Map<string, number>();
+  const count = (id: string | undefined) => {
+    if (id) uses.set(id, (uses.get(id) ?? 0) + 1);
+  };
+  const visit = (ref: TypeRef | undefined): void => {
+    if (!ref) return;
+    switch (ref.kind) {
+      case "named":
+        count(ref.id);
+        return;
+      case "array":
+      case "map":
+      case "nullable":
+        visit(ref.of);
+        return;
+    }
+  };
+  for (const t of api.types) {
+    if (t.kind === "model") {
+      t.properties.forEach((p) => visit(p.type));
+      visit(t.additionalProperties);
+      count(t.baseId);
+      t.templateArgs?.forEach(visit);
+    } else if (t.kind === "union") {
+      t.variants.forEach((v) => visit(v.type));
+    }
+  }
+  for (const group of api.services.flatMap((s) => s.groups)) {
+    for (const op of group.operations) {
+      op.params.forEach((p) => visit(p.type));
+      visit(op.body?.type);
+      for (const r of op.responses) {
+        visit(r.body?.type);
+        r.headers.forEach((h) => visit(h.type));
+      }
+    }
+  }
+  return uses;
 }

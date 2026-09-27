@@ -51,6 +51,8 @@ export interface KtSealedInterface extends KtDeclBase {
   discriminator: string;
   properties: KtProperty[];
   implements: string[];
+  /** Variant data classes declared inside the interface (`union-variants: nested`); FQN `<fqn>.<name>`. */
+  variants: KtDataClass[];
 }
 
 export interface KtEnumMember {

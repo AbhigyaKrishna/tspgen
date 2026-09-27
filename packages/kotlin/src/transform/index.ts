@@ -17,6 +17,7 @@ export interface KotlinTransformOptions {
   errors?: "typed" | "thrown";
   validation?: boolean;
   dateTime?: DateTimeMapping;
+  unionVariants?: "nested" | "top-level";
 }
 
 export function resolveKotlinOptions(options: Record<string, unknown>): KotlinTransformOptions {
@@ -30,6 +31,7 @@ export function resolveKotlinOptions(options: Record<string, unknown>): KotlinTr
     errors: options.errors === "thrown" ? "thrown" : "typed",
     validation: options.validation === true,
     dateTime: options["date-time"] === "kotlin.time" ? "kotlin.time" : "java.time",
+    unionVariants: options["union-variants"] === "top-level" ? "top-level" : "nested",
   };
 }
 
@@ -42,6 +44,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     packages: options.packages,
     validation: options.validation,
     dateTime: options.dateTime,
+    unionVariants: options.unionVariants,
   });
   const declarations = builder.build();
   const apiBuilder = new ApiBuilder(builder, apiPackage, { errors: options.errors, packages: options.packages });

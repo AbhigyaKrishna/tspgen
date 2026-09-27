@@ -11,6 +11,7 @@ export interface KotlinEmitterOptions extends CoreEmitterOptions {
   errors?: "typed" | "thrown";
   validation?: boolean;
   "date-time"?: "java.time" | "kotlin.time";
+  "union-variants"?: "nested" | "top-level";
 }
 
 const optionsSchema = {
@@ -68,6 +69,14 @@ const optionsSchema = {
       description:
         "java.time (default): Instant, OffsetDateTime, LocalDate, LocalTime, Duration from java.time with generated " +
         "ISO-8601 serializers; kotlin.time: kotlin.time.Instant/Duration and kotlinx.datetime dates.",
+    },
+    "union-variants": {
+      type: "string",
+      enum: ["nested", "top-level"],
+      nullable: true,
+      description:
+        "nested (default): variant models only a sealed union references are declared inside it, named after the " +
+        "variant key (NodeSource.Catalog); top-level: every variant is its own file.",
     },
   },
   required: [],

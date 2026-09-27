@@ -115,6 +115,93 @@ data class Slot(
     expect(outputs["models/com/acme/models/JavaTimeSerializers.kt"]).toBeUndefined();
   });
 
+  it("nests variants only a sealed union uses inside it, named after their keys", async () => {
+    const { outputs } = await emitter({ validation: true }).compile(`
+      using TspGen;
+      @service namespace S;
+      model Cat { @minLength(1) name: string; at: utcDateTime; @Kotlin.type("java.util.UUID") id: string }
+      model Dog { name: string }
+      model Shared { name: string }
+      @Kotlin.name("Hound") model Wolf { name: string }
+      @discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
+      union Pet { cat: Cat, dog: Dog, shared: Shared, wolf: Wolf }
+      model UsesShared { s: Shared }
+      model Owner { pet: Pet }
+    `);
+    expect(outputs["models/com/acme/models/Pet.kt"]).toBe(`${HEADER}
+@file:UseSerializers(InstantSerializer::class)
+package com.acme.models
+
+import java.time.Instant
+import java.util.UUID
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.UseSerializers
+import kotlinx.serialization.json.JsonClassDiscriminator
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@JsonClassDiscriminator("kind")
+sealed interface Pet {
+    @Serializable
+    @SerialName("cat")
+    data class Cat(
+        val name: String,
+        val at: Instant,
+        val id: UUID,
+    ) : Pet {
+        init {
+            require(name.isNotEmpty()) { "name must not be empty" }
+        }
+    }
+
+    @Serializable
+    @SerialName("dog")
+    data class Dog(
+        val name: String,
+    ) : Pet
+
+    @Serializable
+    @SerialName("wolf")
+    data class Hound(
+        val name: String,
+    ) : Pet
+}
+`);
+    // Shared is also used by UsesShared, so it stays top-level.
+    expect(outputs["models/com/acme/models/Shared.kt"]).toContain("data class Shared(\n    val name: String,\n) : Pet");
+    for (const gone of ["Cat", "Dog", "Wolf", "Hound"]) expect(outputs[`models/com/acme/models/${gone}.kt`]).toBeUndefined();
+  });
+
+  it("nests single-use variants from other namespaces too, in the union's package", async () => {
+    const { outputs } = await emitter({
+      packages: [{ namespace: "S.Other", package: "com.acme.other" }],
+    }).compile(`
+      @service namespace S;
+      model Catalog { id: string }
+      namespace Other { model Remote { id: string } }
+      @discriminated(#{ envelope: "none", discriminatorPropertyName: "type" })
+      union Source { catalog: Catalog, remote: Other.Remote }
+      @route("/sources") op read(): Source;
+    `);
+    const source = outputs["models/com/acme/models/Source.kt"];
+    expect(source).toContain("    data class Catalog(\n        val id: String,\n    ) : Source");
+    expect(source).toContain("    data class Remote(");
+    expect(outputs["models/com/acme/other/Remote.kt"]).toBeUndefined();
+  });
+
+  it("keeps every variant top-level with union-variants: top-level", async () => {
+    const { outputs } = await emitter({ "union-variants": "top-level" }).compile(`
+      @service namespace S;
+      model Cat { name: string }
+      @discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
+      union Pet { cat: Cat }
+    `);
+    expect(outputs["models/com/acme/models/Cat.kt"]).toContain("data class Cat(");
+    expect(outputs["models/com/acme/models/Pet.kt"]).toContain("sealed interface Pet\n");
+  });
+
   it("emits enums", async () => {
     const { outputs } = await emitter().compile(petSpec);
     expect(outputs["models/com/acme/models/Color.kt"]).toBe(`${HEADER}

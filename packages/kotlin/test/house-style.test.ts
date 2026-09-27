@@ -274,9 +274,9 @@ data class Req(
       @discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
       union Pet { cat: Cat, dog: Dog }
     `);
-    const cat = outputs["models/com/acme/models/Cat.kt"];
-    expect(cat).toContain("data class Cat(");
-    expect(cat).not.toContain("containsMatchIn(");
+    const pet = outputs["models/com/acme/models/Pet.kt"];
+    expect(pet).toContain("data class Cat(");
+    expect(pet).not.toContain("containsMatchIn(");
   });
 
   it("renders defaults for empty collections, empty models and mapped enums", async () => {

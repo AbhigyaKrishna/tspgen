@@ -1,5 +1,5 @@
 import { kotlinxImports } from "./serialization/kotlinx.js";
-import type { KtApiDecl, KtDecl } from "./transform/model.js";
+import type { KtApiDecl, KtDataClass, KtDecl } from "./transform/model.js";
 
 /** Dedupe, drop same-package imports, sort. */
 export function organizeImports(imports: readonly string[], pkg: string): string[] {
@@ -50,7 +50,8 @@ function declImportCandidates(decl: KtDecl): string[] {
       : decl.kind === "enum"
         ? []
         : [...decl.properties.flatMap((p) => p.type.imports), ...decl.implements];
-  return [...typeImports, ...decl.imports, ...kotlinxImports(decl)];
+  const variants = decl.kind === "sealed-interface" ? decl.variants.flatMap(declImportCandidates) : [];
+  return [...typeImports, ...decl.imports, ...kotlinxImports(decl), ...variants];
 }
 
 /** Imports for a declaration file and the FQNs it must write qualified (see resolveImports). */
@@ -74,6 +75,12 @@ export function qualifyDecl(decl: KtDecl, qualified: readonly string[]): KtDecl 
       return { ...decl, target: fix(decl.target) };
     case "enum":
       return decl;
+    case "sealed-interface":
+      return {
+        ...decl,
+        properties: decl.properties.map((p) => ({ ...p, type: fix(p.type) })),
+        variants: decl.variants.map((v) => qualifyDecl(v, qualified) as KtDataClass),
+      };
     default:
       return { ...decl, properties: decl.properties.map((p) => ({ ...p, type: fix(p.type) })) } as KtDecl;
   }

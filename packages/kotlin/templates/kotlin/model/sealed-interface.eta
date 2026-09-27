@@ -2,6 +2,9 @@
 <%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @JsonClassDiscriminator(<%~ it.h.str(d.discriminator) %>)
-sealed interface <%= d.name %><%= d.implements.length ? " : " + d.implements.map((f) => it.h.ref(f, it.qualified)).join(", ") : "" %><% if (d.properties.length) { %> {
+sealed interface <%= d.name %><%= d.implements.length ? " : " + d.implements.map((f) => it.h.ref(f, it.qualified)).join(", ") : "" %><% if (d.properties.length || d.variants.length) { %> {
 <% for (const p of d.properties) { %><%~ it.h.kdoc(p.docs, "    ") %>    val <%= p.name %>: <%= p.type.text %>
-<% } %>}<% } %>
+<% } %><% d.variants.forEach((v, i) => { %><% if (i > 0 || d.properties.length) { %>
+
+<% } %><%~ it.h.indent(include("kotlin/model/data-class", { ...it, decl: v }).trim(), "    ") %>
+<% }) %>}<% } %>

@@ -20,6 +20,7 @@ export function kotlinxImports(decl: KtDecl): string[] {
         "kotlinx.serialization.ExperimentalSerializationApi",
         "kotlinx.serialization.Serializable",
         "kotlinx.serialization.json.JsonClassDiscriminator",
+        ...decl.variants.flatMap(kotlinxImports),
       ];
     case "enum":
       return [
