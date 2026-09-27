@@ -1,5 +1,7 @@
 import type {
   ApiIR,
+  ConstraintsIR,
+  CustomScalarIR,
   DecoratorData,
   EnumIR,
   ModelIR,
@@ -9,7 +11,16 @@ import type {
   TypeRef,
   UnionIR,
 } from "@abhigyakrishna/tspgen-core";
-import { metaBoolean, metaScopes, metaStrings, resolveMeta, type MetaScopes } from "@abhigyakrishna/tspgen-core";
+import {
+  declarationScopes,
+  metaBoolean,
+  metaScopes,
+  metaStrings,
+  reportDiagnostic as reportCoreDiagnostic,
+  resolveMeta,
+  type MetaScopes,
+  type ResolvedFeatures,
+} from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
@@ -18,13 +29,17 @@ import { decoratorArg, decoratorArgs } from "./decorators.js";
 import type {
   KtDataClass,
   KtDecl,
+  KtEnum,
   KtEnumMember,
   KtEvent,
   KtEvents,
   KtProperty,
   KtSealedInterface,
   KtStream,
+  KtTypeAlias,
   KtTypeUse,
+  KtValueClass,
+  ScalarStyle,
 } from "./model.js";
 import { mappedPackage } from "./packages.js";
 import {
@@ -35,7 +50,9 @@ import {
   mapOf,
   nullable,
   scalarTypeUse,
+  serializedIn,
   type DateTimeMapping,
+  type DecimalMapping,
 } from "./type-map.js";
 
 type UnionShape = "enum" | "string-alias" | "sealed-interface" | "json";
@@ -43,14 +60,19 @@ type UnionShape = "enum" | "string-alias" | "sealed-interface" | "json";
 export interface DeclarationOptions {
   modelsPackage: string;
   dateTime?: DateTimeMapping;
+  decimal?: DecimalMapping;
   /** nested: variant models only a sealed union uses are declared inside it. */
   unionVariants?: "nested" | "top-level";
   enumMemberNaming: EnumMemberNaming;
   packages?: Record<string, string>;
   validation?: boolean;
+  features?: ResolvedFeatures<string>;
+  scalarStyle?: ScalarStyle;
 }
 
-const NUMERIC = new Set(["Byte", "Short", "Int", "Long", "Float", "Double"]);
+const NUMERIC = new Set(["Byte", "Short", "Int", "Long", "ULong", "Float", "Double"]);
+
+const SCALAR_STYLES: readonly ScalarStyle[] = ["inline", "typealias", "value-class"];
 
 function items(n: number): string {
   return `${n} ${n === 1 ? "item" : "items"}`;
@@ -79,6 +101,9 @@ export class DeclarationBuilder {
   private readonly multipartModels: Set<string>;
   private usesFile = false;
   private usesSseMessage = false;
+  private usesULongAsString = false;
+  /** Value-class scalars used with a property's own `@encode(string)`: their generated `<Name>AsStringSerializer`. */
+  private readonly usedValueClassAsString = new Map<string, { name: string; fqn: string; wraps: "Long" | "ULong" }>();
 
   constructor(
     private readonly program: Program,
@@ -116,6 +141,16 @@ export class DeclarationBuilder {
     return this.usesSseMessage;
   }
 
+  /** Whether some type use is a string-encoded ULong (ModelSerializers.kt then declares ULongAsStringSerializer). */
+  get ulongAsStringUsed(): boolean {
+    return this.usesULongAsString;
+  }
+
+  /** Value-class scalars whose `<Name>AsStringSerializer` ModelSerializers.kt must declare (see `valueClassAsString`). */
+  get valueClassAsStringSerializers(): { name: string; fqn: string; wraps: "Long" | "ULong" }[] {
+    return [...this.usedValueClassAsString.values()];
+  }
+
   /** The Kotlin side of a response stream whose body type is `ref`: its events declaration, else `SseMessage`. */
   stream(stream: StreamIR, ref: TypeRef): KtStream {
     const decl = stream.events && ref.kind === "named" ? this.decls.get(ref.id) : undefined;
@@ -144,6 +179,12 @@ export class DeclarationBuilder {
     }
     const own = this.api.types.filter((t) => !this.mapped.has(t.id) && !this.generic.has(t.id));
     for (const t of own) this.decls.set(t.id, this.shell(t));
+    // User scalars declared as typealiases / value classes, before any type use refers to them.
+    for (const scalar of this.api.customScalars) {
+      if (decoratorArg(scalar.decorators, "Kotlin.type")) continue;
+      const decl = this.scalarDecl(scalar);
+      if (decl) this.decls.set(scalar.id, decl);
+    }
     // Enums (and enum-like unions) first so model defaults can reference members; sealed unions
     // last so they can adjust their variant data classes.
     for (const t of own) if (t.kind === "enum") this.fillEnum(t);
@@ -176,10 +217,24 @@ export class DeclarationBuilder {
       case "scalar": {
         const fqn = decoratorArg(ref.custom?.decorators, "Kotlin.type");
         if (fqn) return fqnTypeUse(fqn);
-        const scalar = scalarTypeUse(ref.name, this.options.dateTime);
-        // A generated type named like a java.time class (a model `Duration`) would clash with its import.
-        const [time] = scalar.imports.filter((i) => i.startsWith("java.time."));
-        return time && this.hasName(scalar.text) ? { text: time, imports: [], nullable: false } : scalar;
+        const std = this.stdScalarUse(ref.name);
+        const base = ref.encoding === "string" ? this.stringEncoded(std) : std;
+        const decl = ref.custom ? this.decls.get(ref.custom.id) : undefined;
+        if (decl?.kind === "typealias") {
+          const needs = serializedIn(base);
+          return { ...base, text: decl.name, imports: [decl.fqn], underlying: base, ...(needs.length ? { needs } : {}) };
+        }
+        if (decl?.kind === "value-class") {
+          // A value class has one wire encoding, fixed by the scalar's own @encode (`stringEncoded` above, on
+          // `decl.value`). A use's own @encode(string) then wraps it in a generated `<Name>AsStringSerializer` —
+          // same class, same wire, just annotated at this use (see `valueClassAsString`).
+          if (ref.encoding === "string" && !decl.value.serializer) {
+            const wrapped = this.valueClassAsString(decl);
+            if (wrapped) return wrapped;
+          }
+          return { text: decl.name, imports: [decl.fqn], nullable: false, underlying: decl.value, wrapper: "value-class" };
+        }
+        return base;
       }
       case "literal":
         return scalarTypeUse(
@@ -199,6 +254,61 @@ export class DeclarationBuilder {
       case "unknown":
         return JSON_ELEMENT;
     }
+  }
+
+  /** A std scalar's type use; a java.time / java.math class is written qualified when a generated type takes its name. */
+  private stdScalarUse(name: string): KtTypeUse {
+    const scalar = scalarTypeUse(name, this.options.dateTime, this.options.decimal);
+    const [fqn] = scalar.imports.filter((i) => i.startsWith("java.time.") || i.startsWith("java.math."));
+    return fqn && this.hasName(scalar.text) ? { text: fqn, imports: [], nullable: false } : scalar;
+  }
+
+  /**
+   * `@encode(string)`: Long (int64, integer, safeint) with kotlinx's LongAsStringSerializer, ULong with the generated
+   * ULongAsStringSerializer. BigDecimal and String decimals already write strings.
+   */
+  private stringEncoded(type: KtTypeUse): KtTypeUse {
+    if (type.text === "Long") {
+      return {
+        ...type,
+        serializer: "LongAsStringSerializer",
+        serialImports: ["kotlinx.serialization.Serializable", "kotlinx.serialization.builtins.LongAsStringSerializer"],
+      };
+    }
+    if (type.text === "ULong") {
+      this.usesULongAsString = true;
+      return {
+        ...type,
+        serializer: "ULongAsStringSerializer",
+        serialImports: ["kotlinx.serialization.Serializable", `${this.options.modelsPackage}.ULongAsStringSerializer`],
+      };
+    }
+    return type;
+  }
+
+  /**
+   * `scalar-style: value-class`, a use's own `@encode(string)` (the scalar itself is not already string-encoded):
+   * `<Name>AsStringSerializer`, generated once per scalar in ModelSerializers.kt, wraps `LongAsStringSerializer` /
+   * the generated `ULongAsStringSerializer` around `decl.value` — `Long`/`ULong` only, since decimal-based value
+   * classes (`String`/`BigDecimal`) already write a JSON string and need no serializer at the use site.
+   */
+  private valueClassAsString(decl: KtValueClass): KtTypeUse | undefined {
+    const wraps = decl.value.text === "Long" ? "Long" : decl.value.text === "ULong" ? "ULong" : undefined;
+    if (!wraps) return undefined;
+    const serializerName = `${decl.name}AsStringSerializer`;
+    if (!this.usedValueClassAsString.has(decl.id)) {
+      this.usedValueClassAsString.set(decl.id, { name: serializerName, fqn: decl.fqn, wraps });
+      if (wraps === "ULong") this.usesULongAsString = true;
+    }
+    return {
+      text: decl.name,
+      imports: [decl.fqn],
+      nullable: false,
+      underlying: decl.value,
+      wrapper: "value-class",
+      serializer: serializerName,
+      serialImports: ["kotlinx.serialization.Serializable", `${this.options.modelsPackage}.${serializerName}`],
+    };
   }
 
   /** A named type without its type arguments: mapped, nested in a sealed union, or its own declaration. */
@@ -279,6 +389,48 @@ export class DeclarationBuilder {
     }
   }
 
+  /** A user scalar's style: its `scalarStyle` meta when valid (else invalid-meta), otherwise the option. */
+  private scalarStyle(s: CustomScalarIR): ScalarStyle {
+    const fallback = this.options.scalarStyle ?? "inline";
+    const value = resolveMeta(metaScopes(s.decorators), "kotlin").scalarStyle;
+    if (value === undefined) return fallback;
+    const style = SCALAR_STYLES.find((x) => x === value);
+    if (style) return style;
+    reportCoreDiagnostic(this.program, {
+      code: "invalid-meta",
+      format: { key: "scalarStyle", where: s.id, expected: 'one of "inline", "typealias", "value-class"' },
+      target: NoTarget,
+    });
+    return fallback;
+  }
+
+  /** The typealias / value class of a user scalar; undefined when inlined. */
+  private scalarDecl(s: CustomScalarIR): KtTypeAlias | KtValueClass | undefined {
+    const style = this.scalarStyle(s);
+    if (style === "inline") return undefined;
+    const name = decoratorArg(s.decorators, "Kotlin.name") ?? typeName(s.name);
+    const pkg =
+      decoratorArg(s.decorators, "Kotlin.packageName") ??
+      mappedPackage(this.options.packages, s.namespace) ??
+      this.options.modelsPackage;
+    const scopes = metaScopes(s.decorators);
+    const std = this.stdScalarUse(s.root);
+    const value = s.encoding === "string" ? this.stringEncoded(std) : std;
+    const base = {
+      id: s.id,
+      name,
+      package: pkg,
+      fqn: `${pkg}.${name}`,
+      ...(s.docs && this.options.features?.values.docs !== false ? { docs: s.docs } : {}),
+      annotations: this.annotations(s, s.id, scopes),
+      meta: scopes,
+      imports: metaStrings(this.program, resolveMeta(scopes, "kotlin"), "imports", s.id),
+    };
+    if (style === "typealias") return { ...base, kind: "typealias", target: value };
+    const c = this.options.validation ? s.constraints : undefined;
+    return { ...base, kind: "value-class", value, checks: c ? this.constraintChecks("value", name, c, value, false) : [] };
+  }
+
   private unionShape(u: UnionIR): UnionShape {
     const types = u.variants.map((v) => v.type);
     const stringLiterals = types.filter((t) => t.kind === "literal" && typeof t.value === "string").length;
@@ -313,6 +465,7 @@ export class DeclarationBuilder {
           meta: metaScopes(m.decorators),
         }),
       );
+      this.fillUnknown(decl, e);
       return;
     }
     if (decl.kind === "typealias") {
@@ -340,6 +493,7 @@ export class DeclarationBuilder {
           meta: {},
         };
       });
+      this.fillUnknown(decl, u);
     } else if (decl.kind === "sealed-interface") {
       for (const variant of u.variants) {
         if (variant.type.kind !== "named") continue;
@@ -357,6 +511,25 @@ export class DeclarationBuilder {
         reportDiagnostic(this.program, { code: "unsupported-union", format: { id: u.id }, target: NoTarget });
       }
     }
+  }
+
+  /** `features.enum-unknown`: the fallback member (`UNKNOWN` / `Unknown`; `_` appended when a member has that name). */
+  private fillUnknown(decl: KtEnum, source: EnumIR | UnionIR): void {
+    const meta = resolveMeta(declarationScopes(source.decorators, source.namespaceDecorators), "kotlin");
+    if (!this.options.features?.at("enum-unknown", meta, source.kind)) return;
+    const taken = (name: string) => decl.members.some((m) => m.name === name);
+    const freeName = (base: string): string => {
+      let name = base;
+      while (taken(name)) name += "_";
+      return name;
+    };
+    const unknownBase = this.options.enumMemberNaming === "PascalCase" ? "Unknown" : "UNKNOWN";
+    decl.unknown = freeName(unknownBase);
+    // The nested `Serializer` object shares the class's namespace with the members; a member named `Serializer`
+    // (any naming convention) would otherwise redeclare it.
+    let serializerName = "Serializer";
+    while (taken(serializerName) || serializerName === decl.unknown) serializerName += "_";
+    decl.serializerName = serializerName;
   }
 
   /**
@@ -511,6 +684,12 @@ export class DeclarationBuilder {
       meta: metaScopes(p.decorators),
     };
     if (name.replace(/`/g, "") !== p.wireName && !this.multipartModels.has(owner)) prop.serialName = p.wireName;
+    // Multipart request classes are not @Serializable: no serializer annotations there.
+    if (!this.multipartModels.has(owner)) {
+      if (type.serializer) prop.annotations = [`@Serializable(with = ${type.serializer}::class)`, ...prop.annotations];
+      if (type.serialText) prop.serialType = type.serialText;
+      if (type.serialImports?.length) prop.serialImports = type.serialImports;
+    }
     if (defaultValue !== undefined) prop.default = defaultValue;
     else if (p.optional) prop.default = "null";
     return prop;
@@ -518,18 +697,39 @@ export class DeclarationBuilder {
 
   /**
    * `require` lines for a property: its constraint decorators when `validation` is on, and the
-   * `notBlank` meta flag (an explicit request, so emitted regardless of `validation`).
+   * `notBlank` meta flag (an explicit request, so emitted regardless of `validation`). Typealias scalars are checked
+   * as their base type; value-class scalars through `.value`, minus the constraints the class checks itself.
    */
   private checks(p: PropertyIR, prop: KtProperty, where: string): string[] {
     const notBlank = metaBoolean(this.program, resolveMeta(prop.meta, "kotlin"), "notBlank", where) === true;
-    const c = this.options.validation ? p.constraints : undefined;
+    let c = this.options.validation ? p.constraints : undefined;
+    let expr = prop.name;
+    let type = prop.type;
+    if (type.underlying) {
+      if (type.wrapper === "value-class") {
+        c = c && withoutScalarConstraints(c, p.type);
+        expr = `${prop.name}.value`;
+      }
+      type = { ...type.underlying, nullable: type.nullable };
+    }
+    return this.constraintChecks(expr, p.name, c, type, notBlank, prop.name);
+  }
+
+  /** `require` lines checking `c` (and `notBlank`) on `expr` of `type`; `guard` is null-checked first when nullable. */
+  private constraintChecks(
+    expr: string,
+    label: string,
+    c: ConstraintsIR | undefined,
+    type: KtTypeUse,
+    notBlank: boolean,
+    guard = expr,
+  ): string[] {
     if (!c && !notBlank) return [];
-    const name = prop.name;
-    const label = p.name;
-    const base = prop.type.text.replace(/\?$/, "");
+    const name = expr;
+    const base = type.text.replace(/\?$/, "");
     const out: string[] = [];
     const add = (condition: string, message: string) => {
-      const guarded = prop.type.nullable ? `${name} == null || ${condition}` : condition;
+      const guarded = type.nullable ? `${guard} == null || ${condition}` : condition;
       out.push(`require(${guarded}) { ${kotlinString(message)} }`);
     };
     if (notBlank && base === "String") add(`${name}.isNotBlank()`, `${label} must not be blank`);
@@ -548,9 +748,14 @@ export class DeclarationBuilder {
       if (c.minItems !== undefined) add(`${name}.size >= ${c.minItems}`, `${label} must have at least ${items(c.minItems)}`);
       if (c.maxItems !== undefined) add(`${name}.size <= ${c.maxItems}`, `${label} must have at most ${items(c.maxItems)}`);
     }
-    if (NUMERIC.has(base)) {
-      if (c.minValue !== undefined) add(`${name} >= ${c.minValue}`, `${label} must be at least ${c.minValue}`);
-      if (c.maxValue !== undefined) add(`${name} <= ${c.maxValue}`, `${label} must be at most ${c.maxValue}`);
+    if (NUMERIC.has(base) || base === "BigDecimal") {
+      // ULong compares only with unsigned literals (a non-positive lower bound always holds); BigDecimal with BigDecimal.
+      const literal = (v: number) =>
+        base === "ULong" ? `${v}uL` : base === "BigDecimal" ? `BigDecimal(${kotlinString(String(v))})` : String(v);
+      if (c.minValue !== undefined && !(base === "ULong" && c.minValue <= 0)) {
+        add(`${name} >= ${literal(c.minValue)}`, `${label} must be at least ${c.minValue}`);
+      }
+      if (c.maxValue !== undefined) add(`${name} <= ${literal(c.maxValue)}`, `${label} must be at most ${c.maxValue}`);
     }
     return out;
   }
@@ -576,12 +781,22 @@ export class DeclarationBuilder {
       }
       return undefined;
     }
+    if (type.underlying) {
+      const inner = this.defaultLiteral(value, ref, type.underlying);
+      if (inner === undefined) return undefined;
+      // `type.text` may carry a trailing `?` (a nullable property with a default keeps the non-null literal).
+      return type.wrapper === "value-class" ? `${type.text.replace(/\?$/, "")}(${inner})` : inner;
+    }
     if (typeof value === "string") return type.text === "String" ? kotlinString(value) : undefined;
     if (typeof value === "boolean") return String(value);
     if (typeof value !== "number") return undefined;
     switch (type.text) {
       case "Long":
         return `${value}L`;
+      case "ULong":
+        return Number.isInteger(value) && value >= 0 ? `${value}uL` : undefined;
+      case "BigDecimal":
+        return `BigDecimal(${kotlinString(String(value))})`;
       case "Float":
         return `${value}f`;
       case "Double":
@@ -653,6 +868,15 @@ function countNamedUses(api: ApiIR): Map<string, number> {
     }
   }
   return uses;
+}
+
+/** `c` without the constraints a value-class property's scalar already checks in its own init block. */
+function withoutScalarConstraints(c: ConstraintsIR, ref: TypeRef): ConstraintsIR | undefined {
+  const scalar = ref.kind === "nullable" ? ref.of : ref;
+  const own = scalar.kind === "scalar" ? scalar.custom?.constraints : undefined;
+  if (!own) return c;
+  const rest = Object.entries(c).filter(([key, value]) => own[key as keyof ConstraintsIR] !== value);
+  return rest.length > 0 ? (Object.fromEntries(rest) as ConstraintsIR) : undefined;
 }
 
 /** Simple identifiers in a Kotlin type expression (`Map<String, List<Pet>>` → Map, String, List, Pet). */

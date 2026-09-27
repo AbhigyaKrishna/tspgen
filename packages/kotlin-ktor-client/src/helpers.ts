@@ -1,50 +1,30 @@
 import type { StatusCodes } from "@abhigyakrishna/tspgen-core";
 import {
   camel,
-  javaTimeCodec,
   kotlinString as str,
+  listElement,
+  paramDecode,
+  paramEncode,
   type KtBody,
   type KtGroup,
   type KtOperation,
   type KtParam,
   type KtPart,
   type KtResultVariant,
+  type KtTypeUse,
 } from "@abhigyakrishna/tspgen-kotlin";
 import { emitLines, preludeLines, streamOf } from "./sse.js";
 
-const PARSE: Record<string, string> = {
-  Int: "toInt()",
-  Long: "toLong()",
-  Short: "toShort()",
-  Byte: "toByte()",
-  Double: "toDouble()",
-  Float: "toFloat()",
-  Boolean: "toBooleanStrict()",
-};
-
 const METHODS = { get: "Get", put: "Put", post: "Post", patch: "Patch", delete: "Delete", head: "Head" } as const;
 
-function bare(typeText: string): string {
-  return typeText.replace(/\?$/, "");
-}
-
-function listItem(typeText: string): string | undefined {
-  return /^List<(.+)>$/.exec(typeText)?.[1];
-}
-
-/** Kotlin expression turning a value into its wire string; `imports` of its type pick java.time codecs. */
-function encode(expr: string, typeText: string, imports: readonly string[]): string {
-  if (typeText === "String") return expr;
-  if (javaTimeCodec(typeText, imports)) return `${expr}.toString()`;
-  return PARSE[typeText] ? `${expr}.toString()` : `encodeParam(${expr})`;
+/** Kotlin expression turning a value into its wire string. */
+function encode(expr: string, type: KtTypeUse): string {
+  return paramEncode(expr, type);
 }
 
 /** Kotlin expression parsing a wire string. */
-export function decode(expr: string, typeText: string, imports: readonly string[]): string {
-  if (typeText === "String") return expr;
-  if (javaTimeCodec(typeText, imports)) return `${typeText}.parse(${expr})`;
-  const parse = PARSE[typeText];
-  return parse ? `${expr}.${parse}` : `decodeParam<${typeText}>(${expr})`;
+export function decode(expr: string, type: KtTypeUse): string {
+  return paramDecode(expr, type);
 }
 
 function statusMatch(codes: StatusCodes): string {
@@ -58,16 +38,18 @@ function rank(codes: StatusCodes): number {
 
 function headerExpr(h: KtParam): string {
   const wire = str(h.wireName);
-  const typeText = bare(h.type.text);
   const raw = `response.headers[${wire}]`;
-  if (h.optional) return typeText === "String" ? raw : `${raw}?.let { ${decode("it", typeText, h.type.imports)} }`;
+  if (h.optional) {
+    const parsed = decode("it", h.type);
+    return parsed === "it" ? raw : `${raw}?.let { ${parsed} }`;
+  }
   const required = `(${raw} ?: throw ApiException(response.status.value, ${str(`missing header ${h.wireName}`)}))`;
-  return decode(required, typeText, h.type.imports);
+  return decode(required, h.type);
 }
 
-function valueExpr(name: string, typeText: string, imports: readonly string[]): string {
-  const item = listItem(typeText);
-  return item ? `${name}.joinToString(",") { ${encode("it", item, imports)} }` : encode(name, typeText, imports);
+function valueExpr(name: string, type: KtTypeUse): string {
+  const item = listElement(type);
+  return item ? `${name}.joinToString(",") { ${encode("it", item)} }` : encode(name, type);
 }
 
 const OCTET_STREAM = "application/octet-stream";
@@ -90,7 +72,7 @@ function partLine(body: string, p: KtPart): string {
       case "json":
         return `append(${wire}, encodeJson(${value}), jsonPartHeaders(${jsonContentType(p)}))`;
       case "text":
-        return `append(${wire}, ${encode(value, p.type.text, p.type.imports)})`;
+        return `append(${wire}, ${encode(value, p.type)})`;
     }
   };
   const value = `${body}.${p.name}`;
@@ -142,7 +124,7 @@ export const ktorClientHelpers = {
       .map((segment) => {
         const name = /^\{(.+)\}$/.exec(segment)?.[1];
         const param = name ? op.params.find((p) => p.location === "path" && p.wireName === name) : undefined;
-        return param ? encode(param.name, bare(param.type.text), param.type.imports) : str(segment);
+        return param ? encode(param.name, param.type) : str(segment);
       })
       .join(", ");
   },
@@ -152,20 +134,18 @@ export const ktorClientHelpers = {
       .filter((p) => p.location === "query")
       .map((p) => {
         const wire = str(p.wireName);
-        const typeText = bare(p.type.text);
-        const imports = p.type.imports;
-        const item = listItem(typeText);
+        const item = listElement(p.type);
         if (item && p.explode) {
-          return `${p.name}${p.optional ? "?" : ""}.forEach { parameters.append(${wire}, ${encode("it", item, imports)}) }`;
+          return `${p.name}${p.optional ? "?" : ""}.forEach { parameters.append(${wire}, ${encode("it", item)}) }`;
         }
         if (item) {
           return p.optional
-            ? `${p.name}?.let { values -> parameters.append(${wire}, ${valueExpr("values", typeText, imports)}) }`
-            : `parameters.append(${wire}, ${valueExpr(p.name, typeText, imports)})`;
+            ? `${p.name}?.let { values -> parameters.append(${wire}, ${valueExpr("values", p.type)}) }`
+            : `parameters.append(${wire}, ${valueExpr(p.name, p.type)})`;
         }
         return p.optional
-          ? `${p.name}?.let { parameters.append(${wire}, ${encode("it", typeText, imports)}) }`
-          : `parameters.append(${wire}, ${encode(p.name, typeText, imports)})`;
+          ? `${p.name}?.let { parameters.append(${wire}, ${encode("it", p.type)}) }`
+          : `parameters.append(${wire}, ${encode(p.name, p.type)})`;
       });
   },
 
@@ -175,12 +155,10 @@ export const ktorClientHelpers = {
       .map((p) => {
         const fn = p.location === "header" ? "header" : "cookie";
         const wire = str(p.wireName);
-        const typeText = bare(p.type.text);
-        const imports = p.type.imports;
-        if (!p.optional) return `${fn}(${wire}, ${valueExpr(p.name, typeText, imports)})`;
-        return listItem(typeText)
-          ? `${p.name}?.let { values -> ${fn}(${wire}, ${valueExpr("values", typeText, imports)}) }`
-          : `${p.name}?.let { ${fn}(${wire}, ${encode("it", typeText, imports)}) }`;
+        if (!p.optional) return `${fn}(${wire}, ${valueExpr(p.name, p.type)})`;
+        return listElement(p.type)
+          ? `${p.name}?.let { values -> ${fn}(${wire}, ${valueExpr("values", p.type)}) }`
+          : `${p.name}?.let { ${fn}(${wire}, ${encode("it", p.type)}) }`;
       });
     const body = op.body;
     if (body) {

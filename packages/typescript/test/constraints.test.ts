@@ -43,4 +43,30 @@ describe("constrain", () => {
     const base = scalarUse("string");
     expect(constrain(base, { minLength: 1 })).toMatchObject({ text: "string", imports: [], schemaImports: [] });
   });
+
+  it("checks @minValue/@maxValue on an @encode(string) integer with a BigInt refine", () => {
+    expect(schema(scalarUse("int64", "string"), { minValue: 1, maxValue: 100 })).toBe(
+      "z.string().regex(/^-?\\d+$/).refine((v) => BigInt(v) >= 1n).refine((v) => BigInt(v) <= 100n)",
+    );
+    expect(schema(scalarUse("uint64", "string"), { minValue: 0 })).toBe("z.string().regex(/^\\d+$/).refine((v) => BigInt(v) >= 0n)");
+  });
+
+  it("uint64 as a string disallows a leading '-' (unsigned); other integers still allow it", () => {
+    expect(scalarUse("uint64", "string").schema).toBe("z.string().regex(/^\\d+$/)");
+    expect(scalarUse("int64", "string").schema).toBe("z.string().regex(/^-?\\d+$/)");
+  });
+
+  it("reports unsupported bounds instead of silently dropping @minValue/@maxValue on a decimal", () => {
+    const reasons: void[] = [];
+    const onUnsupportedBounds = () => reasons.push(undefined);
+    expect(schema(scalarUse("decimal"), { minValue: 0 }, false, undefined, onUnsupportedBounds)).toBe(scalarUse("decimal").schema);
+    expect(reasons).toHaveLength(1);
+    // An @encode(string) decimal is the same base schema (decimal is already a wire string) and is also reported.
+    expect(schema(scalarUse("decimal", "string"), { maxValue: 10 }, false, undefined, onUnsupportedBounds)).toBe(scalarUse("decimal").schema);
+    expect(reasons).toHaveLength(2);
+    // No callback and no @minValue/@maxValue: unrelated constraints (@minLength) don't call it.
+    expect(() => schema(scalarUse("decimal"), { minValue: 0 })).not.toThrow();
+    schema(scalarUse("decimal"), { minLength: 1 }, false, undefined, onUnsupportedBounds);
+    expect(reasons).toHaveLength(2);
+  });
 });

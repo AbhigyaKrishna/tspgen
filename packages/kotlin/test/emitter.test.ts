@@ -88,7 +88,7 @@ data class Slot(
 )
 `);
     expect(outputs["models/com/acme/models/Plain.kt"]).not.toContain("UseSerializers");
-    const serializers = outputs["models/com/acme/models/JavaTimeSerializers.kt"];
+    const serializers = outputs["models/com/acme/models/ModelSerializers.kt"];
     expect(serializers).toContain(`object InstantSerializer : KSerializer<Instant> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("java.time.Instant", PrimitiveKind.STRING)
 
@@ -109,7 +109,7 @@ data class Slot(
     expect(w).toContain("    val d: java.time.Duration,\n    val x: Duration,\n");
     expect(w).not.toContain("import java.time.Duration");
     expect(w).toContain("@file:UseSerializers(DurationSerializer::class)");
-    expect(outputs["models/com/acme/models/JavaTimeSerializers.kt"]).toContain("object DurationSerializer");
+    expect(outputs["models/com/acme/models/ModelSerializers.kt"]).toContain("object DurationSerializer");
   });
 
   it("keeps kotlin.time and kotlinx.datetime with date-time: kotlin.time", async () => {
@@ -120,12 +120,12 @@ data class Slot(
     const slot = outputs["models/com/acme/models/Slot.kt"];
     expect(slot).toContain("import kotlin.time.Duration\nimport kotlin.time.Instant\nimport kotlinx.datetime.LocalDate\n");
     expect(slot).not.toContain("UseSerializers");
-    expect(outputs["models/com/acme/models/JavaTimeSerializers.kt"]).toBeUndefined();
+    expect(outputs["models/com/acme/models/ModelSerializers.kt"]).toBeUndefined();
   });
 
   it("emits no serializers when no model uses java.time", async () => {
     const { outputs } = await emitter().compile(`@service namespace S; model Plain { name: string }`);
-    expect(outputs["models/com/acme/models/JavaTimeSerializers.kt"]).toBeUndefined();
+    expect(outputs["models/com/acme/models/ModelSerializers.kt"]).toBeUndefined();
   });
 
   it("nests variants only a sealed union uses inside it, named after their keys", async () => {

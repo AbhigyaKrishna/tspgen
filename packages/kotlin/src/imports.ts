@@ -1,5 +1,5 @@
 import { kotlinxImports } from "./serialization/kotlinx.js";
-import type { KtApiDecl, KtDataClass, KtDecl } from "./transform/model.js";
+import type { KtApiDecl, KtDataClass, KtDecl, KtTypeUse } from "./transform/model.js";
 
 /** Dedupe, drop same-package imports, sort. */
 export function organizeImports(imports: readonly string[], pkg: string): string[] {
@@ -44,6 +44,9 @@ export function qualifyText(text: string, fqns: readonly string[]): string {
 }
 
 function declImportCandidates(decl: KtDecl): string[] {
+  if (decl.kind === "value-class") {
+    return [...decl.value.imports, ...(decl.value.serialImports ?? []), ...decl.imports, ...kotlinxImports(decl)];
+  }
   const typeImports =
     decl.kind === "typealias"
       ? decl.target.imports
@@ -51,7 +54,11 @@ function declImportCandidates(decl: KtDecl): string[] {
         ? []
         : decl.kind === "events"
           ? decl.events.flatMap((e) => e.data?.imports ?? [])
-          : [...decl.properties.flatMap((p) => p.type.imports), ...decl.implements];
+          : [
+              ...decl.properties.flatMap((p) => p.type.imports),
+              ...(decl.kind === "data-class" ? decl.properties.flatMap((p) => p.serialImports ?? []) : []),
+              ...decl.implements,
+            ];
   const variants = decl.kind === "sealed-interface" ? decl.variants.flatMap(declImportCandidates) : [];
   return [...typeImports, ...decl.imports, ...kotlinxImports(decl), ...variants];
 }
@@ -72,6 +79,15 @@ export function qualifyDecl(decl: KtDecl, qualified: readonly string[]): KtDecl 
     const hits = qualified.filter((q) => type.imports.includes(q));
     return hits.length > 0 ? { ...type, text: qualifyText(type.text, hits) } : type;
   };
+  const fixProp = <P extends { type: KtTypeUse; serialType?: string }>(p: P): P => {
+    const hits = qualified.filter((q) => p.type.imports.includes(q));
+    if (hits.length === 0) return p;
+    return {
+      ...p,
+      type: { ...p.type, text: qualifyText(p.type.text, hits) },
+      ...(p.serialType ? { serialType: qualifyText(p.serialType, hits) } : {}),
+    };
+  };
   switch (decl.kind) {
     case "typealias":
       return { ...decl, target: fix(decl.target) };
@@ -82,11 +98,13 @@ export function qualifyDecl(decl: KtDecl, qualified: readonly string[]): KtDecl 
     case "sealed-interface":
       return {
         ...decl,
-        properties: decl.properties.map((p) => ({ ...p, type: fix(p.type) })),
+        properties: decl.properties.map(fixProp),
         variants: decl.variants.map((v) => qualifyDecl(v, qualified) as KtDataClass),
       };
+    case "value-class":
+      return { ...decl, value: fix(decl.value) };
     default:
-      return { ...decl, properties: decl.properties.map((p) => ({ ...p, type: fix(p.type) })) } as KtDecl;
+      return { ...decl, properties: decl.properties.map(fixProp) } as KtDecl;
   }
 }
 

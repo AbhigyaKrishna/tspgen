@@ -14,6 +14,23 @@ export interface KtTypeUse {
   text: string;
   imports: string[];
   nullable: boolean;
+  /** Element of a `List` (set by `listOf`); parameter codecs convert list items with it. */
+  element?: KtTypeUse;
+  /**
+   * Serializer (simple name) giving this scalar its JSON form, e.g. `LongAsStringSerializer` for `@encode(string)`:
+   * a model property of this type is annotated `@Serializable(with = <serializer>::class)`.
+   */
+  serializer?: string;
+  /** Imports `serializer` / `serialText` need. */
+  serialImports?: string[];
+  /** The type as written in a model when an element needs a serializer: `List<@Serializable(with = …) Long>`. */
+  serialText?: string;
+  /** A user scalar declared as a typealias or value class: its base type. Parameter codecs convert through it. */
+  underlying?: KtTypeUse;
+  /** `"value-class"`: values are wrapped (`PetId(raw)`; `id.value` for the raw value). */
+  wrapper?: "value-class";
+  /** Classes whose generated serializers this type needs though it does not name them (typealiases of java.time). */
+  needs?: string[];
 }
 
 interface KtDeclBase {
@@ -42,6 +59,10 @@ export interface KtProperty {
   docs?: string;
   annotations: string[];
   meta: MetaScopes;
+  /** Type as written in the class when it differs from `type.text` (serializer annotations on elements). */
+  serialType?: string;
+  /** Imports the property's serializer annotations need. */
+  serialImports?: string[];
 }
 
 export interface KtDataClass extends KtDeclBase {
@@ -79,11 +100,26 @@ export interface KtEnumMember {
 export interface KtEnum extends KtDeclBase {
   kind: "enum";
   members: KtEnumMember[];
+  /** `features.enum-unknown`: name of the fallback member unknown wire values decode to (declared last). */
+  unknown?: string;
+  /** Name of the nested `Serializer` object, set together with `unknown`: `Serializer` unless a member has that name. */
+  serializerName?: string;
 }
 
 export interface KtTypeAlias extends KtDeclBase {
   kind: "typealias";
   target: KtTypeUse;
+}
+
+/** How user scalars are declared; see the `scalar-style` option. */
+export type ScalarStyle = "inline" | "typealias" | "value-class";
+
+/** A user scalar with `scalar-style: value-class`: `@JvmInline value class <name>(val value: <value>)`. */
+export interface KtValueClass extends KtDeclBase {
+  kind: "value-class";
+  value: KtTypeUse;
+  /** `init { require(…) }` lines from the scalar's own constraints (features.validation). */
+  checks: string[];
 }
 
 /** One event of an `@events` union: a class nested in the events interface. */
@@ -109,7 +145,7 @@ export interface KtEvents extends KtDeclBase {
   events: KtEvent[];
 }
 
-export type KtDecl = KtDataClass | KtSealedInterface | KtEnum | KtTypeAlias | KtEvents;
+export type KtDecl = KtDataClass | KtSealedInterface | KtEnum | KtTypeAlias | KtEvents | KtValueClass;
 
 export interface KtParam {
   name: string;
@@ -228,13 +264,20 @@ export interface KotlinIR {
   httpFile?: string;
   /** FQN of the generated `SseMessage` class, when an operation streams untyped server-sent events. */
   sseMessage?: string;
-  /** java.time classes used anywhere (models, parameters, bodies); each gets a generated serializer. */
-  javaTime: string[];
+  /** Classes with a generated serializer in ModelSerializers.kt that the API uses (models, parameters, bodies). */
+  serializers: string[];
   /**
-   * FQN of the generated `SerializersModule` with contextual java.time serializers, when `javaTime` is not
-   * empty: bodies that are java.time values themselves (`List<Instant>`) need it in the Json configuration.
+   * FQN of the generated `modelSerializersModule` (the `serializers` as contextual serializers), when `serializers` is
+   * not empty: bodies that are such values themselves (`List<Instant>`) need it in the Json configuration.
    */
-  javaTimeModule?: string;
+  serializersModule?: string;
+  /** `@encode(string)` on uint64 is used: ModelSerializers.kt declares `ULongAsStringSerializer`. */
+  ulongAsString?: boolean;
+  /**
+   * `scalar-style: value-class` scalars used with a use's own `@encode(string)`: ModelSerializers.kt declares
+   * `<name>AsStringSerializer` for each, wrapping `LongAsStringSerializer`/`ULongAsStringSerializer`.
+   */
+  valueClassAsString?: { name: string; fqn: string; wraps: "Long" | "ULong" }[];
 }
 
 export type KtResult =

@@ -145,9 +145,9 @@ describe("kotlin: visibility", () => {
     expect(shape).toContain("\ninternal sealed interface Shape");
     expect(shape).toContain("\n    data class Circle(");
     expect(shape).not.toContain("internal data class Circle");
-    const time = outputs["models/com/acme/models/JavaTimeSerializers.kt"];
+    const time = outputs["models/com/acme/models/ModelSerializers.kt"];
     expect(time).toContain("\ninternal object InstantSerializer : KSerializer<Instant> {");
-    expect(time).toContain("\ninternal val javaTimeSerializersModule: SerializersModule");
+    expect(time).toContain("\ninternal val modelSerializersModule: SerializersModule");
     expect(outputs["models/com/acme/api/ApiException.kt"]).toContain("\ninternal open class ApiException(");
     expect(outputs["models/com/acme/api/OopsException.kt"]).toContain("\ninternal class OopsException(");
   });

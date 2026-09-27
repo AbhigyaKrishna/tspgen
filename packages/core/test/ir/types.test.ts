@@ -115,12 +115,93 @@ describe("type IR", () => {
     const thing = find(ir, "Pets.Thing");
     if (thing.kind !== "model") throw new Error("expected model");
     expect(thing.properties.map((p) => p.type)).toEqual([
-      { kind: "scalar", name: "string", custom: { id: "Pets.petId", name: "petId", decorators: {} } },
+      {
+        kind: "scalar",
+        name: "string",
+        custom: { id: "Pets.petId", name: "petId", namespace: ["Pets"], root: "string", decorators: {} },
+      },
       { kind: "named", id: "Pets.Color" },
       { kind: "named", id: "Pets.Shape" },
       { kind: "named", id: "$anon.ThingInline" },
     ]);
     expect(find(ir, "$anon.ThingInline")).toMatchObject({ kind: "model", name: "ThingInline", namespace: [] });
+  });
+
+  it("describes custom scalars with their namespace, docs and constraints", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      /** A pet id. */
+      @minLength(3) @pattern("^p") scalar petId extends string;
+      model Thing { id: petId }
+    `);
+    const thing = find(ir, "Pets.Thing");
+    if (thing.kind !== "model") throw new Error("expected model");
+    expect(thing.properties[0].type).toEqual({
+      kind: "scalar",
+      name: "string",
+      custom: {
+        id: "Pets.petId",
+        name: "petId",
+        namespace: ["Pets"],
+        root: "string",
+        docs: "A pet id.",
+        constraints: { minLength: 3, pattern: "^p" },
+        decorators: {},
+      },
+    });
+    // Property constraints still include the scalar's (unchanged).
+    expect(thing.properties[0].constraints).toEqual({ minLength: 3, pattern: "^p" });
+  });
+
+  it("gives a custom scalar its ultimate std root and own @encode, independent of a property's own @encode", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      scalar bigId extends int64;
+      @encode(string) scalar encodedId extends int64;
+      /** A scalar chain: \`shortId\` roots at int64 through \`bigId\`; only \`bigId\` gets its own declaration. */
+      scalar shortId extends bigId;
+      model Thing {
+        a: bigId;
+        b: encodedId;
+        @encode(string) c: bigId;
+        d: shortId;
+      }
+    `);
+    const thing = find(ir, "Pets.Thing");
+    if (thing.kind !== "model") throw new Error("expected model");
+    const [a, b, c, d] = thing.properties.map((p) => p.type);
+    if (a.kind !== "scalar" || b.kind !== "scalar" || c.kind !== "scalar" || d.kind !== "scalar") {
+      throw new Error("expected scalar refs");
+    }
+    // `bigId` has no @encode of its own: unaffected by property `c`'s own @encode(string) applying only to that ref.
+    expect(a.custom).toMatchObject({ id: "Pets.bigId", root: "int64" });
+    expect(a.custom?.encoding).toBeUndefined();
+    expect(a.encoding).toBeUndefined();
+    // `encodedId` carries its own @encode(string).
+    expect(b.custom).toMatchObject({ id: "Pets.encodedId", root: "int64", encoding: "string" });
+    expect(b.encoding).toBe("string");
+    // Property `c`'s own @encode(string) is on the ref, not the (unencoded) scalar's CustomScalarIR.
+    expect(c.custom).toBe(a.custom);
+    expect(c.encoding).toBe("string");
+    // `shortId` extends `bigId` (not a std scalar directly): its root is still the ultimate std scalar, int64.
+    expect(d.custom).toMatchObject({ id: "Pets.shortId", root: "int64" });
+    expect(d.custom?.encoding).toBeUndefined();
+  });
+
+  it("exposes every distinct custom scalar in ApiIR.customScalars, one shared object per ref", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      scalar petId extends string;
+      model Thing { a: petId; b: petId; other: int32 }
+    `);
+    expect(ir.customScalars.map((s) => s.id)).toEqual(["Pets.petId"]);
+    const thing = find(ir, "Pets.Thing");
+    if (thing.kind !== "model") throw new Error("expected model");
+    const [a, b] = thing.properties.map((p) => p.type);
+    if (a.kind !== "scalar" || b.kind !== "scalar") throw new Error("expected scalar refs");
+    // Every ref to the same scalar (and the entry in `customScalars`) shares one object.
+    expect(a.custom).toBe(b.custom);
+    expect(a.custom).toBe(ir.customScalars[0]);
   });
 
   it("records discriminator mapping and base models", async () => {

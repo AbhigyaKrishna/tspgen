@@ -1,0 +1,48 @@
+<% it.classes.forEach((c, i) => { %><% if (i > 0) { %>
+
+<% } %>/** Writes `<%= c.name %>` as its ISO-8601 string (`toString()` / `<%= c.name %>.parse`). */
+<%= it.h.visibility(it) %>object <%= c.name %>Serializer : KSerializer<<%= c.name %>> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(<%~ it.h.str(c.fqn) %>, PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: <%= c.name %>) = encoder.encodeString(value.toString())
+
+    override fun deserialize(decoder: Decoder): <%= c.name %> = <%= c.name %>.parse(decoder.decodeString())
+}<% }) %><% if (it.bigDecimal) { %>
+
+/** Writes `BigDecimal` as a JSON string (`toPlainString()`); reads a JSON string or number. */
+<%= it.h.visibility(it) %>object BigDecimalSerializer : KSerializer<BigDecimal> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("java.math.BigDecimal", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: BigDecimal) = encoder.encodeString(value.toPlainString())
+
+    override fun deserialize(decoder: Decoder): BigDecimal =
+        BigDecimal(if (decoder is JsonDecoder) decoder.decodeJsonElement().jsonPrimitive.content else decoder.decodeString())
+}<% } %><% if (it.ulongAsString) { %>
+
+/** Writes `ULong` as a JSON string (`@encode(string)` on uint64). */
+<%= it.h.visibility(it) %>object ULongAsStringSerializer : KSerializer<ULong> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(<%~ it.h.str(it.package + ".ULongAsString") %>, PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: ULong) = encoder.encodeString(value.toString())
+
+    override fun deserialize(decoder: Decoder): ULong = decoder.decodeString().toULong()
+}<% } %><% if (it.valueClassAsString && it.valueClassAsString.length > 0) { it.valueClassAsString.forEach((v) => { %>
+
+/** Writes `<%= v.className %>` as its wrapped <%= v.wraps %>, as a JSON string (`@encode(string)` on a use). */
+<%= it.h.visibility(it) %>object <%= v.name %> : KSerializer<<%= v.className %>> {
+    private val delegate = <%= v.wraps === "Long" ? "LongAsStringSerializer" : "ULongAsStringSerializer" %>
+
+    override val descriptor: SerialDescriptor = delegate.descriptor
+
+    override fun serialize(encoder: Encoder, value: <%= v.className %>) = delegate.serialize(encoder, value.value)
+
+    override fun deserialize(decoder: Decoder): <%= v.className %> = <%= v.className %>(delegate.deserialize(decoder))
+}<% }) } %><% if (it.contextual.length > 0) { %>
+
+/**
+ * Registers the serializers above as contextual, for such values outside the models (e.g. a
+ * `List<Instant>` request body): `Json { serializersModule = modelSerializersModule }`.
+ */
+<%= it.h.visibility(it) %>val modelSerializersModule: SerializersModule = SerializersModule {
+<% for (const name of it.contextual) { %>    contextual(<%= name %>::class, <%= name %>Serializer)
+<% } %>}<% } %>

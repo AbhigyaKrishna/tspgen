@@ -1,10 +1,11 @@
 import type { FileSpec, Target } from "@abhigyakrishna/tspgen-core";
 import { apiDeclImports, organizeImports, qualifyDecl, resolveDeclImports } from "./imports.js";
 import type { KotlinIR, KtDecl, KtTypeUse } from "./transform/model.js";
-import { JAVA_TIME_CLASSES, javaTimeIn } from "./transform/type-map.js";
+import { SERIALIZED_CLASSES, serializedIn } from "./transform/type-map.js";
 
 /** Property types of a declaration, including those of variants nested in it. */
 function declTypes(decl: KtDecl): KtTypeUse[] {
+  if (decl.kind === "value-class") return [decl.value];
   // Events classes are not serialized: their payloads are encoded by the server and client routes.
   if (decl.kind === "typealias" || decl.kind === "enum" || decl.kind === "events") return [];
   const own = decl.properties.map((p) => p.type);
@@ -17,34 +18,45 @@ function simpleName(fqn: string): string {
   return fqn.slice(fqn.lastIndexOf(".") + 1);
 }
 
-/**
- * ISO-8601 serializers for the java.time classes the API uses, plus a SerializersModule registering them
- * contextually (for bodies that are java.time values themselves), in one file of the models package.
- */
-function javaTimeSerializersFile(ir: KotlinIR): FileSpec[] {
-  const classes = ir.javaTime;
-  if (classes.length === 0) return [];
+/** Serializers for classes kotlinx has none for, plus modelSerializersModule registering them contextually. */
+function modelSerializersFile(ir: KotlinIR): FileSpec[] {
+  const valueClassAsString = ir.valueClassAsString ?? [];
+  if (ir.serializers.length === 0 && !ir.ulongAsString && valueClassAsString.length === 0) return [];
+  const time = ir.serializers.filter((fqn) => fqn.startsWith("java.time."));
+  const bigDecimal = ir.serializers.includes("java.math.BigDecimal");
+  // PrimitiveSerialDescriptor/PrimitiveKind are only used by the java.time / BigDecimal / ULongAsString blocks
+  // below (the value-class-as-string block delegates to another serializer's descriptor instead).
+  const primitiveDescriptor = time.length > 0 || bigDecimal || ir.ulongAsString === true;
+  const needsLongAsString = valueClassAsString.some((v) => v.wraps === "Long");
   return [
     {
-      path: `models/${ir.modelsPackage.replaceAll(".", "/")}/JavaTimeSerializers.kt`,
+      path: `models/${ir.modelsPackage.replaceAll(".", "/")}/ModelSerializers.kt`,
       template: "kotlin/file",
       data: {
         package: ir.modelsPackage,
         imports: organizeImports(
           [
-            ...classes,
+            ...ir.serializers,
+            ...valueClassAsString.map((v) => v.fqn),
             "kotlinx.serialization.KSerializer",
-            "kotlinx.serialization.descriptors.PrimitiveKind",
-            "kotlinx.serialization.descriptors.PrimitiveSerialDescriptor",
+            ...(primitiveDescriptor
+              ? ["kotlinx.serialization.descriptors.PrimitiveKind", "kotlinx.serialization.descriptors.PrimitiveSerialDescriptor"]
+              : []),
             "kotlinx.serialization.descriptors.SerialDescriptor",
             "kotlinx.serialization.encoding.Decoder",
             "kotlinx.serialization.encoding.Encoder",
-            "kotlinx.serialization.modules.SerializersModule",
+            ...(ir.serializers.length > 0 ? ["kotlinx.serialization.modules.SerializersModule"] : []),
+            ...(bigDecimal ? ["kotlinx.serialization.json.JsonDecoder", "kotlinx.serialization.json.jsonPrimitive"] : []),
+            ...(needsLongAsString ? ["kotlinx.serialization.builtins.LongAsStringSerializer"] : []),
           ],
           ir.modelsPackage,
         ),
-        body: "kotlin/model/java-time-serializers",
-        classes: classes.map((fqn) => ({ fqn, name: simpleName(fqn) })),
+        body: "kotlin/model/model-serializers",
+        classes: time.map((fqn) => ({ fqn, name: simpleName(fqn) })),
+        bigDecimal,
+        contextual: ir.serializers.map(simpleName),
+        ulongAsString: ir.ulongAsString === true,
+        valueClassAsString: valueClassAsString.map((v) => ({ name: v.name, className: simpleName(v.fqn), wraps: v.wraps })),
       },
     },
   ];
@@ -99,12 +111,12 @@ export const modelsTarget: Target<KotlinIR> = {
       const resolved = resolveDeclImports(decl);
       const { qualified } = resolved;
       let { imports } = resolved;
-      // java.time has no kotlinx serializers: register the generated ones for the whole file, which
-      // also covers them as type arguments (List<Instant>) and map values.
-      const used = new Set(declTypes(decl).flatMap(javaTimeIn));
-      const time = JAVA_TIME_CLASSES.filter((fqn) => used.has(fqn));
-      const serializers = time.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`);
-      if (time.length > 0) {
+      // Classes without kotlinx serializers: register the generated ones for the whole file, which also covers
+      // them as type arguments (List<Instant>) and map values.
+      const used = new Set(declTypes(decl).flatMap(serializedIn));
+      const custom = SERIALIZED_CLASSES.filter((fqn) => used.has(fqn));
+      const serializers = custom.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`);
+      if (custom.length > 0) {
         imports = organizeImports([...imports, USE_SERIALIZERS, ...serializers], decl.package);
       }
       return {
@@ -114,7 +126,7 @@ export const modelsTarget: Target<KotlinIR> = {
           package: decl.package,
           imports,
           qualified,
-          ...(time.length > 0
+          ...(custom.length > 0
             ? { fileAnnotations: [`UseSerializers(${serializers.map((s) => `${simpleName(s)}::class`).join(", ")})`] }
             : {}),
           body: `kotlin/model/${decl.kind}`,
@@ -122,7 +134,7 @@ export const modelsTarget: Target<KotlinIR> = {
         },
       };
     });
-    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...javaTimeSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
+    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...modelSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
   },
 };
 

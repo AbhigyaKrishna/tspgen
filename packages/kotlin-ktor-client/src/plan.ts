@@ -1,6 +1,6 @@
 import { metaStrings, type FileSpec } from "@abhigyakrishna/tspgen-core";
 import type { Program } from "@typespec/compiler";
-import { camel, organizeImports, type KotlinIR, type KtGroup } from "@abhigyakrishna/tspgen-kotlin";
+import { camel, codecImports, organizeImports, type KotlinIR, type KtGroup } from "@abhigyakrishna/tspgen-kotlin";
 import type { KtorClientOptions } from "./options.js";
 import { eventFunctions, streamOf, streamsOf, supportImports, usesJson } from "./sse.js";
 
@@ -54,6 +54,9 @@ function groupImports(ir: KotlinIR, group: KtGroup): string[] {
       ...(o.body?.type.imports ?? []),
       ...o.result.type.imports,
       ...o.errors.flatMap((e) => e.exception.imports),
+      // Response headers are decoded inline (`headerExpr`): a value-class/typealias scalar's decode expression
+      // names its underlying type directly (`Seen(Instant.parse(it))`), which needs that import too.
+      ...o.responses.flatMap((r) => r.headers.flatMap((h) => codecImports(h.type))),
     ]),
   ];
 }
@@ -69,7 +72,7 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, progra
   const multipart = multipartBodies.length > 0;
   // File helpers (and HttpFile) only when some multipart body has a file part: HttpFile exists only then.
   const fileParts = multipartBodies.some((b) => (b.parts ?? []).some((p) => p.kind === "file"));
-  const javaTimeModule = ir.javaTimeModule ? ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1) : undefined;
+  const serializersModule = ir.serializersModule ? ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1) : undefined;
   const streams = streamsOf(services.flatMap((s) => s.groups.flatMap((g) => g.operations)));
   const files: FileSpec[] = [
     {
@@ -81,7 +84,7 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, progra
           [
             ...SUPPORT_IMPORTS,
             ...(multipart ? ["io.ktor.http.Headers", "io.ktor.http.HttpHeaders", "io.ktor.http.headersOf"] : []),
-            ...(multipart && javaTimeModule ? [ir.javaTimeModule!] : []),
+            ...(multipart && serializersModule ? [ir.serializersModule!] : []),
             ...(fileParts ? [`${ir.modelsPackage}.HttpFile`, "io.ktor.http.ContentDisposition", "io.ktor.http.quote"] : []),
             ...supportImports(ir, streams),
           ],
@@ -90,7 +93,7 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, progra
         body: "ktor-client/support",
         multipart,
         fileParts,
-        partJson: javaTimeModule ? `Json { serializersModule = ${javaTimeModule} }` : "Json",
+        partJson: serializersModule ? `Json { serializersModule = ${serializersModule} }` : "Json",
         ...(streams.any
           ? {
               sse: {
@@ -121,9 +124,9 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, progra
       template: "kotlin/file",
       data: {
         package: pkg,
-        imports: organizeImports([...API_CLIENT_IMPORTS, ...(ir.javaTimeModule ? [ir.javaTimeModule] : [])], pkg),
+        imports: organizeImports([...API_CLIENT_IMPORTS, ...(ir.serializersModule ? [ir.serializersModule] : [])], pkg),
         body: "ktor-client/api-client",
-        json: ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "Json",
+        json: ir.serializersModule ? `Json { serializersModule = ${ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1)} }` : "Json",
         /** Event payloads decode with the defaults' format (see sseJsonPlugin in ClientSupport.kt). */
         sseJson: streams.events.some(usesJson),
         service,

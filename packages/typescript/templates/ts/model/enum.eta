@@ -1,12 +1,14 @@
-<% const d = it.decl; const strings = d.members.every((m) => typeof m.value === "string"); -%>
+<% const d = it.decl; -%>
 <%~ it.h.jsdoc(d.docs, "", d.deprecated, undefined, d.jsdoc) %><%~ it.h.enumType(d) %>
+<% if (d.style === "union-const") { -%>
 
 export const <%= d.name %> = {
 <% for (const m of d.members) { -%>
 <%~ it.h.jsdoc(m.docs, "  ") %>  <%= m.name %>: <%= it.h.literal(m.value) %>,
 <% } -%>
 } as const;
+<% } -%>
 <% if (it.zod) { -%>
 
-export const <%= d.name %>Schema: z.ZodType<<%= d.name %>> = <%= strings ? "z.enum([" + d.members.map((m) => it.h.literal(m.value)).join(", ") + "])" : "z.union([" + d.members.map((m) => "z.literal(" + it.h.literal(m.value) + ")").join(", ") + "])" %>;
+export const <%= d.name %>Schema: z.ZodType<<%= d.name %>> = <%~ it.h.enumSchema(d) %>;
 <% } -%>

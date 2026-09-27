@@ -32,9 +32,7 @@ function dataExpr(e: KtEvent): string {
   if (e.literal !== undefined) return str(e.literal);
   const data = e.data!;
   if (e.json) return "sseJson.encodeToJsonElement(data).toString()";
-  const text = data.text.replace(/\?$/, "");
-  const encoded = encode("data", text, data.imports);
-  return data.nullable ? `data?.let { ${encode("it", text, data.imports)} } ?: ""` : encoded;
+  return data.nullable ? `data?.let { ${encode("it", data)} } ?: ""` : encode("data", data);
 }
 
 function frame(e: KtEvent, data: string): string {
@@ -89,7 +87,7 @@ export function ssePlan(ops: ServerOperation[]): SsePlan | undefined {
 
 /** The Json both the module's content negotiation and event payloads use (Ktor's DefaultJson unless java.time needs a module). */
 export function sseJsonExpr(ir: KotlinIR): string {
-  return ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "DefaultJson";
+  return ir.serializersModule ? `Json { serializersModule = ${ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1)} }` : "DefaultJson";
 }
 
 export function sseImports(plan: SsePlan, ir: KotlinIR): string[] {
@@ -100,7 +98,7 @@ export function sseImports(plan: SsePlan, ir: KotlinIR): string[] {
     "io.ktor.server.response.header",
     ...plan.events.map((d) => d.fqn),
     ...(plan.sseMessage && ir.sseMessage ? [ir.sseMessage] : []),
-    ...(plan.json ? (ir.javaTimeModule ? [ir.javaTimeModule] : ["io.ktor.serialization.kotlinx.json.DefaultJson"]) : []),
+    ...(plan.json ? (ir.serializersModule ? [ir.serializersModule] : ["io.ktor.serialization.kotlinx.json.DefaultJson"]) : []),
     ...(plan.textWriter ? ["io.ktor.http.ContentType", "io.ktor.server.response.respondBytesWriter", "io.ktor.utils.io.writeStringUtf8"] : []),
     ...(plan.plugin
       ? [

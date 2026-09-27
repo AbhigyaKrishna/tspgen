@@ -68,6 +68,7 @@ export function checkMetaFeatures(program: Program, api: ApiIR, features: Resolv
   };
   walkNamespaces(program.getGlobalNamespaceType(), (ns) => check(collectDecorators(ns), getNamespaceFullName(ns), "namespace"));
   for (const type of api.types) check(type.decorators, type.id, type.kind);
+  for (const scalar of api.customScalars) check(scalar.decorators, scalar.id, "scalar");
   // An operation declared directly in a namespace (no interface) gets a group whose `id`/`decorators` are that
   // namespace's own (see `buildService` in `ir/services.ts`, `OperationGroupIR.container`): that namespace was
   // already checked as "namespace" above, while walking every namespace in the program. Checking it again here as
@@ -83,8 +84,13 @@ export function checkMetaFeatures(program: Program, api: ApiIR, features: Resolv
 
 /**
  * Deletes `docs` (from `@doc` / doc comments) from IR nodes whose `features.docs` resolves false for `language`:
- * types with their properties, enum members, union variants and events; interfaces; operations with their
- * parameters, body and parts. Service docs follow the global value.
+ * types with their properties, enum members, union variants and events; custom scalars; interfaces; operations
+ * with their parameters, body and parts. Service docs follow the global value.
+ *
+ * A custom scalar's own `@meta` and its enclosing namespaces' both apply (`declarationScopes`, kind `"scalar"`),
+ * same as a model/enum/union: every `TypeRef.custom` pointing at a given scalar is the very same object
+ * (`TypeCollector`'s per-`Scalar` cache), so stripping it once here — from `api.customScalars`, not by walking
+ * every ref — turns its docs off everywhere it is used.
  *
  * Known limitation: an anonymous inline model or union (`TypeIR.id` starting with `"$anon."`, e.g. an operation's
  * inline request/response body, or a property's inline object type) only inherits `docs` from the namespaces
@@ -105,6 +111,9 @@ export function stripDocs(api: ApiIR, features: ResolvedFeatures<string>, langua
       type.variants.forEach((v) => delete v.docs);
       type.events?.forEach((e) => delete e.docs);
     }
+  }
+  for (const scalar of api.customScalars) {
+    if (!on(declarationScopes(scalar.decorators, scalar.namespaceDecorators), "scalar")) delete scalar.docs;
   }
   for (const service of api.services) {
     if (!features.values.docs) delete service.docs;

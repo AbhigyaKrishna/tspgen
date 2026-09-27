@@ -1,0 +1,5 @@
+/** `utcDateTime` as a `Date`: `parse` decodes the ISO-8601 wire string, `z.encode` writes `toISOString()`. */
+export const dateTimeCodec = z.codec(z.iso.datetime({ offset: true }), z.date(), {
+  decode: (value) => new Date(value),
+  encode: (value) => value.toISOString(),
+});

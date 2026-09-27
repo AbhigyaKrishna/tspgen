@@ -1,7 +1,10 @@
 import {
   camel,
-  javaTimeCodec,
   kotlinString as str,
+  listElement,
+  paramDecode,
+  paramEncode,
+  serializedIn,
   typeName,
   type KtBody,
   type KtOperation,
@@ -33,36 +36,22 @@ const STATUS: Record<number, string> = {
   500: "InternalServerError",
 };
 
-const CONVERTERS: Record<string, string> = {
-  Int: "{ it.toInt() }",
-  Long: "{ it.toLong() }",
-  Short: "{ it.toShort() }",
-  Byte: "{ it.toByte() }",
-  Double: "{ it.toDouble() }",
-  Float: "{ it.toFloat() }",
-  Boolean: "{ it.toBooleanStrict() }",
-};
-
 const SOURCES = { path: "pathParam", query: "queryParam", header: "headerParam", cookie: "cookieParam" } as const;
 
-/** `imports` of the parameter's type pick java.time codecs (see `javaTimeCodec`). */
-export function converter(typeText: string, imports: readonly string[]): string | undefined {
-  if (typeText === "String") return undefined;
-  const time = javaTimeCodec(typeText, imports);
-  if (time) return `{ ${time.parse} }`;
-  return CONVERTERS[typeText] ?? `{ decodeParam<${typeText}>(it) }`;
+/** `{ <parse> }` turning the wire string into `type`; undefined when the string is used as-is. */
+export function converter(type: KtTypeUse): string | undefined {
+  const parsed = paramDecode("it", type);
+  return parsed === "it" ? undefined : `{ ${parsed} }`;
 }
 
-export function convert(expr: string, wire: string, typeText: string, imports: readonly string[], safe: boolean): string {
-  const conv = converter(typeText, imports);
+export function convert(expr: string, wire: string, type: KtTypeUse, safe: boolean): string {
+  const conv = converter(type);
   return conv ? `${expr}${safe ? "?" : ""}.convertParam(${wire}) ${conv}` : expr;
 }
 
 /** Kotlin expression turning a value into its wire string (kotlinx encoding for non-primitives). */
-export function encode(expr: string, typeText: string, imports: readonly string[]): string {
-  if (typeText === "String") return expr;
-  if (javaTimeCodec(typeText, imports)) return `${expr}.toString()`;
-  return CONVERTERS[typeText] ? `${expr}.toString()` : `encodeParam(${expr})`;
+export function encode(expr: string, type: KtTypeUse): string {
+  return paramEncode(expr, type);
 }
 
 function plain(name: string): string {
@@ -94,6 +83,16 @@ function requestName(op: KtOperation): string {
   return `${typeName(plain(op.name))}Request`;
 }
 
+/**
+ * Classes with a generated serializer (BigDecimal, java.time) that a `routing-style: resources` operation's
+ * `@Resource` class needs for its path/query param properties: kotlinx has no native serializer for them, and the
+ * resource class (unlike a data class property) carries no per-property `@Serializable(with = ...)` annotation, so
+ * the routes file needs `@file:UseSerializers(...)` instead.
+ */
+export function resourceSerializedClasses(op: KtOperation): string[] {
+  return op.params.filter((p) => p.location === "path" || p.location === "query").flatMap((p) => serializedIn(p.type));
+}
+
 /** Exposed to templates as `it.h.ktorServer`. */
 export const ktorServerHelpers = {
   status(code: number): string {
@@ -104,12 +103,10 @@ export const ktorServerHelpers = {
   /** Kotlin expression reading and converting a request parameter inside a route handler. */
   paramExpr(p: KtParam): string {
     const wire = str(p.wireName);
-    const typeText = p.type.text.replace(/\?$/, "");
     const source = `call.${SOURCES[p.location]}(${wire})`;
-    const imports = p.type.imports;
-    const item = /^List<(.+)>$/.exec(typeText)?.[1];
+    const item = listElement(p.type);
     if (item) {
-      const mapped = converter(item, imports) ? `.map { ${convert("it", wire, item, imports, false)} }` : "";
+      const mapped = converter(item) ? `.map { ${convert("it", wire, item, false)} }` : "";
       if (p.location === "query" && p.explode) {
         const values = `call.queryParams(${wire})`;
         return p.optional ? `${values}.takeIf { it.isNotEmpty() }${mapped ? `?${mapped}` : ""}` : `${values}${mapped}`;
@@ -117,10 +114,10 @@ export const ktorServerHelpers = {
       const values = `${source}?.split(",")${mapped ? `?${mapped}` : ""}`;
       return p.optional ? values : `(${values}).required(${wire})`;
     }
-    if (p.location === "path") return convert(source, wire, typeText, imports, false);
+    if (p.location === "path") return convert(source, wire, p.type, false);
     return p.optional
-      ? convert(source, wire, typeText, imports, true)
-      : convert(`${source}.required(${wire})`, wire, typeText, imports, false);
+      ? convert(source, wire, p.type, true)
+      : convert(`${source}.required(${wire})`, wire, p.type, false);
   },
 
   /** Route-handler statements reading the request body: `call.receive…` for JSON, the upload plan's lines otherwise. */
@@ -172,10 +169,9 @@ export const ktorServerHelpers = {
 
   headerWrite(h: KtParam): string {
     const wire = str(h.wireName);
-    const typeText = h.type.text.replace(/\?$/, "");
     return h.optional
-      ? `result.${h.name}?.let { call.response.header(${wire}, ${encode("it", typeText, h.type.imports)}) }`
-      : `call.response.header(${wire}, ${encode(`result.${h.name}`, typeText, h.type.imports)})`;
+      ? `result.${h.name}?.let { call.response.header(${wire}, ${encode("it", h.type)}) }`
+      : `call.response.header(${wire}, ${encode(`result.${h.name}`, h.type)})`;
   },
 
   resourceName(op: KtOperation): string {

@@ -1,9 +1,11 @@
-<% const d = it.decl; const ext = d.extends.length > 0; const tps = d.typeParameters ?? []; const tp = tps.length ? "<" + tps.join(", ") + ">" : ""; -%>
-<%~ it.h.jsdoc(d.docs, "", d.deprecated, undefined, d.jsdoc) %>export interface <%= d.name %><%= tp %><%= ext ? " extends " + d.extends.map((e) => e.text).join(", ") : "" %> {
+<% const d = it.decl; const ext = d.extends.length > 0; const tps = d.typeParameters ?? []; const tp = tps.length ? "<" + tps.join(", ") + ">" : ""; const alias = d.declaration === "type"; -%>
+<%~ it.h.jsdoc(d.docs, "", d.deprecated, undefined, d.jsdoc) %><% if (alias) { %>export type <%= d.name %><%= tp %> = <%= ext ? d.extends.map((e) => e.text).join(" & ") + " & " : "" %>{
+<% } else { %>export interface <%= d.name %><%= tp %><%= ext ? " extends " + d.extends.map((e) => e.text).join(", ") : "" %> {
+<% } -%>
 <% for (const p of d.properties) { -%>
 <%~ it.h.jsdoc(p.docs, "  ", p.deprecated, p.defaultDoc, p.jsdoc) %>  <%= p.readonly ? "readonly " : "" %><%= p.key %><%= p.optional ? "?" : "" %>: <%= p.type.text %>;
 <% } -%>
-}
+<%= alias ? "};" : "}" %>
 <% if (it.zod && tps.length) { -%>
 
 export function <%= d.name %>Schema<%= tp %>(<%= tps.map((t) => t + "Schema: z.ZodType<" + t + ">").join(", ") %>): z.ZodType<<%= d.name %><%= tp %>> {

@@ -336,8 +336,8 @@ interface UploadsService {
       @post op send(@header contentType: "multipart/form-data", @multipartBody body: Form): void;
     `);
     const support = outputs[`${DIR}/ServerSupport.kt`];
-    expect(support).toContain("import com.acme.models.javaTimeSerializersModule\n");
-    expect(support).toContain("internal val partJson: Json = Json { serializersModule = javaTimeSerializersModule }\n");
+    expect(support).toContain("import com.acme.models.modelSerializersModule\n");
+    expect(support).toContain("internal val partJson: Json = Json { serializersModule = modelSerializersModule }\n");
     expect(outputs[`${DIR}/SRoutes.kt`]).toContain(
       'times = parts.text("times").required("times").convertParam("times") { partJson.decodeFromString<List<Instant>>(it) },',
     );

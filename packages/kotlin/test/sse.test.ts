@@ -71,7 +71,7 @@ sealed interface ChannelEvents {
 }
 `);
     // A java.time payload is encoded with the models' Json: its serializer is generated.
-    expect(result.outputs["models/com/acme/models/JavaTimeSerializers.kt"]).toContain("object InstantSerializer");
+    expect(result.outputs["models/com/acme/models/ModelSerializers.kt"]).toContain("object InstantSerializer");
     expect(result.outputs["models/com/acme/models/SseMessage.kt"]).toBeUndefined();
   });
 

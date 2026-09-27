@@ -75,7 +75,13 @@ export class ApiBuilder {
   private operation(op: OperationIR, groupName: string, groupScopes: MetaScopes): TsOperation {
     const params: TsParam[] = op.params.map((p) => {
       const plain = this.types.typeUse(p.type);
-      const type = constrain(plain, p.constraints, false, (pattern) => this.types.invalidPattern(pattern, `${op.id}.${p.name}`));
+      const type = constrain(
+        plain,
+        p.constraints,
+        false,
+        (pattern) => this.types.invalidPattern(pattern, `${op.id}.${p.name}`),
+        () => this.types.unsupportedBounds(`${op.id}.${p.name}`),
+      );
       return {
         name: camel(p.name),
         wireName: p.wireName,
@@ -118,8 +124,12 @@ export class ApiBuilder {
       result.body = {
         name: params.some((p) => p.name === preferred) ? "requestBody" : preferred,
         ...(op.body.docs ? { docs: op.body.docs } : {}),
-        type: constrain(this.types.typeUse(op.body.type), op.body.constraints, false, (pattern) =>
-          this.types.invalidPattern(pattern, `${op.id}.${op.body?.name ?? "body"}`),
+        type: constrain(
+          this.types.typeUse(op.body.type),
+          op.body.constraints,
+          false,
+          (pattern) => this.types.invalidPattern(pattern, `${op.id}.${op.body?.name ?? "body"}`),
+          () => this.types.unsupportedBounds(`${op.id}.${op.body?.name ?? "body"}`),
         ),
         contentType: op.body.contentTypes[0] ?? "application/json",
         optional: op.body.optional,

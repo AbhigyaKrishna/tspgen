@@ -2,13 +2,17 @@ import { metaStrings, reportDiagnostic, type AuthRequirementIR, type ExtensionRe
 import { NoTarget, type Program, type Type } from "@typespec/compiler";
 import {
   camel,
+  codecImports,
   kotlinString,
   organizeImports,
+  SERIALIZED_CLASSES,
+  serializedIn,
   typeName,
   type KotlinIR,
   type KtService,
 } from "@abhigyakrishna/tspgen-kotlin";
 import { withContext, type ServerOperation } from "./context.js";
+import { resourceSerializedClasses } from "./helpers.js";
 import type { KtorServerOptions } from "./options.js";
 import { commonPrefix, routeTree, type RouteFunction } from "./routes.js";
 import { builtinStyles, resolveStyle, type RoutingStyle } from "./styles.js";
@@ -83,7 +87,7 @@ const UPLOAD_SUPPORT: Record<SupportNeed, { imports: (ir: KotlinIR) => string[];
     functions: ["partText"],
   },
   json: {
-    imports: (ir) => (ir.javaTimeModule ? [ir.javaTimeModule] : []),
+    imports: (ir) => (ir.serializersModule ? [ir.serializersModule] : []),
     functions: ["partJson"],
   },
   buffered: { imports: () => [], functions: ["receiveParts"] },
@@ -136,7 +140,9 @@ function withUpload(
 /** Types the service (`fields`) or routes file refers to; upload routes get theirs from `upload.routeImports`. */
 function typeImports(ops: ServerOperation[], file: "service" | "routes" = "service"): string[] {
   return ops.flatMap((op) => [
-    ...op.params.flatMap((p) => p.type.imports),
+    // Routes decode each param inline (`paramExpr`/`convert`): a value-class/typealias scalar's decode expression
+    // names its underlying type directly (`Seen(Instant.parse(it))`), which needs that import too.
+    ...op.params.flatMap((p) => (file === "routes" ? codecImports(p.type) : p.type.imports)),
     ...(op.upload
       ? file === "service"
         ? op.upload.fields.flatMap((f) => f.type.imports)
@@ -460,7 +466,7 @@ export function planServerFiles(
       body: "ktor-server/support",
       uploads: Object.fromEntries(needs.map((n) => [n, true])),
       flowType: flowClash ? "kotlinx.coroutines.flow.Flow" : "Flow",
-      partJson: ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "Json",
+      partJson: ir.serializersModule ? `Json { serializersModule = ${ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1)} }` : "Json",
       ...(sse
         ? {
             sse: {
@@ -500,7 +506,7 @@ export function planServerFiles(
       const support = pkg === supportPkg ? [] : supportFunctions.map((f) => `${supportPkg}.${f}`);
       files.push(
         serviceFile(unit, pkg, dirOf(pkg), options, extras),
-        routesFile(unit, pkg, dirOf(pkg), options, style, extras, support, functions.get(unit)!),
+        routesFile(ir, unit, pkg, dirOf(pkg), options, style, extras, support, functions.get(unit)!),
       );
     }
     if (options.features.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style, sse?.json ?? false));
@@ -533,7 +539,12 @@ function serviceFile(
   };
 }
 
+function simpleName(fqn: string): string {
+  return fqn.slice(fqn.lastIndexOf(".") + 1);
+}
+
 function routesFile(
+  ir: KotlinIR,
   unit: ServerUnit,
   pkg: string,
   dir: string,
@@ -543,6 +554,13 @@ function routesFile(
   support: string[],
   functions: RouteFunction[],
 ): FileSpec {
+  // `routing-style: resources` classes carry no per-property serializer annotation: BigDecimal/java.time path and
+  // query params need the models' generated serializers registered file-wide.
+  const resourceSerialized =
+    style.template === "ktor-server/routes/resources"
+      ? [...new Set(unit.operations.flatMap(resourceSerializedClasses))]
+      : [];
+  const serializers = resourceSerialized.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`);
   const imports = [
     ...typeImports(unit.operations, "routes"),
     ...style.imports(unit, options),
@@ -551,6 +569,7 @@ function routesFile(
     ...(unit.operations.some((op) => extras[op.id].auth.length > 0) ? ["io.ktor.server.auth.authenticate"] : []),
     ...(unit.operations.some((op) => extras[op.id].authStrategy) ? ["io.ktor.server.auth.AuthenticationStrategy"] : []),
     ...(functions.some((f) => f.prefix) ? ["io.ktor.server.routing.route"] : []),
+    ...(serializers.length > 0 ? ["kotlinx.serialization.UseSerializers", ...serializers] : []),
   ];
   return {
     path: `${dir}/${unit.name}Routes.kt`,
@@ -563,6 +582,9 @@ function routesFile(
       options,
       extras,
       routeFunctions: functions,
+      ...(serializers.length > 0
+        ? { fileAnnotations: [`UseSerializers(${serializers.map((s) => `${simpleName(s)}::class`).join(", ")})`] }
+        : {}),
     },
   };
 }
@@ -592,8 +614,8 @@ function moduleFile(
     .filter((u) => u.package && u.package !== pkg)
     .flatMap((u) => [`${u.package}.${u.serviceName}`, ...functions.get(u)!.map((f) => `${u.package}.${f.name}`)]);
   // With JSON event payloads, content negotiation installs ServerSupport's sseJson: REST and events share one Json.
-  const javaTime = ir.javaTimeModule && !sharedJson ? [ir.javaTimeModule, "kotlinx.serialization.json.Json"] : [];
-  const imports = [...MODULE_IMPORTS, ...installs, ...exceptions.keys(), `${ir.apiPackage}.ApiException`, ...unitImports, ...javaTime];
+  const serializers = ir.serializersModule && !sharedJson ? [ir.serializersModule, "kotlinx.serialization.json.Json"] : [];
+  const imports = [...MODULE_IMPORTS, ...installs, ...exceptions.keys(), `${ir.apiPackage}.ApiException`, ...unitImports, ...serializers];
   const base = camel(service.name);
   return {
     path: `${dir}/${service.name}Module.kt`,
@@ -607,7 +629,7 @@ function moduleFile(
       /** Route function names per unit, in unit order. */
       mounts: units.map((u) => functions.get(u)!.map((f) => f.name)),
       installs,
-      json: sharedJson ? "sseJson" : ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "",
+      json: sharedJson ? "sseJson" : ir.serializersModule ? `Json { serializersModule = ${ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1)} }` : "",
       exceptions: [...exceptions.values()],
       moduleFn: `${base}Module`,
       apiRoutesFn: `${base}ApiRoutes`,

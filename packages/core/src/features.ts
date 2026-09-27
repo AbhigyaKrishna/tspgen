@@ -11,7 +11,7 @@ import type { MetaData } from "./meta.js";
 export type FeatureOverride = false | "declaration" | "operation" | "model";
 
 /** The kind of declaration a feature value is asked for (see `ResolvedFeatures.at`). */
-export type FeatureNodeKind = "namespace" | "interface" | "operation" | "model" | "enum" | "union";
+export type FeatureNodeKind = "namespace" | "interface" | "operation" | "model" | "enum" | "union" | "scalar";
 
 export interface FeatureDef {
   default: boolean;
@@ -43,7 +43,7 @@ export interface FeatureSet<K extends string = string> {
   resolve(configured: unknown): ResolvedFeatures<K>;
 }
 
-const TYPE_KINDS: ReadonlySet<FeatureNodeKind> = new Set(["model", "enum", "union"]);
+const TYPE_KINDS: ReadonlySet<FeatureNodeKind> = new Set(["model", "enum", "union", "scalar"]);
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

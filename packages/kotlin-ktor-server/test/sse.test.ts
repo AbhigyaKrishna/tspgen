@@ -79,7 +79,7 @@ fun Route.feedRoutes(service: FeedService) {
     }
 `);
     expect(support).toContain("internal fun SseMessage.sseFrame(): TspgenSseFrame = TspgenSseFrame(event, data, id)\n");
-    expect(support).toContain("internal val sseJson: Json = Json { serializersModule = javaTimeSerializersModule }\n");
+    expect(support).toContain("internal val sseJson: Json = Json { serializersModule = modelSerializersModule }\n");
     expect(support).toContain(`    map(frame).transformWhile {
         emit(it)
         !it.terminal
@@ -106,7 +106,7 @@ fun Route.feedRoutes(service: FeedService) {
     for (const i of [
       "com.acme.models.ChannelEvents",
       "com.acme.models.SseMessage",
-      "com.acme.models.javaTimeSerializersModule",
+      "com.acme.models.modelSerializersModule",
       "io.ktor.server.sse.SSE",
       "io.ktor.server.sse.SSEServerContent",
       "io.ktor.sse.ServerSentEvent",

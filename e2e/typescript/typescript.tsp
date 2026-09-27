@@ -4,7 +4,7 @@ import "./petstore.tsp";
 using TspGen;
 using Http;
 
-@@meta(PetStore.Pet, "typescript", #{ readonly: true, jsdoc: #["@public"] });
+@@meta(PetStore.Pet, "typescript", #{ features: #{ readonly: true }, jsdoc: #["@public"] });
 @@meta(PetStore.Pets, "typescript:ts-nextjs-client", #{ next: #{ revalidate: 60, tags: #["pets"] }, staleTime: 30000 });
 
 // Generated auth (TypeScript-only): credentials from ClientConfig.auth per the operations' @useAuth.

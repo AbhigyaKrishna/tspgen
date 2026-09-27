@@ -15,6 +15,17 @@ export interface TsTypeUse {
   imports: TsImport[];
   schema: string;
   schemaImports: TsImport[];
+  /**
+   * The schema transforms values (it contains `dateTimeCodec`): `schema.parse(json)` decodes wire strings into
+   * `Date`s, and `z.encode(schema, value)` / `schema.safeEncode(value)` validate `Date`s and return wire values.
+   */
+  codec?: true;
+  /**
+   * True only for a direct `dateUse` result (`text: "globalThis.Date"`): clients use this, not `text`, to decide
+   * whether to call `.toISOString()` / `new Date(...)` on a value, so a model literally named `Date` cannot cause
+   * a false match. Dropped by `arrayOf`/`recordOf`/`nullable` (their `text` is no longer exactly the global type).
+   */
+  date?: true;
 }
 
 interface TsDeclBase {
@@ -51,6 +62,8 @@ export interface TsInterface extends TsDeclBase {
   extends: TsTypeUse[];
   /** Type parameters of a generic interface (`Page<T>` → ["T"]); its zod schema is then a function. */
   typeParameters?: string[];
+  /** `interface X { … }` or `type X = { … };` (supertypes become an intersection); see the `declaration` option. */
+  declaration: "interface" | "type";
 }
 
 export interface TsAlias extends TsDeclBase {
@@ -65,10 +78,17 @@ export interface TsEnumMember {
   meta: MetaScopes;
 }
 
+/** How an enum (or closed string-literal union) is declared; see the `enum-style` option. */
+export type EnumStyle = "union-const" | "union" | "enum" | "const-array";
+
 export interface TsEnum extends TsDeclBase {
   kind: "enum";
   members: TsEnumMember[];
-  /** Name of an exported const tuple of the values (`@meta("typescript", #{ values })`). */
+  style: EnumStyle;
+  /**
+   * Name of an exported const tuple of the values: the `values` meta, else `<Name>Values` with style `const-array`.
+   * The type is derived from it, except with style `enum`.
+   */
   values?: string;
 }
 
@@ -221,6 +241,10 @@ export interface TsIR {
   importExtension: string;
   /** "per-type": models/<Name>.ts; "single-file": every model in types.ts. */
   layout: "per-type" | "single-file";
+  /** "date": `utcDateTime` is `Date` via the zod codec `dateTimeCodec` (only with zod); "string" otherwise. */
+  dateType: "string" | "date";
+  /** Output-relative file declaring `dateTimeCodec` ("models/codecs" or "types"), when some type use is a `Date`. */
+  codecsFile?: string;
   /** `models/index.ts` is generated (per-type layout); false: `API_VERSION` goes to `models/api-version.ts`. */
   barrel: boolean;
   /** Version constants of the versioned services (models barrel, or types.ts in the single-file layout). */

@@ -227,7 +227,7 @@ function buildOperation(
       name: p.param.name,
       wireName: p.name,
       location: p.type,
-      type: collector.ref(p.param.type, `${base}${pascal(p.param.name)}`),
+      type: collector.propertyRef(p.param, `${base}${pascal(p.param.name)}`),
       optional: p.param.optional,
       explode: "explode" in p ? Boolean(p.explode) : false,
       ...(constraints ? { constraints } : {}),
@@ -259,7 +259,9 @@ function buildOperation(
     ir.body = {
       ...(property ? { name: property.name } : {}),
       ...(bodyDocs ? { docs: bodyDocs } : {}),
-      type: collector.ref(body.type, `${base}Request`),
+      // `propertyRef` (rather than `ref`) so an explicit `@body`/`@bodyRoot` property's own `@encode` applies to a
+      // scalar body; an implicit body (no `property`, the whole params model) has no property to carry `@encode`.
+      type: property ? collector.propertyRef(property, `${base}Request`) : collector.ref(body.type, `${base}Request`),
       contentTypes: body.contentTypes,
       optional: property?.optional ?? false,
       kind: body.bodyKind,
@@ -305,13 +307,17 @@ function buildPart(program: Program, collector: TypeCollector, part: ModelPart, 
   const isFile = part.body.bodyKind === "file" || isBytes(part.body.type);
   const isJson = !isFile && part.body.contentTypes.some(isJsonMediaType) && isStructured(part.body.type);
   const { docs } = docInfo(program, part.property);
+  // `part.body.type` is already unwrapped past `HttpPart<T>[]` down to `T` (repetition is `PartIR.multi`); apply
+  // the part property's own `@encode` to that (via `encodeRef`, not `propertyRef`, which would re-derive the ref
+  // from `part.property.type` — `HttpPart<T>[]` for a repeatable part — and wrap it back into an array).
+  const type = collector.ref(part.body.type, `${base}${pascal(part.property.name)}`);
   return {
     name: part.name,
     property: part.property.name,
     optional: part.optional,
     multi: part.multi,
     kind: isFile ? "file" : isJson ? "json" : "text",
-    type: isFile ? { kind: "file" } : collector.ref(part.body.type, `${base}${pascal(part.property.name)}`),
+    type: isFile ? { kind: "file" } : collector.encodeRef(type, part.property),
     contentTypes: isFile ? declaredContentTypes(part.body.contentTypes) : [...part.body.contentTypes],
     ...(docs ? { docs } : {}),
   };
@@ -453,7 +459,7 @@ function buildResponses(
               {
                 name: p.property.name,
                 wireName: p.options.name,
-                type: collector.ref(p.property.type, `${base}${pascal(p.property.name)}`),
+                type: collector.propertyRef(p.property, `${base}${pascal(p.property.name)}`),
                 optional: p.property.optional,
               },
             ]

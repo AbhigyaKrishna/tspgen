@@ -65,7 +65,16 @@ describe("server-sent events", () => {
     const [subscribe] = ir.services[0].groups[0].operations;
     const events = [
       { name: "userconnect", payload: { kind: "named", id: "S.UserConnect" }, contentType: "application/json", terminal: false, docs: "A user joined" },
-      { name: "note", payload: { kind: "scalar", name: "string", custom: { id: "S.Note", name: "Note", decorators: {} } }, contentType: "text/plain", terminal: false },
+      {
+        name: "note",
+        payload: {
+          kind: "scalar",
+          name: "string",
+          custom: { id: "S.Note", name: "Note", namespace: ["S"], root: "string", decorators: {} },
+        },
+        contentType: "text/plain",
+        terminal: false,
+      },
       { name: "count", payload: { kind: "scalar", name: "int32" }, contentType: "application/json", terminal: false },
       { name: "quoted", payload: { kind: "scalar", name: "string" }, contentType: "application/json", terminal: false },
       { name: "wrapped", payload: { kind: "scalar", name: "string" }, contentType: "text/plain", terminal: false },

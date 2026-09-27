@@ -1,6 +1,7 @@
 import {
   getDiscriminatedUnion,
   getDiscriminator,
+  getEncode,
   getFriendlyName,
   getMaxItems,
   getMaxLength,
@@ -35,11 +36,20 @@ import { pascal } from "../naming.js";
 import { collectDecorators, namespaceDecoratorsField } from "./decorators.js";
 import { docInfo } from "./docs.js";
 import { isEventsUnion, type SseLibraries } from "./sse.js";
-import type { ConstraintsIR, EnumIR, EventIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
+import type { ConstraintsIR, CustomScalarIR, EnumIR, EventIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
 import type { ResolvedService } from "./versioning.js";
 
 const UNKNOWN: TypeRef = { kind: "unknown" };
 const FILE: TypeRef = { kind: "file" };
+/** Std roots `@encode(string)` turns into JSON strings (base-10 integers, decimal strings). */
+const STRING_ENCODABLE = new Set(["int64", "uint64", "integer", "safeint", "decimal", "decimal128"]);
+/** Encodings naming a scalar's default JSON form: accepted without a warning. */
+const DEFAULT_ENCODINGS: Record<string, readonly string[]> = {
+  utcDateTime: ["rfc3339"],
+  offsetDateTime: ["rfc3339"],
+  duration: ["ISO8601"],
+  bytes: ["base64"],
+};
 
 /** Converts TypeSpec types into TypeRefs, collecting named/anonymous declarations as TypeIR. */
 export class TypeCollector {
@@ -51,6 +61,19 @@ export class TypeCollector {
   private readonly genericsCache = new Map<Model, boolean>();
   /** Ids already reported by `version-conflict`. */
   private readonly conflicts = new Set<string>();
+  /**
+   * Declarations already reported by `unsupported-encoding`, keyed by the declaring node (see
+   * `declaringEncodeTarget`): spread, `model … is …` and template-instantiated copies of a property share their
+   * origin's node, so keying on it (rather than e.g. `getTypeName`, which differs per copy) collapses every copy
+   * of the same written `@encode` into one warning.
+   */
+  private readonly encodingReported = new Set<unknown>();
+  /**
+   * `CustomScalarIR` by the `Scalar` it describes, so every `TypeRef.custom` pointing at the same scalar shares one
+   * object (see `getCustomScalars`): a mutation (e.g. `stripDocs` deleting `docs`) is then visible through every
+   * reference, rather than only the ref that happened to be mutated.
+   */
+  private readonly customScalars = new Map<Scalar, CustomScalarIR>();
   /** The service being built, when its namespace is a mutated (versioned) clone. */
   private service?: {
     /** Template declarations of the mutated namespace by node: instances point at the original declaration. */
@@ -78,6 +101,11 @@ export class TypeCollector {
 
   getTypes(): TypeIR[] {
     return [...this.types.values()].sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  /** Every distinct custom scalar referenced so far (see `customScalars`), one entry per `Scalar`. */
+  getCustomScalars(): CustomScalarIR[] {
+    return [...this.customScalars.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
   /**
@@ -155,6 +183,70 @@ export class TypeCollector {
     }
     reportDiagnostic(this.program, { code: "unsupported-type", format: { kind: type.kind }, target: type ?? NoTarget });
     return UNKNOWN;
+  }
+
+  /**
+   * The type of a model property, parameter or header: its type's ref, with the property's own `@encode` (which wins
+   * over the scalar's) applied to a scalar or `Scalar | null`. `state`: the property whose decorator state applies.
+   * `@encode` on any other shape (a union with several non-null members, or a named union) is reported once per
+   * declaration (`unsupported-encoding`) and ignored, rather than silently dropped.
+   */
+  propertyRef(prop: ModelProperty, hint: string, state: ModelProperty = prop): TypeRef {
+    return this.applyEncode(this.ref(prop.type, hint), state);
+  }
+
+  /**
+   * `ref` with `state`'s own `@encode` applied, for a `ref` already computed from a value type other than
+   * `state.type` (a multipart part's `T`, once `HttpPart<T>[]` has been unwrapped and the repetition dropped into
+   * `PartIR.multi`): `propertyRef` cannot be used there, since re-deriving the ref from `state.type` directly would
+   * wrap it back into an array.
+   */
+  encodeRef(ref: TypeRef, state: ModelProperty): TypeRef {
+    return this.applyEncode(ref, state);
+  }
+
+  private applyEncode(ref: TypeRef, state: ModelProperty): TypeRef {
+    const data = getEncode(this.program, state);
+    if (!data) return ref;
+    const target = ref.kind === "nullable" ? ref.of : ref;
+    if (target.kind !== "scalar") {
+      this.reportUnsupportedEncoding(state, data.encoding ?? "string");
+      return ref;
+    }
+    const encoding = this.encoding(state, target.name);
+    const encoded: TypeRef = {
+      kind: "scalar",
+      name: target.name,
+      ...(target.custom ? { custom: target.custom } : {}),
+      ...(encoding ? { encoding } : {}),
+    };
+    return ref.kind === "nullable" ? { kind: "nullable", of: encoded } : encoded;
+  }
+
+  /**
+   * `"string"` for `@encode(string)` on a string-encodable number; undefined for none or a scalar's default JSON
+   * encoding. Anything else is reported once per declaration and ignored.
+   */
+  private encoding(target: ModelProperty | Scalar, root: string): "string" | undefined {
+    const data = getEncode(this.program, target);
+    if (!data) return undefined;
+    const encoding = data.encoding ?? "string";
+    if (encoding === "string" && STRING_ENCODABLE.has(root)) return "string";
+    if (DEFAULT_ENCODINGS[root]?.includes(encoding)) return undefined;
+    this.reportUnsupportedEncoding(target, encoding);
+    return undefined;
+  }
+
+  /**
+   * Reports `unsupported-encoding` once per declaration: the key and diagnostic target are the declaring node of
+   * `source`'s `@encode` (see `declaringEncodeTarget`), so spread, `model … is …` and template-instantiated copies
+   * of the same declared property warn only once, no matter how many copies are collected.
+   */
+  private reportUnsupportedEncoding(source: ModelProperty | Scalar, encoding: string): void {
+    const { key, target } = declaringEncodeTarget(source);
+    if (this.encodingReported.has(key)) return;
+    this.encodingReported.add(key);
+    reportDiagnostic(this.program, { code: "unsupported-encoding", format: { encoding, where: getTypeName(source) }, target });
   }
 
   private isCollection(model: Model): boolean {
@@ -334,11 +426,46 @@ export class TypeCollector {
   private scalarRef(scalar: Scalar): TypeRef {
     const name = this.stdScalarName(scalar);
     if (this.isStd(scalar)) return { kind: "scalar", name };
+    // The nearest @encode along the user scalar chain (starting at this scalar itself) applies.
+    const encoding = this.nearestEncoding(scalar, name);
     return {
       kind: "scalar",
       name,
-      custom: { id: getTypeName(scalar), name: scalar.name, decorators: collectDecorators(scalar) },
+      custom: this.customScalar(scalar, name, encoding),
+      ...(encoding ? { encoding } : {}),
     };
+  }
+
+  /** The nearest `@encode` from `scalar` up its base chain to (not including) `root`'s std scalar; absent without one. */
+  private nearestEncoding(scalar: Scalar, root: string): "string" | undefined {
+    for (let current: Scalar | undefined = scalar; current && !this.isStd(current); current = current.baseScalar) {
+      if (!getEncode(this.program, current)) continue;
+      return this.encoding(current, root);
+    }
+    return undefined;
+  }
+
+  /**
+   * Cached per `Scalar` (see `customScalars`) so every ref to the same scalar shares one `CustomScalarIR`. `root`/
+   * `encoding` are `scalarRef`'s own (the same computed for a ref to `scalar` itself, since both start there).
+   */
+  private customScalar(scalar: Scalar, root: string, encoding: "string" | undefined): CustomScalarIR {
+    const cached = this.customScalars.get(scalar);
+    if (cached) return cached;
+    const constraints = this.collectConstraints([scalar]);
+    const ir: CustomScalarIR = {
+      id: getTypeName(scalar),
+      name: scalar.name,
+      namespace: scalar.namespace ? splitNamespace(getNamespaceFullName(scalar.namespace)) : [],
+      root,
+      ...(encoding ? { encoding } : {}),
+      ...docInfo(this.program, scalar),
+      ...(constraints ? { constraints } : {}),
+      decorators: collectDecorators(scalar),
+      ...namespaceDecoratorsField(scalar),
+    };
+    this.customScalars.set(scalar, ir);
+    return ir;
   }
 
   private stdScalarName(scalar: Scalar): string {
@@ -439,7 +566,7 @@ export class TypeCollector {
     const ir: PropertyIR = {
       name: prop.name,
       wireName: resolveEncodedName(this.program, state, "application/json"),
-      type: this.ref(prop.type, `${parentName}${pascal(prop.name)}`),
+      type: this.propertyRef(prop, `${parentName}${pascal(prop.name)}`, state),
       optional: prop.optional,
       ...docInfo(this.program, state),
       decorators: collectDecorators(prop),
@@ -456,7 +583,11 @@ export class TypeCollector {
    */
   constraints(prop: ModelProperty): ConstraintsIR | undefined {
     const scalar = constrainedScalar(prop.type);
-    const sources: Type[] = scalar ? [prop, scalar] : [prop];
+    return this.collectConstraints(scalar ? [prop, scalar] : [prop]);
+  }
+
+  /** The first value of each constraint decorator among `sources`, in order; undefined when none applies. */
+  private collectConstraints(sources: readonly Type[]): ConstraintsIR | undefined {
     const first = <T>(get: (program: Program, target: Type) => T | undefined): T | undefined => {
       for (const source of sources) {
         const value = get(this.program, source);
@@ -619,6 +750,27 @@ function shape(type: Type): string {
     default:
       return "";
   }
+}
+
+/** The root of a `sourceProperty` chain: where a `model … is …` or `...spread` copy's property originates. */
+function rootProperty(prop: ModelProperty): ModelProperty {
+  let current = prop;
+  while (current.sourceProperty) current = current.sourceProperty;
+  return current;
+}
+
+/**
+ * The dedupe key and diagnostic target for an `unsupported-encoding` report on `source`: the node where `@encode`
+ * was actually written. Spread, `model … is …` and template-instantiated copies of a property share their origin's
+ * node (only new `ModelProperty` wrapper objects are created per copy), so keying on the node — rather than e.g.
+ * `getTypeName`, which differs per copy (`M.a` vs `N.a` vs `Container<string>.stamp`) — collapses every copy of the
+ * same declared `@encode` into one warning. `source.sourceProperty` is followed to the root first because a copy's
+ * own node is not always defined (an `is`-copy may lack one); the property/scalar itself is the key when neither is.
+ */
+function declaringEncodeTarget(source: ModelProperty | Scalar) {
+  const root = source.kind === "ModelProperty" ? rootProperty(source) : source;
+  const target = root.node ?? root;
+  return { key: target as unknown, target };
 }
 
 /** The `bytes` scalar or a scalar extending it. */

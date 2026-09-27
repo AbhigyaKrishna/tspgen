@@ -103,8 +103,8 @@ describe("ktor client uploads", () => {
       @post op send(@header contentType: "multipart/form-data", @multipartBody body: Form): void;
     `);
     const support = outputs[`${DIR}/ClientSupport.kt`];
-    expect(support).toContain("import com.acme.models.javaTimeSerializersModule\n");
-    expect(support).toContain("internal val partJson: Json = Json { serializersModule = javaTimeSerializersModule }\n");
+    expect(support).toContain("import com.acme.models.modelSerializersModule\n");
+    expect(support).toContain("internal val partJson: Json = Json { serializersModule = modelSerializersModule }\n");
     expect(outputs[`${DIR}/SClient.kt`]).toContain('append("times", encodeJson(body.times), jsonPartHeaders())');
   });
 

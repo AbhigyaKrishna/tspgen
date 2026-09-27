@@ -1,8 +1,14 @@
-import { apiVersionConstants, type ApiIR, type ApiVersionConstant, type ResolvedFeatures } from "@abhigyakrishna/tspgen-core";
+import {
+  apiVersionConstants,
+  reportDiagnostic as reportCoreDiagnostic,
+  type ApiIR,
+  type ApiVersionConstant,
+  type ResolvedFeatures,
+} from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
-import type { TsDecl, TsIR } from "./model.js";
+import type { EnumStyle, TsDecl, TsIR } from "./model.js";
 import { ApiBuilder } from "./operations.js";
 
 export * from "./model.js";
@@ -16,6 +22,11 @@ export interface TsTransformOptions {
   apiVersion?: boolean;
   /** Generate models/index.ts (default true). */
   barrel?: boolean;
+  enumStyle?: EnumStyle;
+  declaration?: "interface" | "type";
+  /** Resolved language features (declaration-level overrides). */
+  features?: ResolvedFeatures<string>;
+  dateType?: "string" | "date";
 }
 
 export function resolveTsOptions(options: Record<string, unknown>, features?: ResolvedFeatures<string>): TsTransformOptions {
@@ -26,12 +37,32 @@ export function resolveTsOptions(options: Record<string, unknown>, features?: Re
     errors: options.errors === "thrown" ? "thrown" : "typed",
     apiVersion: features?.values["api-version"] !== false,
     barrel: features?.values.barrel !== false,
+    enumStyle: (["union", "enum", "const-array"] as const).find((s) => s === options["enum-style"]) ?? "union-const",
+    declaration: options.declaration === "type" ? "type" : "interface",
+    dateType: options["date-type"] === "date" ? "date" : "string",
+    ...(features ? { features } : {}),
   };
 }
 
 export function transformToTs(program: Program, api: ApiIR, options: TsTransformOptions): TsIR {
   const layout = options.layout ?? "per-type";
-  const builder = new DeclarationBuilder(program, api, { layout, zod: options.zod });
+  if (options.dateType === "date" && !options.zod) {
+    reportCoreDiagnostic(program, {
+      code: "unsupported-feature",
+      messageId: "option",
+      format: { key: "date-type: date", reason: "without features.zod; dates stay strings" },
+      target: NoTarget,
+    });
+  }
+  const dateType = options.dateType === "date" && options.zod ? "date" : "string";
+  const builder = new DeclarationBuilder(program, api, {
+    layout,
+    zod: options.zod,
+    enumStyle: options.enumStyle ?? "union-const",
+    declaration: options.declaration ?? "interface",
+    dateType,
+    ...(options.features ? { features: options.features } : {}),
+  });
   const declarations = builder.build();
   const apiBuilder = new ApiBuilder(builder, { errors: options.errors ?? "typed" });
   const services = apiBuilder.services(api);
@@ -51,6 +82,8 @@ export function transformToTs(program: Program, api: ApiIR, options: TsTransform
     zod: options.zod,
     importExtension: options.importExtension,
     layout,
+    dateType,
+    ...(builder.codecsUsed ? { codecsFile: builder.codecsFile } : {}),
     barrel: options.barrel !== false,
     apiVersions: options.apiVersion === false ? [] : versionConstants(program, api, declarations),
     api,

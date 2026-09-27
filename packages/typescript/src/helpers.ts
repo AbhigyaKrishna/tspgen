@@ -29,12 +29,25 @@ export const tsHelpers = {
     const head = `${indent}// ── ${title} `;
     return head + "─".repeat(Math.max(3, 80 - head.length));
   },
-  /** The enum's type declaration: a literal union, or a const tuple plus derived type when `values` is set. */
+  /** The enum's declaration per `style`: literal union, tuple + derived type, or TypeScript enum (+ tuple). */
   enumType(d: TsEnum): string {
-    const literals = d.members.map((m) => (typeof m.value === "string" ? JSON.stringify(m.value) : String(m.value)));
-    return d.values
-      ? `export const ${d.values} = [${literals.join(", ")}] as const;\n\nexport type ${d.name} = (typeof ${d.values})[number];`
+    const literals = d.members.map((m) => tsHelpers.literal(m.value));
+    const tuple = d.values ? `export const ${d.values} = [${literals.join(", ")}] as const;` : "";
+    if (d.style === "enum") {
+      const members = d.members.map((m) => `${tsHelpers.jsdoc(m.docs, "  ")}  ${m.name} = ${tsHelpers.literal(m.value)},`);
+      return `export enum ${d.name} {\n${members.join("\n")}\n}${tuple ? `\n\n${tuple}` : ""}`;
+    }
+    return tuple
+      ? `${tuple}\n\nexport type ${d.name} = (typeof ${d.values})[number];`
       : `export type ${d.name} = ${literals.join(" | ")};`;
+  },
+  /** zod schema of an enum: the enum object or const-array tuple when there is one, else the literal values. */
+  enumSchema(d: TsEnum): string {
+    const strings = d.members.every((m) => typeof m.value === "string");
+    if (d.style === "enum") return `z.enum(${d.name})`;
+    if (strings && d.style === "const-array" && d.values) return `z.enum(${d.values})`;
+    const literals = d.members.map((m) => tsHelpers.literal(m.value));
+    return strings ? `z.enum([${literals.join(", ")}])` : `z.union([${literals.map((l) => `z.literal(${l})`).join(", ")}])`;
   },
   /** `{ status: 201; body: Pet; headers: { location: string } }` */
   resultVariant(v: TsResultVariant): string {

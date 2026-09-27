@@ -24,10 +24,23 @@ export function kotlinxImports(decl: KtDecl): string[] {
         ...decl.variants.flatMap(kotlinxImports),
       ];
     case "enum":
-      return [
-        ...(decl.members.some(needsSerialName) ? ["kotlinx.serialization.SerialName"] : []),
-        "kotlinx.serialization.Serializable",
-      ];
+      return decl.unknown
+        ? [
+            "kotlinx.serialization.KSerializer",
+            "kotlinx.serialization.Serializable",
+            "kotlinx.serialization.SerializationException",
+            "kotlinx.serialization.descriptors.PrimitiveKind",
+            "kotlinx.serialization.descriptors.PrimitiveSerialDescriptor",
+            "kotlinx.serialization.descriptors.SerialDescriptor",
+            "kotlinx.serialization.encoding.Decoder",
+            "kotlinx.serialization.encoding.Encoder",
+          ]
+        : [
+            ...(decl.members.some(needsSerialName) ? ["kotlinx.serialization.SerialName"] : []),
+            "kotlinx.serialization.Serializable",
+          ];
+    case "value-class":
+      return ["kotlinx.serialization.Serializable"];
     case "typealias":
     case "events":
       return [];

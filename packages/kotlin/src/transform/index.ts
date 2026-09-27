@@ -2,8 +2,8 @@ import { apiVersionConstants, type ApiIR, type ResolvedFeatures } from "@abhigya
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
-import type { KotlinIR, KtDecl, KtService, KtTypeUse } from "./model.js";
-import { JAVA_TIME_CLASSES, javaTimeIn, type DateTimeMapping } from "./type-map.js";
+import type { KotlinIR, KtDecl, KtService, KtTypeUse, ScalarStyle } from "./model.js";
+import { SERIALIZED_CLASSES, serializedIn, type DateTimeMapping, type DecimalMapping } from "./type-map.js";
 import { ApiBuilder } from "./operations.js";
 
 export * from "./model.js";
@@ -17,9 +17,13 @@ export interface KotlinTransformOptions {
   errors?: "typed" | "thrown";
   validation?: boolean;
   dateTime?: DateTimeMapping;
+  decimal?: DecimalMapping;
   unionVariants?: "nested" | "top-level";
   /** Generate the API version constants (default true). */
   apiVersion?: boolean;
+  /** Resolved language features (declaration-level overrides). */
+  features?: ResolvedFeatures<string>;
+  scalarStyle?: ScalarStyle;
 }
 
 export function resolveKotlinOptions(
@@ -36,8 +40,11 @@ export function resolveKotlinOptions(
     errors: options.errors === "thrown" ? "thrown" : "typed",
     validation: features?.values.validation !== false,
     dateTime: options["date-time"] === "kotlin.time" ? "kotlin.time" : "java.time",
+    decimal: options.decimal === "string" ? "string" : "big-decimal",
     unionVariants: options["union-variants"] === "top-level" ? "top-level" : "nested",
     apiVersion: features?.values["api-version"] !== false,
+    scalarStyle: (["typealias", "value-class"] as const).find((s) => s === options["scalar-style"]) ?? "inline",
+    ...(features ? { features } : {}),
   };
 }
 
@@ -50,12 +57,15 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     packages: options.packages,
     validation: options.validation,
     dateTime: options.dateTime,
+    decimal: options.decimal,
     unionVariants: options.unionVariants,
+    scalarStyle: options.scalarStyle,
+    ...(options.features ? { features: options.features } : {}),
   });
   const declarations = builder.build();
   const apiBuilder = new ApiBuilder(builder, apiPackage, { errors: options.errors, packages: options.packages });
   const services = apiBuilder.services(api, options.package);
-  const javaTime = usedJavaTime(declarations, services);
+  const serializers = usedSerializers(declarations, services);
   if (builder.fileUsed) {
     for (const d of declarations) {
       if (d.fqn === builder.httpFileFqn) {
@@ -78,27 +88,32 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     apiDeclarations: apiBuilder.declarations(),
     services,
     api,
-    javaTime,
+    serializers,
     apiVersions: options.apiVersion === false ? [] : apiVersionConstants(api),
     ...(builder.fileUsed ? { httpFile: builder.httpFileFqn } : {}),
     ...(builder.sseMessageUsed ? { sseMessage: builder.sseMessageFqn } : {}),
-    ...(javaTime.length > 0 ? { javaTimeModule: `${modelsPackage}.javaTimeSerializersModule` } : {}),
+    ...(serializers.length > 0 ? { serializersModule: `${modelsPackage}.modelSerializersModule` } : {}),
+    ...(builder.ulongAsStringUsed ? { ulongAsString: true } : {}),
+    ...(builder.valueClassAsStringSerializers.length > 0
+      ? { valueClassAsString: builder.valueClassAsStringSerializers }
+      : {}),
   };
 }
 
-function usedJavaTime(declarations: KtDecl[], services: KtService[]): string[] {
+function usedSerializers(declarations: KtDecl[], services: KtService[]): string[] {
   const types: KtTypeUse[] = [];
   const addDecl = (d: KtDecl): void => {
     if (d.kind === "data-class" || d.kind === "sealed-interface") types.push(...d.properties.map((p) => p.type));
     if (d.kind === "sealed-interface") d.variants.forEach(addDecl);
     // Event payloads are encoded with the models' Json: a java.time payload needs its serializer.
     if (d.kind === "events") types.push(...d.events.flatMap((e) => (e.data ? [e.data] : [])));
+    if (d.kind === "value-class") types.push(d.value);
   };
   declarations.forEach(addDecl);
   for (const op of services.flatMap((s) => s.groups.flatMap((g) => g.operations))) {
     types.push(...op.params.map((p) => p.type), ...(op.body ? [op.body.type] : []));
     for (const r of op.responses) types.push(...(r.body ? [r.body] : []), ...r.headers.map((h) => h.type));
   }
-  const used = new Set(types.flatMap(javaTimeIn));
-  return JAVA_TIME_CLASSES.filter((fqn) => used.has(fqn));
+  const used = new Set(types.flatMap(serializedIn));
+  return SERIALIZED_CLASSES.filter((fqn) => used.has(fqn));
 }

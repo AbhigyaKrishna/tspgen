@@ -21,6 +21,12 @@ export const kotlinFeatures = defineFeatures({
     description:
       "Constraint decorators (@minLength, @maxLength, @pattern, @minItems, @maxItems, @minValue, @maxValue) as init { require(...) } checks.",
   },
+  "enum-unknown": {
+    default: false,
+    override: "declaration",
+    description:
+      "String enums get an UNKNOWN member that unknown wire values decode to (encoding it throws); for clients — servers should reject unknown input.",
+  },
 });
 
 /** Kotlin emitter option keys moved in 0.2.0. */
@@ -37,7 +43,9 @@ export interface KotlinEmitterOptions extends CoreEmitterOptions {
   visibility?: "public" | "internal";
   "file-annotations"?: string[];
   "date-time"?: "java.time" | "kotlin.time";
+  decimal?: "big-decimal" | "string";
   "union-variants"?: "nested" | "top-level";
+  "scalar-style"?: "inline" | "typealias" | "value-class";
 }
 
 const optionsSchema = {
@@ -108,6 +116,22 @@ const optionsSchema = {
       description:
         "java.time (default): Instant, OffsetDateTime, LocalDate, LocalTime, Duration from java.time with generated " +
         "ISO-8601 serializers; kotlin.time: kotlin.time.Instant/Duration and kotlinx.datetime dates.",
+    },
+    decimal: {
+      type: "string",
+      enum: ["big-decimal", "string"],
+      nullable: true,
+      default: "big-decimal",
+      description:
+        "decimal/decimal128 as java.math.BigDecimal (default; generated serializer writes a JSON string, reads a string or number) or String.",
+    },
+    "scalar-style": {
+      type: "string",
+      enum: ["inline", "typealias", "value-class"],
+      nullable: true,
+      default: "inline",
+      description:
+        "User scalars (scalar PetId extends string): inline (the base type), typealias PetId = String, or @JvmInline value class PetId(val value: String). Per scalar: @meta scalarStyle.",
     },
     "union-variants": {
       type: "string",

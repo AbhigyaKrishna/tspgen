@@ -238,11 +238,11 @@ function multipartUpload(
 function decodeText(expr: string, p: KtPart, safe: boolean): string {
   const wire = str(p.wireName);
   if (p.kind === "json") return `${expr}${safe ? "?" : ""}.convertParam(${wire}) { partJson.decodeFromString<${p.type.text}>(it) }`;
-  return convert(expr, wire, p.type.text, p.type.imports, safe);
+  return convert(expr, wire, p.type, safe);
 }
 
 function needsDecode(p: KtPart): boolean {
-  return p.kind === "json" || converter(p.type.text, p.type.imports) !== undefined;
+  return p.kind === "json" || converter(p.type) !== undefined;
 }
 
 function bufferedPartExpr(p: KtPart): string {

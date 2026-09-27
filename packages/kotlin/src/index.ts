@@ -13,9 +13,13 @@ export {
   mapOf,
   nullable,
   scalarTypeUse,
+  SERIALIZED_CLASSES,
+  serializedIn,
   type DateTimeMapping,
+  type DecimalMapping,
 } from "./transform/type-map.js";
 export { decoratorArg, decoratorArgs } from "./transform/decorators.js";
+export { codecImports, listElement, paramDecode, paramEncode } from "./transform/param-codec.js";
 export { kotlinLanguage } from "./language.js";
 export { modelsTarget } from "./models-target.js";
 export { kotlinHelpers } from "./helpers.js";

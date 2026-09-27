@@ -9,6 +9,12 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Type kind '${"kind"}' is not supported; it will be emitted as unknown.`,
       },
     },
+    "unsupported-encoding": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`@encode("${"encoding"}") on '${"where"}' is not supported; the default JSON encoding is used.`,
+      },
+    },
     "unsupported-multipart-tuple": {
       severity: "error",
       messages: {
@@ -110,6 +116,7 @@ export const $lib = createTypeSpecLibrary({
       severity: "warning",
       messages: {
         default: paramMessage`\`features.${"key"}\` has no effect with ${"reason"}.`,
+        option: paramMessage`\`${"key"}\` has no effect ${"reason"}.`,
       },
     },
     "option-moved": {

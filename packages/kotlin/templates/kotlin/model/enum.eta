@@ -1,6 +1,28 @@
 <% const d = it.decl; %>
-<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable
-<%= it.h.visibility(it) %>enum class <%= d.name %> {
-<% for (const m of d.members) { %><%~ it.h.kdoc(m.docs, "    ") %><%~ it.h.annotations(m.annotations, "    ") %><% if (it.h.needsSerialName(m)) { %>    @SerialName(<%~ it.h.str(m.serialName) %>)
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><% if (d.unknown) { %>@Serializable(with = <%= d.name %>.<%= d.serializerName %>::class)
+<% } else { %>@Serializable
+<% } %><%= it.h.visibility(it) %>enum class <%= d.name %> {
+<% for (const m of d.members) { %><%~ it.h.kdoc(m.docs, "    ") %><%~ it.h.annotations(m.annotations, "    ") %><% if (!d.unknown && it.h.needsSerialName(m)) { %>    @SerialName(<%~ it.h.str(m.serialName) %>)
 <% } %>    <%= m.name %>,
+<% } %><% if (d.unknown) { %>
+    /** A value this code does not know (e.g. added by a newer server); encoding it throws. */
+    <%= d.unknown %>;
+
+    internal object <%= d.serializerName %> : KSerializer<<%= d.name %>> {
+        override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(<%~ it.h.str(d.fqn) %>, PrimitiveKind.STRING)
+
+        override fun serialize(encoder: Encoder, value: <%= d.name %>) {
+            val wire = when (value) {
+<% for (const m of d.members) { %>                <%= d.name %>.<%= m.name %> -> <%~ it.h.str(m.serialName) %>
+<% } %>                <%= d.name %>.<%= d.unknown %> -> throw SerializationException(<%~ it.h.str(`${d.name}.${d.unknown} has no wire value`) %>)
+            }
+            encoder.encodeString(wire)
+        }
+
+        override fun deserialize(decoder: Decoder): <%= d.name %> =
+            when (decoder.decodeString()) {
+<% for (const m of d.members) { %>                <%~ it.h.str(m.serialName) %> -> <%= d.name %>.<%= m.name %>
+<% } %>                else -> <%= d.name %>.<%= d.unknown %>
+            }
+    }
 <% } %>}

@@ -1,3 +1,7 @@
+<% if (it.codecs) { -%>
+<%~ include("ts/codecs", it) %>
+
+<% } -%>
 <% it.sections.forEach((s, i) => { -%>
 <% if (i > 0) { -%>
 

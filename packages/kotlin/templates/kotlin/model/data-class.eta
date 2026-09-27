@@ -4,6 +4,6 @@
 <% } %><% if (d.properties.length === 0) { %><%= it.h.visibility(it) %>class <%= d.name %><%= tp %><%= sup %>
 <% } else { %><%= it.h.visibility(it) %>data class <%= d.name %><%= tp %>(
 <% for (const p of d.properties) { %><%~ it.h.kdoc(p.docs, "    ") %><%~ it.h.annotations(p.annotations, "    ") %><% if (p.serialName !== undefined) { %>    @SerialName(<%~ it.h.str(p.serialName) %>)
-<% } %>    <%= p.override ? "override " : "" %>val <%= p.name %>: <%= p.type.text %><%= p.default !== undefined ? " = " + p.default : "" %>,
+<% } %>    <%= p.override ? "override " : "" %>val <%= p.name %>: <%= p.serialType ?? p.type.text %><%= p.default !== undefined ? " = " + p.default : "" %>,
 <% } %>)<%= sup %><%~ it.h.initBlock(d.checks) %>
 <% } %>

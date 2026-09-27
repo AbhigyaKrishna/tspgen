@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "cp ../kotlin/petstore.tsp petstore.tsp && cp ../kotlin/versioned/library.tsp versioned/library.tsp && tsp compile typescript.tsp && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml && tsp compile flat",
+    "generate": "cp ../kotlin/petstore.tsp petstore.tsp && cp ../kotlin/versioned/library.tsp versioned/library.tsp && tsp compile typescript.tsp && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml && tsp compile flat && tsp compile mapping && tsp compile mapping --config mapping/tspconfig.flat.yaml",
     "test": "pnpm generate && tsc -p tsconfig.json && vitest run"
   },
   "dependencies": {

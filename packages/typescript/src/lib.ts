@@ -15,6 +15,9 @@ export interface TypeScriptEmitterOptions extends LanguageEmitterOptions {
   "import-extension"?: "none" | ".js";
   layout?: "per-type" | "single-file";
   errors?: "typed" | "thrown";
+  "enum-style"?: "union-const" | "union" | "enum" | "const-array";
+  declaration?: "interface" | "type";
+  "date-type"?: "string" | "date";
 }
 
 export const TYPESCRIPT_EMITTER = "@abhigyakrishna/tspgen-typescript";
@@ -26,6 +29,11 @@ export const typescriptFeatures = defineFeatures({
     description: "zod schemas (<Name>Schema) next to the types, constraint decorators as refinements; needs zod >= 4.3.",
   },
   barrel: { default: true, description: "models/index.ts re-exporting every model (per-type layout)." },
+  readonly: {
+    default: false,
+    override: "declaration",
+    description: "Every model property readonly (a property's @meta readonly still wins); arrays stay T[].",
+  },
 });
 
 /** TypeScript emitter option keys moved in 0.2.0. */
@@ -61,6 +69,30 @@ const optionsSchema = {
       nullable: true,
       default: "typed",
       description: "typed (default): <Body>Error classes; thrown: error responses are documentation only.",
+    },
+    "enum-style": {
+      type: "string",
+      enum: ["union-const", "union", "enum", "const-array"],
+      nullable: true,
+      default: "union-const",
+      description:
+        'Enums and closed string-literal unions: "union-const" (default: literal union + const object), "union" (type only), ' +
+        '"enum" (TypeScript enum; not erasable syntax), "const-array" (<Name>Values tuple + derived type). Per declaration: @meta enumStyle.',
+    },
+    declaration: {
+      type: "string",
+      enum: ["interface", "type"],
+      nullable: true,
+      default: "interface",
+      description: 'Model declarations: "interface" (default) or "type" aliases (supertypes become intersections).',
+    },
+    "date-type": {
+      type: "string",
+      enum: ["string", "date"],
+      nullable: true,
+      default: "string",
+      description:
+        'utcDateTime as "string" (default, ISO-8601) or "date" (Date, decoded/encoded by a zod codec; needs features.zod). offsetDateTime, plainDate, plainTime and duration stay strings.',
     },
     ...movedOptionSchemas(typescriptMovedOptions),
     targets: {
@@ -151,6 +183,12 @@ export const $lib = createTypeSpecLibrary({
       severity: "warning",
       messages: {
         default: paramMessage`@pattern '${"pattern"}' on '${"where"}' is not a valid JavaScript regular expression; it is not validated.`,
+      },
+    },
+    "unsupported-bounds": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`@minValue/@maxValue on '${"where"}' has no effect: it is a decimal, represented as a string, and the bound is not checked.`,
       },
     },
   },

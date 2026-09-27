@@ -49,6 +49,11 @@ kotlin {
             "build/generated/tspgen-clash/models",
             "build/generated/tspgen-clash/server",
             "build/generated/tspgen-clash/client",
+            "build/generated/tspgen-mapping/models",
+            "build/generated/tspgen-mapping/server",
+            "build/generated/tspgen-mapping/client",
+            "build/generated/tspgen-mapping-resources/models",
+            "build/generated/tspgen-mapping-resources/server",
         )
     }
 }

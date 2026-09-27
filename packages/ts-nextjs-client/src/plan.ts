@@ -72,6 +72,7 @@ function groupImports(ir: TsIR, g: TsGroup): TsImport[] {
           ...fields.flatMap((t) => t.schemaImports),
           ...bodies.flatMap((t) => t.schemaImports),
           ...streams.flatMap((t) => (t.events ? t.type.schemaImports : [])),
+          ...ops.flatMap((op) => op.errors.flatMap((e) => (e.body?.codec ? e.body.schemaImports : []))),
         ]
       : []),
     ...bodies.flatMap((t) => t.imports),
@@ -112,7 +113,13 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
   }
   const auths = Object.values(auth);
   const files: FileSpec[] = [
-    file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", { withoutUndefined, uploads, streams, auth: auths.length > 0 }),
+    file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", {
+      withoutUndefined,
+      uploads,
+      streams,
+      auth: auths.length > 0,
+      dates: ir.dateType === "date",
+    }),
   ];
   for (const s of services) {
     for (const g of s.groups) {

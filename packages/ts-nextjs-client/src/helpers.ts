@@ -85,15 +85,30 @@ function partContentType(part: TsPart): string | undefined {
 }
 
 function parseExpr(type: TsTypeUse, zod: boolean): string {
-  return zod ? `parse(this.config, res, ${type.schema})` : `parse<${type.text}>(this.config, res)`;
+  return zod ? `parse(this.config, res, ${type.schema}${type.codec ? ", true" : ""})` : `parse<${type.text}>(this.config, res)`;
 }
 
 function headerExpr(h: TsHeader): string {
   const wire = str(h.wireName);
-  const map = h.type.text === "number" ? "Number" : h.type.text === "boolean" ? `(value) => value === "true"` : "";
+  const map =
+    h.type.text === "number"
+      ? "Number"
+      : h.type.text === "boolean"
+        ? `(value) => value === "true"`
+        : h.type.date
+          ? "(value) => new Date(value)"
+          : "";
   if (h.optional) return `optionalHeader(res, ${wire}${map ? `, ${map}` : ""})`;
   const raw = `requireHeader(res, ${wire})`;
-  return map === "Number" ? `Number(${raw})` : map ? `${raw} === "true"` : raw;
+  if (h.type.text === "number") return `Number(${raw})`;
+  if (h.type.text === "boolean") return `${raw} === "true"`;
+  if (h.type.date) return `new Date(${raw})`;
+  return raw;
+}
+
+/** Whether an operation's params schema decodes (a `Date` field): Server Actions then check by encoding. */
+function paramsCodec(op: TsOperation): boolean {
+  return fields(op).some((f) => f.type.codec === true);
 }
 
 function statusCondition(codes: StatusCodes): string {
@@ -134,6 +149,7 @@ export const nextjsHelpers = {
   partsExpr,
   key,
   memberType,
+  paramsCodec,
 
   hasParams(op: TsOperation): boolean {
     return fields(op).length > 0;
@@ -157,7 +173,8 @@ export const nextjsHelpers = {
       const param = op.params.find((p) => p.location === "path" && p.wireName === wire);
       if (!param) return match;
       dynamic = true;
-      return `\${encodeURIComponent(String(params.${param.name}))}`;
+      const value = param.type.date ? `params.${param.name}.toISOString()` : `String(params.${param.name})`;
+      return `\${encodeURIComponent(${value})}`;
     });
     return dynamic ? `\`${path}\`` : str(path);
   },
@@ -190,7 +207,7 @@ export const nextjsHelpers = {
   successLines(op: TsOperation, zod: boolean): string[] {
     const r = op.result;
     if (r.kind === "single" && r.stream) {
-      const schema = zod && r.stream.events ? `, ${r.stream.type.schema}` : "";
+      const schema = zod && r.stream.events ? `, ${r.stream.type.schema}${r.stream.type.codec ? ", true" : ""}` : "";
       return [`if (res.ok) return yield* streamEvents(this.config, res, ${eventsExpr(op)}${schema});`];
     }
     if (r.kind === "single") {
@@ -208,10 +225,12 @@ export const nextjsHelpers = {
     const rank = (c: StatusCodes) => (c === "default" ? 2 : typeof c === "number" ? 0 : 1);
     return [...op.errors]
       .sort((a, b) => rank(a.statusCodes) - rank(b.statusCodes))
-      .map((e) =>
-        e.body
-          ? `${errorKey(e.statusCodes)}: (status, body) => new ${e.errorClass.text}(status, body as ${e.body.text})`
-          : `${errorKey(e.statusCodes)}: (status, body) => new HttpError(status, body)`,
-      );
+      .map((e) => {
+        const key = errorKey(e.statusCodes);
+        if (!e.body) return `${key}: (status, body) => new HttpError(status, body)`;
+        if (!e.body.codec) return `${key}: (status, body) => new ${e.errorClass.text}(status, body as ${e.body.text})`;
+        // An unexpected (non-matching) error body must not throw; fall back to the typed error with the raw body.
+        return `${key}: (status, body) => { const r = ${e.body.schema}.safeParse(body); return new ${e.errorClass.text}(status, r.success ? r.data : (body as ${e.body.text})); }`;
+      });
   },
 };

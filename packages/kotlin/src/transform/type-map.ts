@@ -15,7 +15,7 @@ const SCALARS: Record<string, [string, string?]> = {
   uint8: ["Short"],
   uint16: ["Int"],
   uint32: ["Long"],
-  uint64: ["Long"],
+  uint64: ["ULong"],
   float32: ["Float"],
   float64: ["Double"],
   float: ["Double"],
@@ -40,6 +40,11 @@ const JAVA_TIME: Record<string, [string, string]> = {
 
 export type DateTimeMapping = "java.time" | "kotlin.time";
 
+export type DecimalMapping = "big-decimal" | "string";
+
+/** `decimal: big-decimal` for decimal and decimal128. */
+const BIG_DECIMAL: [string, string] = ["BigDecimal", "java.math.BigDecimal"];
+
 /** java.time classes the models serialize as ISO-8601 strings, each with a generated `<Name>Serializer`. */
 export const JAVA_TIME_CLASSES: readonly string[] = Object.values(JAVA_TIME).map(([, fqn]) => fqn);
 
@@ -54,10 +59,13 @@ export function javaTimeCodec(typeText: string, imports: readonly string[]): { p
   return { parse: `${typeText}.parse(it)`, encode: "toString()" };
 }
 
-/** java.time classes a type use refers to, imported or written qualified. */
-export function javaTimeIn(type: KtTypeUse): string[] {
-  const qualified: string[] = type.text.match(/java\.time\.[A-Za-z]+/g) ?? [];
-  return JAVA_TIME_CLASSES.filter((fqn) => type.imports.includes(fqn) || qualified.includes(fqn));
+/** Classes the models serialize with a generated serializer in ModelSerializers.kt: java.time as ISO-8601 strings, BigDecimal as a decimal string. */
+export const SERIALIZED_CLASSES: readonly string[] = [...JAVA_TIME_CLASSES, "java.math.BigDecimal"];
+
+/** Serialized classes (see SERIALIZED_CLASSES) a type use refers to, imported or written qualified. */
+export function serializedIn(type: KtTypeUse): string[] {
+  const qualified: string[] = type.text.match(/java\.(?:time|math)\.[A-Za-z]+/g) ?? [];
+  return SERIALIZED_CLASSES.filter((fqn) => type.imports.includes(fqn) || qualified.includes(fqn) || type.needs?.includes(fqn));
 }
 
 export const JSON_ELEMENT: KtTypeUse = {
@@ -66,8 +74,13 @@ export const JSON_ELEMENT: KtTypeUse = {
   nullable: false,
 };
 
-export function scalarTypeUse(name: string, dateTime: DateTimeMapping = "kotlin.time"): KtTypeUse {
-  const [text, fqn] = (dateTime === "java.time" ? JAVA_TIME[name] : undefined) ?? SCALARS[name] ?? ["String"];
+export function scalarTypeUse(
+  name: string,
+  dateTime: DateTimeMapping = "kotlin.time",
+  decimal: DecimalMapping = "big-decimal",
+): KtTypeUse {
+  const bigDecimal = decimal === "big-decimal" && (name === "decimal" || name === "decimal128") ? BIG_DECIMAL : undefined;
+  const [text, fqn] = (dateTime === "java.time" ? JAVA_TIME[name] : undefined) ?? bigDecimal ?? SCALARS[name] ?? ["String"];
   return { text, imports: fqn ? [fqn] : [], nullable: false };
 }
 
@@ -79,15 +92,40 @@ export function fqnTypeUse(fqn: string): KtTypeUse {
 }
 
 export function nullable(type: KtTypeUse): KtTypeUse {
-  return type.nullable ? type : { ...type, text: `${type.text}?`, nullable: true };
+  if (type.nullable) return type;
+  return { ...type, text: `${type.text}?`, nullable: true, ...(type.serialText ? { serialText: `${type.serialText}?` } : {}) };
+}
+
+/** A container element as written in a model: its `serialText`, or its serializer as a type annotation. */
+function serialElement(item: KtTypeUse): string | undefined {
+  if (item.serialText) return item.serialText;
+  return item.serializer ? `@Serializable(with = ${item.serializer}::class) ${item.text}` : undefined;
+}
+
+function serialFields(item: KtTypeUse, wrap: (element: string) => string): Pick<KtTypeUse, "serialText" | "serialImports"> {
+  const element = serialElement(item);
+  return element ? { serialText: wrap(element), serialImports: item.serialImports ?? [] } : {};
 }
 
 export function listOf(item: KtTypeUse): KtTypeUse {
-  return { text: `List<${item.text}>`, imports: item.imports, nullable: false };
+  return {
+    text: `List<${item.text}>`,
+    imports: item.imports,
+    nullable: false,
+    element: item,
+    ...serialFields(item, (e) => `List<${e}>`),
+    ...(item.needs ? { needs: item.needs } : {}),
+  };
 }
 
 export function mapOf(value: KtTypeUse): KtTypeUse {
-  return { text: `Map<String, ${value.text}>`, imports: value.imports, nullable: false };
+  return {
+    text: `Map<String, ${value.text}>`,
+    imports: value.imports,
+    nullable: false,
+    ...serialFields(value, (e) => `Map<String, ${e}>`),
+    ...(value.needs ? { needs: value.needs } : {}),
+  };
 }
 
 /** `Page` + [`Pet`] → `Page<Pet>` carrying the imports of both. */
@@ -96,5 +134,6 @@ export function genericOf(base: KtTypeUse, args: readonly KtTypeUse[]): KtTypeUs
     text: `${base.text}<${args.map((a) => a.text).join(", ")}>`,
     imports: [...base.imports, ...args.flatMap((a) => a.imports)],
     nullable: false,
+    ...(args.some((a) => a.needs) ? { needs: args.flatMap((a) => a.needs ?? []) } : {}),
   };
 }

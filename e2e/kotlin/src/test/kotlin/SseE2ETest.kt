@@ -11,7 +11,7 @@ import com.example.petstore.models.Pet
 import com.example.petstore.models.PetEvents
 import com.example.petstore.models.SseMessage
 import com.example.petstore.models.Species
-import com.example.petstore.models.javaTimeSerializersModule
+import com.example.petstore.models.modelSerializersModule
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import com.example.petstore.server.FeedService
@@ -304,7 +304,7 @@ class SseE2ETest {
                 }
             }
         }
-        val lenient = Json { ignoreUnknownKeys = true; serializersModule = javaTimeSerializersModule }
+        val lenient = Json { ignoreUnknownKeys = true; serializersModule = modelSerializersModule }
         val api = PetStoreApiClient(createClient { petStoreDefaults(lenient) }, "http://localhost")
         assertEquals(
             listOf(PetEvents.Added(Pet(id = 1, name = "Rex", species = Species.DOG)), PetEvents.Done),

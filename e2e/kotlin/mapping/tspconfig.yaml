@@ -1,0 +1,10 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../build/generated/tspgen-mapping"
+    package: "com.example.ledger"
+    scalar-style: value-class
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server": {}
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client": {}

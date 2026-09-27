@@ -26,9 +26,8 @@ export function usesJson(decl: KtEvents): boolean {
 /** Kotlin expression of an event's payload from `event.data`. */
 function payloadExpr(e: KtEvent): string {
   const data = e.data!;
-  const text = data.text.replace(/\?$/, "");
   if (e.json) return `json.decodeFromString<${data.text}>(event.data)`;
-  return decode("event.data", text, data.imports);
+  return decode("event.data", data);
 }
 
 function valueExpr(decl: KtEvents, e: KtEvent): string {
@@ -97,7 +96,7 @@ export function supportImports(ir: KotlinIR, streams: ReturnType<typeof streamsO
           "io.ktor.client.plugins.api.ClientPlugin",
           "io.ktor.client.plugins.api.createClientPlugin",
           "io.ktor.util.AttributeKey",
-          ...(ir.javaTimeModule ? [ir.javaTimeModule] : []),
+          ...(ir.serializersModule ? [ir.serializersModule] : []),
         ]
       : []),
   ];

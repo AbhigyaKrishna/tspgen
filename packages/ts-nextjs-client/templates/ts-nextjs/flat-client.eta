@@ -95,16 +95,22 @@ export class <%= c.name %> {
 <%~ it.h.jsdoc(m.docs, "  ", m.deprecated) %><% if (m.stream) { -%>
   async *<%= m.name %>(<%~ m.params %>): <%~ m.returnType %> {
 <% } else { -%>
-  <% if (m.void || m.checks.length > 0) { %>async <% } %><%= m.name %>(<%~ m.params %>): Promise<<%~ m.returnType %>> {
+  <% if (m.void || m.checks.length > 0 || m.decode) { %>async <% } %><%= m.name %>(<%~ m.params %>): Promise<<%~ m.returnType %>> {
 <% } -%>
 <% for (const check of m.checks) { -%>
     <%~ check %>
 <% } -%>
 <% if (m.stream) { -%>
     const response = await this.request(<%~ m.args %>);
+<% if (m.stream.decode) { -%>
+    for await (const event of decodeEvents(response.body, <%~ m.stream.events %>)) yield <%~ m.stream.decode %>.parse(event);
+<% } else { -%>
     yield* decodeEvents(response.body, <%~ m.stream.events %>) as AsyncIterable<<%~ m.stream.element %>>;
+<% } -%>
 <% } else if (m.void) { -%>
     await this.request(<%~ m.args %>);
+<% } else if (m.decode) { -%>
+    return <%~ m.decode %>.parse(await this.send(<%~ m.args %>));
 <% } else { -%>
     return this.send(<%~ m.args %>);
 <% } -%>
@@ -218,7 +224,7 @@ function toFormData(value: object, parts: readonly PartSpec[]): globalThis.FormD
       } else if (part.kind === "json") {
         form.append(part.name, new globalThis.Blob([JSON.stringify(item)], { type: part.contentType ?? "application/json" }));
       } else {
-        form.append(part.name, String(item));
+        form.append(part.name, <%= it.usesDates ? "toText" : "String" %>(item));
       }
     }
   }
@@ -236,7 +242,12 @@ function toFormData(value: object, parts: readonly PartSpec[]): globalThis.FormD
 async function toError(response: Response): Promise<<%= e.name %>> {
   const body: unknown = await response.json().catch(() => undefined);
 <% if (e.model) { -%>
+<% if (e.decode) { -%>
+  // A codec error body failing decode (e.g. an invalid Date) must not become undefined; fall back to the raw body.
+  return new <%= e.name %>(response.status, isErrorBody(body) ? (() => { const r = <%= e.decode %>.safeParse(body); return r.success ? r.data : body; })() : undefined);
+<% } else { -%>
   return new <%= e.name %>(response.status, isErrorBody(body) ? body : undefined);
+<% } -%>
 }
 
 function isErrorBody(value: unknown): value is <%= e.model %> {
@@ -255,9 +266,9 @@ function toQuery(params: Record<string, unknown>, explode: readonly string[] = [
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
-    if (!Array.isArray(value)) search.append(key, String(value));
-    else if (explode.includes(key)) for (const item of value) search.append(key, String(item));
-    else search.append(key, value.map(String).join(","));
+    if (!Array.isArray(value)) search.append(key, <%= it.usesDates ? "toText" : "String" %>(value));
+    else if (explode.includes(key)) for (const item of value) search.append(key, <%= it.usesDates ? "toText" : "String" %>(item));
+    else search.append(key, value.map(<%= it.usesDates ? "toText" : "String" %>).join(","));
   }
   const rendered = search.toString();
   return rendered ? `?${rendered}` : "";
@@ -268,7 +279,7 @@ function toQuery(params: Record<string, unknown>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
-    for (const item of Array.isArray(value) ? value : [value]) search.append(key, String(item));
+    for (const item of Array.isArray(value) ? value : [value]) search.append(key, <%= it.usesDates ? "toText" : "String" %>(item));
   }
   const rendered = search.toString();
   return rendered ? `?${rendered}` : "";
@@ -277,4 +288,11 @@ function toQuery(params: Record<string, unknown>): string {
 <% if (it.usesWithoutUndefined) { -%>
 
 <%~ include("ts-nextjs/without-undefined", { exported: false }) %>
+<% } -%>
+<% if (it.usesDates && (it.usesQuery || it.usesUploads)) { -%>
+
+/** A query or form value as sent: dates as ISO-8601 strings. */
+function toText(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value);
+}
 <% } -%>

@@ -233,6 +233,45 @@ describe("stripDocs", () => {
     expect(single.body?.docs).toBeUndefined();
   });
 
+  it("removes custom scalar docs when features.docs resolves false globally or via a namespace @meta", async () => {
+    const { program } = await MetaTester.compile(`
+      @service namespace S {
+        @meta("kotlin", #{ features: #{ docs: false } })
+        namespace Quiet {
+          /** hidden id */
+          scalar HiddenId extends string;
+          model M { id: HiddenId }
+        }
+        /** shown id */
+        scalar ShownId extends string;
+        model N { a: ShownId; b: ShownId }
+      }
+    `);
+    const byName = (ir: ApiIR, name: string) => {
+      const found = ir.customScalars.find((s) => s.name === name);
+      if (!found) throw new Error(`scalar ${name} not found among ${ir.customScalars.map((s) => s.name).join(", ")}`);
+      return found;
+    };
+
+    const ir = buildApiIR(program);
+    stripDocs(ir, features(), "kotlin");
+    // Off via the enclosing namespace's @meta; the sibling scalar outside Quiet keeps its docs.
+    expect(byName(ir, "HiddenId").docs).toBeUndefined();
+    expect(byName(ir, "ShownId").docs).toBe("shown id");
+    // Every ref to the same scalar shares the one (mutated) CustomScalarIR object.
+    const n = find(ir, "S.N");
+    if (n.kind !== "model") throw new Error("expected model");
+    const [a, b] = n.properties.map((p) => p.type);
+    if (a.kind !== "scalar" || b.kind !== "scalar") throw new Error("expected scalar refs");
+    expect(a.custom?.docs).toBe("shown id");
+    expect(b.custom).toBe(a.custom);
+
+    const globallyOff = buildApiIR(program);
+    stripDocs(globallyOff, features({ docs: false }), "kotlin");
+    expect(byName(globallyOff, "ShownId").docs).toBeUndefined();
+    expect(byName(globallyOff, "HiddenId").docs).toBeUndefined();
+  });
+
   it("known limitation: an owning operation's docs:false does not reach an anonymous inline body model", async () => {
     // See stripDocs' JSDoc: an anonymous ($anon.*) inline model is not associated with the declaration that owns
     // it, so only a namespace-level @meta (not one set directly on the operation) can turn its docs off.

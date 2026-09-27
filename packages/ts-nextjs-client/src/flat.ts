@@ -87,7 +87,9 @@ export interface FlatMethod {
   /** zod `.parse(…)` statements run before the request (validate option). */
   checks: string[];
   /** A server-sent event stream: an async generator method. */
-  stream?: { element: string; events: string };
+  stream?: { element: string; events: string; /** Schema decoding each event. */ decode?: string };
+  /** Schema decoding the JSON result (it contains a codec): `return <decode>.parse(await this.send(…))`. */
+  decode?: string;
   docs?: string;
   deprecated?: string;
 }
@@ -100,6 +102,8 @@ export interface FlatErrorClass {
   required: string[];
   /** Expression passed to super(). */
   message: string;
+  /** Schema decoding the error model (it contains a codec). */
+  decode?: string;
 }
 
 function unsupported(op: TsOperation, auth: boolean): string | undefined {
@@ -115,16 +119,16 @@ function unsupported(op: TsOperation, auth: boolean): string | undefined {
 
 /**
  * Local names of a method's path parameters and body. A reserved word (`class`, `default`, …; also `arguments` and
- * `eval`, invalid as strict-mode parameters) and, with validate — method bodies reference the zod import `z` — a
- * parameter named `z` are renamed `<name>Value` (`<name>Value2`, … avoiding the method's other names). Parameters
- * are positional, so callers are unaffected; `<Op>Vars` keeps the public names.
+ * `eval`, invalid as strict-mode parameters) and, when method bodies reference the zod import `z` (validate or
+ * dates) — a parameter named `z` are renamed `<name>Value` (`<name>Value2`, … avoiding the method's other names).
+ * Parameters are positional, so callers are unaffected; `<Op>Vars` keeps the public names.
  */
-function localNames(op: TsOperation, validate: boolean): { path: TsParam[]; body: string | undefined } {
+function localNames(op: TsOperation, usesZ: boolean): { path: TsParam[]; body: string | undefined } {
   const path = op.params.filter((p) => p.location === "path");
   const names = [...path.map((p) => p.name), ...(op.body ? [op.body.name] : [])];
   const renamed = [...names];
   names.forEach((n, i) => {
-    if (!RESERVED_WORDS.has(n) && n !== "arguments" && n !== "eval" && !(validate && n === "z")) return;
+    if (!RESERVED_WORDS.has(n) && n !== "arguments" && n !== "eval" && !(usesZ && n === "z")) return;
     let replacement = `${n}Value`;
     for (let k = 2; renamed.includes(replacement) || names.includes(replacement); k++) replacement = `${n}Value${k}`;
     renamed[i] = replacement;
@@ -135,8 +139,8 @@ function localNames(op: TsOperation, validate: boolean): { path: TsParam[]; body
   };
 }
 
-function method(op: TsOperation, validate: boolean, auth: string | undefined): FlatMethod {
-  const { path, body: bodyName } = localNames(op, validate);
+function method(op: TsOperation, validate: boolean, usesZ: boolean, auth: string | undefined): FlatMethod {
+  const { path, body: bodyName } = localNames(op, usesZ);
   const query = op.params.filter((p) => p.location === "query");
   const params = path.map((p) => `${p.name}: ${p.type.text}`);
   const queryRequired = query.some((p) => !p.optional);
@@ -159,7 +163,8 @@ function method(op: TsOperation, validate: boolean, auth: string | undefined): F
   const queryCall = exploded.length > 0 ? `toQuery(${queryName}, [${exploded.join(", ")}])` : `toQuery(${queryName})`;
   const url = op.path.replace(/\{([^}]+)\}/g, (match, wire: string) => {
     const p = path.find((x) => x.wireName === wire);
-    return p ? `\${encodeURIComponent(String(${p.name}))}` : match;
+    if (!p) return match;
+    return `\${encodeURIComponent(${p.type.date ? `${p.name}.toISOString()` : `String(${p.name})`})}`;
   });
   const dynamic = url !== op.path || query.length > 0;
   const urlExpr = dynamic ? `\`${url}${query.length > 0 ? `\${${queryCall}}` : ""}\`` : JSON.stringify(op.path);
@@ -167,13 +172,18 @@ function method(op: TsOperation, validate: boolean, auth: string | undefined): F
   if (validate) {
     for (const p of path.filter((x) => x.constrained)) checks.push(`${p.type.schema}.parse(${p.name});`);
     if (op.body) {
-      // undefined-valued keys are dropped first, as JSON.stringify drops them from what is sent
-      const parse = `${op.body.type.schema}.parse(withoutUndefined(${bodyName}));`;
-      checks.push(op.body.optional ? `if (${bodyName} !== undefined) ${parse}` : parse);
+      // undefined-valued keys are dropped first, as JSON.stringify drops them from what is sent; codec schemas
+      // (Dates) are checked by encoding, since parsing expects wire strings
+      const input = `withoutUndefined(${bodyName})`;
+      const check = op.body.type.codec
+        ? `z.encode(${op.body.type.schema}, ${input} as ${op.body.type.text});`
+        : `${op.body.type.schema}.parse(${input});`;
+      checks.push(op.body.optional ? `if (${bodyName} !== undefined) ${check}` : check);
     }
     if (query.length > 0) {
       const fields = query.map((p) => `${propertyKey(p.wireName)}: ${p.type.schema}${p.optional ? ".optional()" : ""}`);
-      checks.push(`z.object({ ${fields.join(", ")} }).parse(${queryName});`);
+      const object = `z.object({ ${fields.join(", ")} })`;
+      checks.push(query.some((p) => p.type.codec) ? `z.encode(${object}, ${queryName});` : `${object}.parse(${queryName});`);
     }
   }
   // A stream asks for text/event-stream: request() takes the accept header next to the caller's signal.
@@ -184,6 +194,7 @@ function method(op: TsOperation, validate: boolean, auth: string | undefined): F
     stream ? `{ accept: "text/event-stream", signal: ${initName}?.signal }` : initName,
     ...(auth ? [auth] : []),
   ];
+  const decode = !stream && op.result.type.codec ? op.result.type.schema : undefined;
   return {
     name: op.name,
     params: params.join(", "),
@@ -191,7 +202,16 @@ function method(op: TsOperation, validate: boolean, auth: string | undefined): F
     void: op.result.type.text === "void",
     args: args.join(", "),
     checks,
-    ...(stream ? { stream: { element: stream.type.text, events: nextjsHelpers.eventsExpr(op) } } : {}),
+    ...(decode ? { decode } : {}),
+    ...(stream
+      ? {
+          stream: {
+            element: stream.type.text,
+            events: nextjsHelpers.eventsExpr(op),
+            ...(stream.type.codec ? { decode: stream.type.schema } : {}),
+          },
+        }
+      : {}),
     ...(op.docs ? { docs: op.docs } : {}),
     ...(op.deprecated ? { deprecated: op.deprecated } : {}),
   };
@@ -235,6 +255,7 @@ function errorClass(name: string, model: TsInterface | undefined): FlatErrorClas
       .map((p) => ({ key: p.key, type: p.type.text })),
     required: model.properties.filter((p) => !p.optional).map((p) => p.wireName),
     message: message ? "body?.message ?? `Request failed with status ${status}`" : "`Request failed with status ${status}`",
+    ...(model.properties.some((p) => p.type.codec) ? { decode: `${model.name}Schema` } : {}),
   };
 }
 
@@ -260,6 +281,9 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const validate = options.features.validate && ir.zod;
+  // Dates decode through zod codecs: results, events and error bodies reference `z` and the schemas.
+  const dates = ir.dateType === "date";
+  const usesZ = validate || dates;
 
   let model: TsInterface | undefined;
   if (options["error-model"]) {
@@ -286,12 +310,15 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
     ...rqNames.filter((n) => n.exported).map((n) => n.name),
   ]);
   // With validate, client.ts imports zod's `z`, which a generated type named z would clash with. The React Query
-  // files import TanStack Query and React names and declare a module-local context per service.
+  // files import TanStack Query and React names and declare a module-local context per service. `Date` is not
+  // reserved: dateUse's text is `globalThis.Date`, so a generated type named `Date` cannot shadow it (see
+  // type-map.ts), and `toText`'s own `instanceof Date` is a value reference a type-only import can't shadow.
   const internal = new Set([
     ...TEMPLATE_GLOBALS,
     ...(usesUploads ? UPLOAD_GLOBALS : []),
     ...(usesStreams ? STREAM_GLOBALS : []),
-    ...(validate ? ["z"] : []),
+    ...(usesZ ? ["z"] : []),
+    ...(dates ? ["toText"] : []),
     ...(auths.size > 0 ? AUTH_LOCALS : []),
     // Key paths (`shopKeys.nodes.all`) are not identifiers; they only matter for the duplicate check below.
     ...(reactQuery ? [...REACT_QUERY_INTERNALS, ...rqNames.filter((n) => !n.exported && !n.name.includes(".")).map((n) => n.name)] : []),
@@ -323,7 +350,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
           ...(op.body?.type.imports ?? []),
           ...op.result.type.imports,
         );
-        const m = method(op, validate, auth?.descriptor(op));
+        const m = method(op, validate, usesZ, auth?.descriptor(op));
         if (m.checks.length > 0) {
           imports.push(
             Z,
@@ -331,6 +358,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
             ...(op.body?.type.schemaImports ?? []),
           );
         }
+        if (m.decode || m.stream?.decode) imports.push(Z, ...op.result.type.schemaImports);
         methods.push(m);
       }
       groups.push({ title: group.name, methods });
@@ -355,6 +383,9 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   }
   if (model) {
     imports.push({ name: model.name, from: model.file, typeOnly: true, root: "models" }, ...model.properties.flatMap((p) => p.type.imports));
+    if (model.properties.some((p) => p.type.codec)) {
+      imports.push({ name: `${model.name}Schema`, from: model.file, typeOnly: false, root: "models" });
+    }
   }
   const ops = services.flatMap((s) => s.groups.flatMap((g) => g.operations));
   const queryParams = ops.flatMap((op) => op.params.filter((p) => p.location === "query"));
@@ -384,6 +415,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         usesArrays: queryParams.some(isArray),
         /** Body checks validate a copy without undefined-valued keys. */
         usesWithoutUndefined: validate && ops.some((op) => op.body !== undefined),
+        usesDates: dates,
       },
     },
     {

@@ -58,3 +58,18 @@ export const VersionedTester = createTester(resolvePath(import.meta.dirname, "..
 export function versionedNextjs(targetOptions: Record<string, unknown> = {}, emitterOptions: Record<string, unknown> = {}) {
   return VersionedTester.emit("@abhigyakrishna/tspgen-typescript", { targets: [{ [TARGET]: targetOptions }], ...emitterOptions });
 }
+
+/** A service using utcDateTime in bodies, query/path/header parameters, response headers and an error body. */
+export const meetingSpec = `
+  @service namespace Shop;
+  model Meeting { title: string; at: utcDateTime; reminders?: utcDateTime[] }
+  @error model Problem { @statusCode _: 409; at: utcDateTime; message: string }
+  @route("/meetings") interface Meetings {
+    @get list(@query after?: utcDateTime, @query days?: utcDateTime[]): Meeting[];
+    @post create(@body meeting: Meeting): Meeting | Problem;
+    @get @route("/{day}") byDay(@path day: utcDateTime, @header("x-since") since?: utcDateTime): {
+      @header("last-modified") modified: utcDateTime;
+      @body meetings: Meeting[];
+    };
+  }
+`;

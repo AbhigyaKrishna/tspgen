@@ -35,5 +35,5 @@ export function buildApiIR(program: Program, options: BuildOptions = {}): ApiIR 
   const collector = new TypeCollector(program, { generics: options.generics ?? true, sse: options.sse });
   const resolved = options.services ?? resolveServices(program, options.versioning, options.version).services;
   const services = buildServices(program, collector, resolved, options.sse);
-  return { services, types: collector.getTypes() };
+  return { services, types: collector.getTypes(), customScalars: collector.getCustomScalars() };
 }

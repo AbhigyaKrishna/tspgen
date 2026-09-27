@@ -8,7 +8,8 @@ export type TypeRef =
   | { kind: "typeParam"; name: string }
   | { kind: "array"; of: TypeRef }
   | { kind: "map"; of: TypeRef }
-  | { kind: "scalar"; name: string; custom?: CustomScalarIR }
+  /** `encoding: "string"`: `@encode(string)` on an integer or decimal (property or scalar): a JSON string on the wire. */
+  | { kind: "scalar"; name: string; custom?: CustomScalarIR; encoding?: "string" }
   | { kind: "literal"; value: string | number | boolean }
   | { kind: "nullable"; of: TypeRef }
   /** `Http.File` or a model extending it: each language maps it to its built-in file type. */
@@ -16,10 +17,27 @@ export type TypeRef =
   | { kind: "unknown" };
 
 /** A user-declared scalar; `name` on the TypeRef is its TypeSpec std root. */
-export interface CustomScalarIR {
+export interface CustomScalarIR extends DocInfo {
   id: string;
   name: string;
+  /** TypeSpec namespace of the scalar. */
+  namespace: string[];
+  /** The std scalar this scalar ultimately extends (same as `TypeRef.name` on a ref to it). */
+  root: string;
+  /**
+   * `@encode(string)` nearest along this scalar's own chain (itself, else its base scalars up to `root`); absent
+   * without one. Independent of any `@encode` a property applies to a use of this scalar (see `TypeRef.encoding`).
+   */
+  encoding?: "string";
+  /** Constraint decorators on the scalar itself; absent when none. */
+  constraints?: ConstraintsIR;
   decorators: DecoratorData;
+  /**
+   * Decorators of the enclosing namespaces, outermost first; present only when one of them has non-TypeSpec
+   * decorators. Used for `@meta` feature overrides (`features`, e.g. `docs`), which namespaces pass on to the
+   * scalars they enclose — same as `NamedTypeBase.namespaceDecorators` for models, enums and unions.
+   */
+  namespaceDecorators?: DecoratorData[];
 }
 
 /** TypeSpec constraint decorators on a property (or its scalar type). */
@@ -134,6 +152,13 @@ export type TypeIR = ModelIR | EnumIR | UnionIR;
 export interface ApiIR {
   services: ServiceIR[];
   types: TypeIR[];
+  /**
+   * Every distinct user-declared scalar referenced (as `TypeRef.custom`) anywhere in `services`/`types`, one entry
+   * per TypeSpec `Scalar` (see `TypeCollector.getCustomScalars`): every `TypeRef.custom` pointing at the same
+   * scalar is the very same object, so mutating an entry here (e.g. `stripDocs` deleting `docs`) is visible through
+   * every reference.
+   */
+  customScalars: CustomScalarIR[];
 }
 
 export interface ServiceIR extends DocInfo {

@@ -29,7 +29,11 @@ export interface ClientConfig {
    */
   auth?: Auth;
 <% } -%>
+<% if (it.dates) { -%>
+  /** Validate response bodies with the generated zod schemas when available (default true); schemas decoding dates always run. */
+<% } else { -%>
   /** Validate response bodies with the generated zod schemas when available (default true). */
+<% } -%>
   validate?: boolean;
 }
 
@@ -41,7 +45,7 @@ export interface RequestOptions {
   headers?: HeadersInit;
 }
 
-type Scalar = string | number | boolean | null | undefined;
+type Scalar = string | number | boolean<%= it.dates ? " | Date" : "" %> | null | undefined;
 
 export type ParamValue = Scalar | readonly Scalar[];
 <% if (it.uploads) { -%>
@@ -89,9 +93,16 @@ export interface Schema<T> {
 
 export type ErrorFactory = (status: number, body: unknown) => Error;
 
+<% if (it.dates) { -%>
+/** A parameter value as sent: dates as ISO-8601 strings. */
+function toText(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+<% } -%>
 function encode(value: ParamValue): string | undefined {
   if (value === undefined || value === null) return undefined;
-  return Array.isArray(value) ? value.map(String).join(",") : String(value);
+  return Array.isArray(value) ? value.map(<%= it.dates ? "toText" : "String" %>).join(",") : <%= it.dates ? "toText" : "String" %>(value);
 }
 <% if (it.uploads) { -%>
 
@@ -114,7 +125,7 @@ export function toFormData(value: object, parts: readonly PartSpec[]): FormData 
       } else if (part.kind === "json") {
         form.append(part.name, new Blob([JSON.stringify(item)], { type: part.contentType ?? "application/json" }));
       } else {
-        form.append(part.name, String(item));
+        form.append(part.name, <%= it.dates ? "toText" : "String" %>(item));
       }
     }
   }
@@ -136,7 +147,7 @@ export async function request(config: ClientConfig, spec: RequestSpec, options: 
   const url = resolveUrl(config.baseUrl, spec.path);
   for (const [name, value, explode] of spec.query ?? []) {
     if (Array.isArray(value) && explode) {
-      for (const item of value) url.searchParams.append(name, String(item));
+      for (const item of value) url.searchParams.append(name, <%= it.dates ? "toText" : "String" %>(item));
       continue;
     }
     const encoded = encode(value);
@@ -201,10 +212,18 @@ export async function readBody(res: Response): Promise<unknown> {
   return (res.headers.get("content-type") ?? "").includes("json") ? JSON.parse(raw) : raw;
 }
 
+<% if (it.dates) { -%>
+/** `codec`: the schema decodes values (dates), so it runs even with `validate: false`. */
+export async function parse<T>(config: ClientConfig, res: Response, schema?: Schema<T>, codec = false): Promise<T> {
+  const body = await readBody(res);
+  return schema && (codec || config.validate !== false) ? schema.parse(body) : (body as T);
+}
+<% } else { -%>
 export async function parse<T>(config: ClientConfig, res: Response, schema?: Schema<T>): Promise<T> {
   const body = await readBody(res);
   return schema && config.validate !== false ? schema.parse(body) : (body as T);
 }
+<% } -%>
 
 /** Maps an error response to an error instance by exact status, status class ("4XX") or default. */
 export async function toError(res: Response, factories: Record<string, ErrorFactory>): Promise<Error> {
@@ -242,11 +261,20 @@ export async function* streamEvents<T>(
   res: Response,
   specs: readonly EventSpec[] | undefined,
   schema?: Schema<T>,
+<% if (it.dates) { -%>
+  codec = false,
+): AsyncGenerator<T, void, undefined> {
+  for await (const value of decodeEvents(res.body, specs)) {
+    yield schema && (codec || config.validate !== false) ? schema.parse(value) : (value as T);
+  }
+}
+<% } else { -%>
 ): AsyncGenerator<T, void, undefined> {
   for await (const value of decodeEvents(res.body, specs)) {
     yield schema && config.validate !== false ? schema.parse(value) : (value as T);
   }
 }
+<% } -%>
 <% } -%>
 <% if (it.withoutUndefined) { -%>
 

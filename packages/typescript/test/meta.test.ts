@@ -8,7 +8,7 @@ const spec = `
   using TspGen;
   @service namespace S;
   model Owner { name: string }
-  @meta("typescript", #{ readonly: true, supertypes: #[#{ name: "Owner", from: "./Owner" }], jsdoc: #["@public"] })
+  @meta("typescript", #{ features: #{ readonly: true }, supertypes: #[#{ name: "Owner", from: "./Owner" }], jsdoc: #["@public"] })
   model Pet {
     id: int64;
     @meta("typescript", #{ readonly: false, jsdoc: #["@internal"] }) note?: string;

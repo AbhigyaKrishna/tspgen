@@ -4,7 +4,13 @@
 
 <% } -%>
 <%~ it.h.jsdoc(op.docs) %>export async function <%= n.names.action(g, op) %>(<%= has ? "params: " + params : "" %>): Promise<ActionResult<<%= op.result.type.text %>>> {
-<% if (has && it.zod) { -%>
+<% if (has && it.zod && n.paramsCodec(op)) { -%>
+  // Dates: check by encoding (parsing expects wire strings), then decode the checked (and key-stripped) wire
+  // shape back so the client gets Date values with no extra keys, consistent with the non-codec branch below.
+  const checked = <%= params %>Schema.safeEncode(withoutUndefined(params) as <%= params %>);
+  if (!checked.success) return { ok: false, status: 400, error: { issues: checked.error.issues } };
+  return runAction(() => <%= server %>().<%= prop %>.<%= op.name %>(<%= params %>Schema.parse(checked.data)));
+<% } else if (has && it.zod) { -%>
   const parsed = <%= params %>Schema.safeParse(withoutUndefined(params));
   if (!parsed.success) return { ok: false, status: 400, error: { issues: parsed.error.issues } };
   return runAction(() => <%= server %>().<%= prop %>.<%= op.name %>(parsed.data));

@@ -169,8 +169,8 @@ fun StatusPagesConfig.petStoreErrors() {
     expect(clash).toContain(`{ java.time.Duration.parse(it) }`);
     expect(clash).not.toContain("import java.time.Duration");
     const module = (await server().compile(spec)).outputs[`${DIR}/SModule.kt`];
-    expect(module).toContain("json(Json { serializersModule = javaTimeSerializersModule })");
-    expect(module).toContain("import com.acme.models.javaTimeSerializersModule\n");
+    expect(module).toContain("json(Json { serializersModule = modelSerializersModule })");
+    expect(module).toContain("import com.acme.models.modelSerializersModule\n");
     const kotlin = (await server({}, { "date-time": "kotlin.time" }).compile(spec)).outputs[`${DIR}/SRoutes.kt`];
     expect(kotlin).toContain(`{ decodeParam<LocalDate>(it) }`);
     expect(kotlin).toContain(`call.response.header("x-next", encodeParam(result.next))`);

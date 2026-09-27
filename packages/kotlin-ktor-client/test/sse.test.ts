@@ -123,7 +123,7 @@ class FeedClient(
     expect(support).toContain(
       "internal fun ChannelEvents.sseTerminal(): Boolean = this is ChannelEvents.Done || this is ChannelEvents.Bye\n",
     );
-    expect(support).toContain("private val defaultSseJson: Json = Json { serializersModule = javaTimeSerializersModule }\n");
+    expect(support).toContain("private val defaultSseJson: Json = Json { serializersModule = modelSerializersModule }\n");
     expect(support).toContain(`internal fun sseJsonPlugin(format: Json): ClientPlugin<Unit> =
     createClientPlugin("TspgenSseJson") { client.attributes.put(sseJsonKey, format) }`);
     expect(support).toContain("internal suspend fun ByteReadChannel.readSse(onEvent: suspend (TspgenSseEvent) -> Boolean) {");

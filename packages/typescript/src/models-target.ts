@@ -64,6 +64,7 @@ export const tsModelsTarget: Target<TsIR> = {
             sections: sections(ir.declarations),
             constants: ir.apiVersions,
             zod: ir.zod,
+            codecs: ir.codecsFile === "types",
           },
         });
       }
@@ -78,6 +79,13 @@ export const tsModelsTarget: Target<TsIR> = {
             decl,
             zod: ir.zod,
           },
+        });
+      }
+      if (ir.codecsFile === "models/codecs") {
+        files.push({
+          path: "models/codecs.ts",
+          template: "ts/file",
+          data: { imports: renderImports("models/codecs", [Z], ext), body: "ts/codecs" },
         });
       }
       if (!ir.barrel) {
