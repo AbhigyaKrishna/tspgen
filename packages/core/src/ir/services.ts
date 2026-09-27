@@ -11,8 +11,8 @@ import {
   type Type,
 } from "@typespec/compiler";
 import {
-  getAllHttpServices,
   getAuthentication,
+  getHttpService,
   getServers,
   type Authentication,
   type HttpAuth,
@@ -26,6 +26,7 @@ import { pascal } from "../naming.js";
 import { collectDecorators } from "./decorators.js";
 import { docInfo } from "./docs.js";
 import { hasParts, isBytes, splitNamespace, type TypeCollector } from "./type-collector.js";
+import type { ResolvedService } from "./versioning.js";
 import type {
   AuthIR,
   AuthRequirementIR,
@@ -42,11 +43,19 @@ import type {
 
 type BuiltOperation = [HttpOperation, OperationIR];
 
-export function buildServices(program: Program, collector: TypeCollector): ServiceIR[] {
-  const [services, diagnostics] = getAllHttpServices(program);
-  program.reportDiagnostics(diagnostics);
+export function buildServices(program: Program, collector: TypeCollector, services: ResolvedService[]): ServiceIR[] {
+  const httpServices = services.map((resolved) => {
+    const [service, diagnostics] = getHttpService(program, resolved.namespace);
+    program.reportDiagnostics(diagnostics);
+    return service;
+  });
   const built: BuiltOperation[] = [];
-  const result = services.map((s) => buildService(program, collector, s, built));
+  const result = httpServices.map((service, i) => {
+    collector.enterService(services[i]);
+    const ir = buildService(program, collector, service, built, services[i].version);
+    collector.enterService(undefined);
+    return ir;
+  });
   checkJsonUses(program, collector, built);
   return result;
 }
@@ -57,7 +66,13 @@ function partsBase(program: Program, model: Model): Model | undefined {
   return undefined;
 }
 
-function buildService(program: Program, collector: TypeCollector, service: HttpService, built: BuiltOperation[]): ServiceIR {
+function buildService(
+  program: Program,
+  collector: TypeCollector,
+  service: HttpService,
+  built: BuiltOperation[],
+  version: ServiceIR["version"],
+): ServiceIR {
   const ns = service.namespace;
   collector.collectNamespace(ns);
   const groups = new Map<string, OperationGroupIR>();
@@ -122,6 +137,7 @@ function buildService(program: Program, collector: TypeCollector, service: HttpS
       parameters: [...s.parameters.keys()],
     })),
     auth: schemes.all(),
+    ...(version ? { version } : {}),
     groups: [...groups.values()],
   };
 }

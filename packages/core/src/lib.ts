@@ -34,6 +34,24 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Multipart model '${"model"}' is also used as JSON (${"where"}); it is generated for multipart only and can't be serialized as JSON.`,
       },
     },
+    "unknown-version": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Version '${"version"}' is not a version of service '${"service"}'; valid versions: ${"versions"}. Nothing is generated.`,
+      },
+    },
+    "unused-version": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Option 'version' is '${"version"}' but no service is versioned (@versioned); it is ignored.`,
+      },
+    },
+    "version-conflict": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Type '${"id"}' is used by several services at different versions; the first one is generated.`,
+      },
+    },
     "template-error": {
       severity: "error",
       messages: {

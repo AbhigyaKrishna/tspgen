@@ -37,16 +37,21 @@
   "peerDependencies": {
     "@typespec/compiler": "^1.16.0",
     "@typespec/http": "^1.16.0",
-    "zod": ">=4.3.0"
+    "zod": ">=4.3.0",
+    "@typespec/versioning": ">=0.86.0 <1.0.0"
   },
   "peerDependenciesMeta": {
     "zod": {
+      "optional": true
+    },
+    "@typespec/versioning": {
       "optional": true
     }
   },
   "devDependencies": {
     "@typespec/compiler": "1.16.0",
     "@typespec/http": "1.16.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "@typespec/versioning": "0.86.0"
   }
 }

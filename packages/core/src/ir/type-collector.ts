@@ -35,6 +35,7 @@ import { pascal } from "../naming.js";
 import { collectDecorators } from "./decorators.js";
 import { docInfo } from "./docs.js";
 import type { ConstraintsIR, EnumIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
+import type { ResolvedService } from "./versioning.js";
 
 const UNKNOWN: TypeRef = { kind: "unknown" };
 const FILE: TypeRef = { kind: "file" };
@@ -45,6 +46,14 @@ export class TypeCollector {
   private readonly ids = new Map<Type, string>();
   /** Template declarations checked by `declarationGeneric` (true while being checked, for recursion). */
   private readonly genericDeclarations = new Map<Model, boolean>();
+  /** Ids already reported by `version-conflict`. */
+  private readonly conflicts = new Set<string>();
+  /** The service being built, when its namespace is a mutated (versioned) clone. */
+  private service?: {
+    /** Template declarations of the mutated namespace by node: instances point at the original declaration. */
+    declarations: Map<unknown, Model>;
+    versionEnum?: unknown;
+  };
 
   constructor(
     private readonly program: Program,
@@ -59,6 +68,28 @@ export class TypeCollector {
 
   getTypes(): TypeIR[] {
     return [...this.types.values()].sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  /**
+   * Set the service whose types are collected next. Types of a mutated (versioned) namespace are clones:
+   * template instances are matched with the cloned declarations, and the version enum is not collected.
+   */
+  enterService(service: ResolvedService | undefined): void {
+    if (!service?.mutated) {
+      this.service = undefined;
+      return;
+    }
+    const declarations = new Map<unknown, Model>();
+    navigateTypesInNamespace(
+      service.namespace,
+      {
+        model: (m) => {
+          if (m.node && isTemplateDeclaration(m)) declarations.set(m.node, m);
+        },
+      },
+      { includeTemplateDeclaration: true },
+    );
+    this.service = { declarations, versionEnum: service.versionEnum?.node };
   }
 
   /** Collect every declared model/enum/union in a namespace (recursively), even if unreferenced. */
@@ -79,7 +110,7 @@ export class TypeCollector {
         }
       },
       enum: (e) => {
-        this.collectEnum(e);
+        if (!e.node || e.node !== this.service?.versionEnum) this.collectEnum(e);
       },
       union: (u) => {
         if (u.name && !isTemplateDeclaration(u)) this.unionRef(u, u.name);
@@ -183,7 +214,8 @@ export class TypeCollector {
   private genericTemplate(instance: Model): { declaration: Model; args: Type[] } | undefined {
     const args = instance.templateMapper?.args ?? [];
     if (args.length === 0 || !instance.templateNode) return undefined;
-    const declaration = this.program.checker.getTypeForNode(instance.templateNode);
+    const declaration =
+      this.service?.declarations.get(instance.templateNode) ?? this.program.checker.getTypeForNode(instance.templateNode);
     if (declaration.kind !== "Model" || !isTemplateDeclaration(declaration)) return undefined;
     const types = args.filter(
       (arg): arg is Type =>
@@ -292,6 +324,22 @@ export class TypeCollector {
     return scalar.namespace !== undefined && getNamespaceFullName(scalar.namespace) === "TypeSpec";
   }
 
+  /**
+   * Whether another type was already collected under `id`: a type outside a versioned service's namespace is
+   * cloned with it, and services at different versions (a `@useDependency` service and the versioned one)
+   * see different clones of the same declaration. The first one is kept.
+   */
+  private collected(type: Model | Union | Enum, id: string): boolean {
+    if (!this.types.has(id)) return false;
+    const first = this.sourceOf(id);
+    this.ids.set(type, id);
+    if (first && shape(first) !== shape(type) && !this.conflicts.has(id)) {
+      this.conflicts.add(id);
+      reportDiagnostic(this.program, { code: "version-conflict", format: { id }, target: type });
+    }
+    return true;
+  }
+
   private identify(type: Model | Union | Enum, hint: string): { id: string; name: string; namespace: string[] } {
     if (type.name) {
       const friendly = getFriendlyName(this.program, type);
@@ -310,6 +358,7 @@ export class TypeCollector {
     const existing = this.ids.get(model);
     if (existing) return existing;
     const { id, name, namespace } = this.identify(model, hint);
+    if (this.collected(model, id)) return id;
     this.ids.set(model, id);
     const ir: ModelIR = {
       kind: "model",
@@ -404,6 +453,7 @@ export class TypeCollector {
     const existing = this.ids.get(e);
     if (existing) return existing;
     const { id, name, namespace } = this.identify(e, e.name);
+    if (this.collected(e, id)) return id;
     this.ids.set(e, id);
     const ir: EnumIR = {
       kind: "enum",
@@ -437,6 +487,7 @@ export class TypeCollector {
     const existing = this.ids.get(union);
     if (existing) return existing;
     const { id, name, namespace } = this.identify(union, hint);
+    if (this.collected(union, id)) return id;
     this.ids.set(union, id);
     const ir: UnionIR = {
       kind: "union",
@@ -469,6 +520,20 @@ export class TypeCollector {
       };
     }
     return id;
+  }
+}
+
+/** What distinguishes versions of a declaration: its properties, members or variants. */
+function shape(type: Type): string {
+  switch (type.kind) {
+    case "Model":
+      return [...type.properties.values()].map((p) => `${p.name}${p.optional ? "?" : ""}:${getTypeName(p.type)}`).join(",");
+    case "Enum":
+      return [...type.members.values()].map((m) => `${m.name}=${m.value ?? ""}`).join(",");
+    case "Union":
+      return [...type.variants.values()].map((v) => `${String(v.name)}:${getTypeName(v.type)}`).join(",");
+    default:
+      return "";
   }
 }
 

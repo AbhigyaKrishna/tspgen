@@ -3,6 +3,7 @@ export interface CoreEmitterOptions {
   plugins?: string[];
   "models-output-dir"?: string;
   generics?: boolean;
+  version?: string;
 }
 
 /** JSON-schema property fragments every language emitter should include in its options schema. */
@@ -30,5 +31,11 @@ export const coreEmitterOptionsSchemaProperties = {
     nullable: true,
     description:
       "Emit template models once as generic types (Page<T>) instead of one model per instance (default true).",
+  },
+  version: {
+    type: "string",
+    nullable: true,
+    description:
+      "Version of @versioned services to generate: a version enum member's name or value (default: the latest).",
   },
 } as const;

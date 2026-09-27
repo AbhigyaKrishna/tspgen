@@ -272,6 +272,9 @@ importers:
       '@typespec/http':
         specifier: 1.16.0
         version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+      '@typespec/versioning':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
 
   packages/kotlin:
     dependencies:
@@ -285,6 +288,9 @@ importers:
       '@typespec/http':
         specifier: 1.16.0
         version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+      '@typespec/versioning':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
 
   packages/kotlin-ktor-client:
     dependencies:
@@ -358,6 +364,9 @@ importers:
       '@typespec/http':
         specifier: 1.16.0
         version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+      '@typespec/versioning':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -1002,6 +1011,12 @@ packages:
     peerDependenciesMeta:
       '@typespec/streams':
         optional: true
+
+  '@typespec/versioning@0.86.0':
+    resolution: {integrity: sha512-/VUgQXSNcwbhNllTKptGAcoxYCh3+E/a9RUcmlBj7v04yIN4rkSFFmxHKRWKuKaz9LYQerXSPrVNM6Ja1msFlw==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@typespec/compiler': ^1.16.0
 
   '@vitest/mocker@5.0.1':
     resolution: {integrity: sha512-6K1DoBNAPGvuOcSsGA4D6x+5zEEff/KmOOP3uetT2TrGpVfI+HRHRnJJfKi5ib/g1vx8IYHQD8s0pbJz8WQI7Q==}
@@ -1984,6 +1999,10 @@ snapshots:
       - '@types/node'
 
   '@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))':
+    dependencies:
+      '@typespec/compiler': 1.16.0(@types/node@24.13.6)
+
+  '@typespec/versioning@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))':
     dependencies:
       '@typespec/compiler': 1.16.0(@types/node@24.13.6)
 

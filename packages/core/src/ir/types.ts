@@ -110,6 +110,8 @@ export interface ServiceIR extends DocInfo {
   namespace: string[];
   servers: ServerIR[];
   auth: AuthIR[];
+  /** The version generated, for a `@versioned` service (the `version` option, or its latest version). */
+  version?: { name: string; value: string };
   groups: OperationGroupIR[];
 }
 

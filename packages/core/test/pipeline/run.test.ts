@@ -12,6 +12,7 @@ import {
   type ModelIR,
   type Target,
 } from "../../src/index.js";
+import { createTester } from "@typespec/compiler/testing";
 import { Tester } from "../tester.js";
 
 function dirWith(files: Record<string, string>): string {
@@ -44,6 +45,61 @@ const target: Target<FakeIR> = {
 const spec = `@service namespace S; model Pet { id: int64 } model Owner { id: int64 }`;
 
 describe("runPipeline", () => {
+  it("builds the version of the version option; plugins see its IR", async () => {
+    const VersionedTester = createTester(resolvePath(import.meta.dirname, "../.."), {
+      libraries: ["@typespec/http", "@typespec/versioning"],
+    })
+      .importLibraries()
+      .using("Http", "Versioning");
+    const { program } = await VersionedTester.compile(`
+      @service @versioned(V) namespace S;
+      enum V { v1, v2 }
+      model Pet { id: int64; @added(V.v2) age?: int32 }
+      @added(V.v2) model Owner { id: int64 }
+    `);
+    const seen: string[][] = [];
+    const plugin = definePlugin<FakeIR>({
+      name: "spy",
+      transformIR(ir) {
+        seen.push(ir.models.flatMap((m) => m.properties.map((p) => `${m.id}.${p.name}`)));
+      },
+    });
+    const out = resolveVirtualPath("out");
+    await runPipeline({
+      program,
+      outputDir: out,
+      language,
+      targets: [{ target, options: {} }],
+      plugins: [plugin],
+      emitterOptions: { version: "v1" },
+    });
+    expect(program.diagnostics).toEqual([]);
+    expect(seen).toEqual([["S.Pet.id"]]);
+    await expect(program.host.readFile(resolvePath(out, "models/Owner.txt"))).rejects.toThrow();
+  });
+
+  it("writes nothing when the version is unknown (earlier output is kept)", async () => {
+    const VersionedTester = createTester(resolvePath(import.meta.dirname, "../.."), {
+      libraries: ["@typespec/http", "@typespec/versioning"],
+    })
+      .importLibraries()
+      .using("Http", "Versioning");
+    const { program } = await VersionedTester.compile(`
+      @service @versioned(V) namespace S;
+      enum V { v1, v2 }
+      model Pet { id: int64 }
+    `);
+    const out = resolveVirtualPath("out");
+    const run = (version: string) =>
+      runPipeline({ program, outputDir: out, language, targets: [{ target, options: {} }], emitterOptions: { version } });
+    await run("v1");
+    const manifest = (await program.host.readFile(resolvePath(out, ".generated-manifest.json"))).text;
+    await run("v9");
+    expectDiagnostics(program.diagnostics, { code: "@abhigyakrishna/tspgen-core/unknown-version" });
+    expect((await program.host.readFile(resolvePath(out, "models/Pet.txt"))).text).toBe("model Pet");
+    expect((await program.host.readFile(resolvePath(out, ".generated-manifest.json"))).text).toBe(manifest);
+  });
+
   it("transforms, plans, renders and writes files", async () => {
     const { program } = await Tester.compile(spec);
     const out = resolveVirtualPath("out");

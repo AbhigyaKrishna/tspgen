@@ -2,6 +2,7 @@ import { NoTarget, resolvePath, type Program } from "@typespec/compiler";
 import { relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApiIR } from "../ir/build.js";
+import { loadVersioning, resolveServices } from "../ir/versioning.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
 import { normalizeDir, writeOutputs, type OutputFile } from "../output/manifest.js";
 import type { PluginContext, TspGenPlugin } from "../plugins/plugin.js";
@@ -56,7 +57,14 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
     if (guard("plugin-failed", plugin.name, "setup", () => plugin.setup?.(ctx)) === FAILED) return;
   }
 
-  let ir = language.transform(buildApiIR(program, { generics: emitterOptions.generics !== false }), {
+  // A versioned build that cannot be resolved writes nothing: writing would clean up the previous output.
+  const loaded = await loadVersioning(program);
+  if (loaded.failed) return;
+  const version = typeof emitterOptions.version === "string" ? emitterOptions.version : undefined;
+  const resolution = resolveServices(program, loaded.versioning, version);
+  if (resolution.failed) return;
+  const api = buildApiIR(program, { generics: emitterOptions.generics !== false, services: resolution.services });
+  let ir = language.transform(api, {
     program,
     options: emitterOptions,
   });
