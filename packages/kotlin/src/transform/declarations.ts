@@ -291,17 +291,31 @@ export class DeclarationBuilder {
   private nestVariants(u: UnionIR, uses: Map<string, number>): void {
     const parent = this.decls.get(u.id);
     if (parent?.kind !== "sealed-interface") return;
-    for (const variant of u.variants) {
-      if (variant.type.kind !== "named" || uses.get(variant.type.id) !== 1) continue;
+    const candidates = u.variants.flatMap((variant) => {
+      if (variant.type.kind !== "named" || uses.get(variant.type.id) !== 1) return [];
       const decl = this.decls.get(variant.type.id);
       const source = this.types.get(variant.type.id);
-      if (decl?.kind !== "data-class" || source?.kind !== "model") continue;
-      const name = decoratorArg(source.decorators, "Kotlin.name") ?? (variant.name ? typeName(variant.name) : decl.name);
+      return decl?.kind === "data-class" && source?.kind === "model" ? [{ variant, id: variant.type.id, decl, source }] : [];
+    });
+    // Inside the interface a nested class shadows any type of the same simple name, so a nested name must
+    // not be one the interface or its variants refer to (`catalog: CatalogSource { catalog: Catalog }`),
+    // the interface's own name, or a sibling's.
+    const referenced = new Set([
+      parent.name,
+      ...[parent, ...candidates.map((c) => c.decl)].flatMap((d) => d.properties.flatMap((p) => identifiers(p.type.text))),
+    ]);
+    const taken = new Set<string>();
+    for (const { variant, id, decl, source } of candidates) {
+      const preferred = decoratorArg(source.decorators, "Kotlin.name") ?? (variant.name ? typeName(variant.name) : decl.name);
+      const name = [preferred, decl.name].find((n) => !referenced.has(n) && !taken.has(n));
+      if (!name) continue;
+      taken.add(name);
+      const nestedId = id;
       decl.name = name;
       decl.package = parent.package;
       decl.fqn = `${parent.fqn}.${name}`;
-      this.decls.delete(variant.type.id);
-      this.nested.set(variant.type.id, { parent, decl });
+      this.decls.delete(nestedId);
+      this.nested.set(nestedId, { parent, decl });
       parent.variants.push(decl);
     }
   }
@@ -526,4 +540,9 @@ function countNamedUses(api: ApiIR): Map<string, number> {
     }
   }
   return uses;
+}
+
+/** Simple identifiers in a Kotlin type expression (`Map<String, List<Pet>>` → Map, String, List, Pet). */
+function identifiers(text: string): string[] {
+  return text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
 }

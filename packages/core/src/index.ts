@@ -9,7 +9,7 @@ export { definePlugin, type PluginContext, type TspGenPlugin } from "./plugins/p
 export { loadPlugins } from "./plugins/load.js";
 export { loadModuleDefault } from "./loader.js";
 export type { FileSpec, LanguageContext, LanguageModule, Target, TargetContext } from "./targets/target.js";
-export { MANIFEST_FILE, writeOutputs, type OutputFile } from "./output/manifest.js";
+export { MANIFEST_FILE, normalizeDir, writeOutputs, type OutputFile } from "./output/manifest.js";
 export { runPipeline, type PipelineOptions, type PipelineTarget } from "./pipeline/run.js";
 export { coreEmitterOptionsSchemaProperties, type CoreEmitterOptions } from "./options.js";
 export { validateOptions } from "./options-validate.js";

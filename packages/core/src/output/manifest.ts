@@ -42,3 +42,8 @@ async function readManifest(program: Program, outputDir: string): Promise<string
 function isSafeRelative(path: string): boolean {
   return !path.startsWith("/") && !/^[A-Za-z]:/.test(path) && !path.split(/[\\/]/).includes("..");
 }
+
+/** Directory path without trailing separators (keeping a root), so equal directories compare equal. */
+export function normalizeDir(dir: string): string {
+  return dir.replace(/(?<=[^\\/:])[\\/]+$/, "");
+}

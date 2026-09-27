@@ -42,6 +42,8 @@ const UNKNOWN: TypeRef = { kind: "unknown" };
 export class TypeCollector {
   private readonly types = new Map<string, TypeIR>();
   private readonly ids = new Map<Type, string>();
+  /** Template declarations checked by `declarationGeneric` (true while being checked, for recursion). */
+  private readonly genericDeclarations = new Map<Model, boolean>();
 
   constructor(
     private readonly program: Program,
@@ -57,6 +59,8 @@ export class TypeCollector {
     navigateTypesInNamespace(ns, {
       model: (m) => {
         if (m.name && !isTemplateDeclaration(m) && !this.isCollection(m) && !this.isHttpEnvelope(m)) {
+          // Partial instances inside template declarations (`Link<T>`) are not types of their own.
+          if (this.mentionsTemplateParameter(m)) return;
           // A template instance that can be generic contributes its declaration, not a model of its own.
           if (!(this.options.generics && this.genericRef(m, m.name))) this.collectModel(m, m.name);
         }
@@ -109,7 +113,8 @@ export class TypeCollector {
     );
   }
 
-  private modelRef(model: Model, hint: string): TypeRef {
+  /** `generic: false` collects a template instance as its own model even when it could be generic. */
+  private modelRef(model: Model, hint: string, generic = true): TypeRef {
     if (isArrayModelType(model)) return { kind: "array", of: this.ref(model.indexer.value, `${hint}Item`) };
     if (isRecordModelType(model) && model.name === "Record") {
       return { kind: "map", of: this.ref(model.indexer.value, `${hint}Value`) };
@@ -122,9 +127,9 @@ export class TypeCollector {
         : { kind: "map", of: this.ref(element, `${hint}Value`) };
     }
     const source = this.spreadSource(model) ?? model;
-    if (this.options.generics) {
-      const generic = this.genericRef(source, hint);
-      if (generic) return generic;
+    if (this.options.generics && generic) {
+      const ref = this.genericRef(source, hint);
+      if (ref) return ref;
     }
     return { kind: "named", id: this.collectModel(source, hint) };
   }
@@ -137,6 +142,16 @@ export class TypeCollector {
 
   /** `Page<Pet>` → the generic `Page` (collected once) with args [Pet], when the template can be generic. */
   private genericRef(instance: Model, hint: string): TypeRef | undefined {
+    const generic = this.genericTemplate(instance);
+    if (!generic) return undefined;
+    // Decorators do not run on template declarations, so docs, encoded names and constraints come
+    // from the instance's properties.
+    const id = this.collectModel(generic.declaration, generic.declaration.name, instance);
+    return { kind: "named", id, args: generic.args.map((arg, i) => this.ref(arg, `${hint}Arg${i + 1}`)) };
+  }
+
+  /** The declaration and type arguments of an instance that can be emitted as a use of a generic model. */
+  private genericTemplate(instance: Model): { declaration: Model; args: Type[] } | undefined {
     const args = instance.templateMapper?.args ?? [];
     if (args.length === 0 || !instance.templateNode) return undefined;
     const declaration = this.program.checker.getTypeForNode(instance.templateNode);
@@ -147,20 +162,75 @@ export class TypeCollector {
         ((arg as Type).kind !== "Intrinsic" || (arg as { name?: string }).name === "unknown"),
     );
     if (types.length !== args.length || !this.expressible(instance, declaration)) return undefined;
-    const id = this.collectModel(declaration, declaration.name);
-    return { kind: "named", id, args: types.map((arg, i) => this.ref(arg, `${hint}Arg${i + 1}`)) };
+    return this.declarationGeneric(declaration) ? { declaration, args: types } : undefined;
   }
 
   /**
    * A template is generic unless it needs per-instance models: a base model or discriminator, HTTP
    * metadata, `...T` spreads (instance and declaration properties differ) or a @friendlyName.
+   * Decorators do not run on declarations, so those are found among the declaration's applications.
    */
   private expressible(instance: Model, declaration: Model): boolean {
-    if (declaration.baseModel || getDiscriminator(this.program, declaration)) return false;
-    if (getFriendlyName(this.program, instance) || getFriendlyName(this.program, declaration)) return false;
+    if (declaration.baseModel || getDiscriminator(this.program, instance)) return false;
+    if (applies(declaration, "discriminator") || applies(declaration, "friendlyName")) return false;
+    if (getFriendlyName(this.program, instance)) return false;
     if (this.isHttpEnvelope(declaration) || this.isHttpEnvelope(instance)) return false;
     const names = (m: Model) => [...m.properties.keys()].join("\0");
     return names(instance) === names(declaration);
+  }
+
+  /**
+   * Whether every use of a type parameter in the declaration can be written in a generic class: directly,
+   * in arrays/records, `T | null`, or as an argument of another generic template. An anonymous model or a
+   * union mentioning `T` would need a generic declaration of its own, so such templates stay per-instance.
+   */
+  private declarationGeneric(declaration: Model): boolean {
+    const known = this.genericDeclarations.get(declaration);
+    if (known !== undefined) return known;
+    this.genericDeclarations.set(declaration, true); // assume true while recursing into itself
+    const ok = [...declaration.properties.values()].every((p) => this.genericSafe(p.type));
+    this.genericDeclarations.set(declaration, ok);
+    return ok;
+  }
+
+  private genericSafe(type: Type): boolean {
+    if (!this.mentionsTemplateParameter(type)) return true;
+    switch (type.kind) {
+      case "TemplateParameter":
+        return true;
+      case "Model": {
+        const [element] = this.stdCollectionArgs(type);
+        if (element) return this.genericSafe(element);
+        if (isArrayModelType(type) || isRecordModelType(type)) return this.genericSafe(type.indexer!.value);
+        const generic = this.genericTemplate(type);
+        return generic !== undefined && generic.args.every((arg) => this.genericSafe(arg));
+      }
+      case "Union": {
+        const variants = [...type.variants.values()].filter((v) => !isNullType(v.type));
+        return !type.name && variants.length === 1 && this.genericSafe(variants[0].type);
+      }
+      default:
+        return false;
+    }
+  }
+
+  private mentionsTemplateParameter(type: Type, seen = new Set<Type>()): boolean {
+    if (seen.has(type)) return false;
+    seen.add(type);
+    switch (type.kind) {
+      case "TemplateParameter":
+        return true;
+      case "ModelProperty":
+        return this.mentionsTemplateParameter(type.type, seen);
+      case "Model":
+        if ((type.templateMapper?.args ?? []).some((a) => isType(a) && this.mentionsTemplateParameter(a, seen))) return true;
+        if (type.indexer && this.mentionsTemplateParameter(type.indexer.value, seen)) return true;
+        return !type.name && [...type.properties.values()].some((p) => this.mentionsTemplateParameter(p.type, seen));
+      case "Union":
+        return [...type.variants.values()].some((v) => this.mentionsTemplateParameter(v.type, seen));
+      default:
+        return false;
+    }
   }
 
   /**
@@ -206,7 +276,8 @@ export class TypeCollector {
     return { id: `$anon.${name}`, name, namespace: [] };
   }
 
-  private collectModel(model: Model, hint: string): string {
+  /** `state`: for a generic declaration, an instance whose decorator state (docs, encodings, constraints) applies. */
+  private collectModel(model: Model, hint: string, state?: Model): string {
     const existing = this.ids.get(model);
     if (existing) return existing;
     const { id, name, namespace } = this.identify(model, hint);
@@ -216,15 +287,16 @@ export class TypeCollector {
       id,
       name,
       namespace,
-      ...docInfo(this.program, model),
+      ...docInfo(this.program, state ?? model),
       decorators: collectDecorators(model),
       properties: [],
     };
     if (isTemplateDeclaration(model)) ir.typeParameters = model.node!.templateParameters.map((p) => p.id.sv);
     this.types.set(id, ir);
     for (const prop of model.properties.values()) {
-      if (isMetadata(this.program, prop)) continue;
-      ir.properties.push(this.property(prop, name));
+      const stateProp = state?.properties.get(prop.name) ?? prop;
+      if (isMetadata(this.program, stateProp)) continue;
+      ir.properties.push(this.property(prop, name, stateProp));
     }
     if (model.baseModel) ir.baseId = this.collectModel(model.baseModel, `${name}Base`);
     if (model.indexer && isRecordModelType(model)) {
@@ -255,18 +327,19 @@ export class TypeCollector {
     return mapping;
   }
 
-  private property(prop: ModelProperty, parentName: string): PropertyIR {
+  /** `state`: the property whose decorator state applies (an instance's, for a generic declaration). */
+  private property(prop: ModelProperty, parentName: string, state: ModelProperty = prop): PropertyIR {
     const ir: PropertyIR = {
       name: prop.name,
-      wireName: resolveEncodedName(this.program, prop, "application/json"),
+      wireName: resolveEncodedName(this.program, state, "application/json"),
       type: this.ref(prop.type, `${parentName}${pascal(prop.name)}`),
       optional: prop.optional,
-      ...docInfo(this.program, prop),
+      ...docInfo(this.program, state),
       decorators: collectDecorators(prop),
     };
-    const constraints = this.constraints(prop);
+    const constraints = this.constraints(state);
     if (constraints) ir.constraints = constraints;
-    if (prop.defaultValue) ir.default = serializeValueAsJson(this.program, prop.defaultValue, prop.type);
+    if (state.defaultValue) ir.default = serializeValueAsJson(this.program, state.defaultValue, state.type);
     return ir;
   }
 
@@ -340,11 +413,15 @@ export class TypeCollector {
       variants: [],
     };
     this.types.set(id, ir);
+    // Variants of a discriminated union are distinct classes (Kotlin sealed subclasses), so a template
+    // variant (`created: Created<Pet>`) gets a model of its own rather than a use of a generic one.
+    const isDiscriminated = getDiscriminatedUnion(this.program, union)[0] !== undefined;
     ir.variants = variants.map((v) => {
       const variantName = typeof v.name === "string" ? v.name : undefined;
+      const hint = `${name}${variantName ? pascal(variantName) : "Variant"}`;
       return {
         ...(variantName ? { name: variantName } : {}),
-        type: this.ref(v.type, `${name}${variantName ? pascal(variantName) : "Variant"}`),
+        type: isDiscriminated && v.type.kind === "Model" ? this.modelRef(v.type, hint, false) : this.ref(v.type, hint),
         ...docInfo(this.program, v),
       };
     });
@@ -394,4 +471,13 @@ function templateArgTypes(model: Model): Type[] {
       (arg as { entityKind?: string }).entityKind === "Type" &&
       (arg as Type).kind !== "Intrinsic",
   );
+}
+
+function isType(entity: unknown): entity is Type {
+  return typeof entity === "object" && entity !== null && (entity as { entityKind?: string }).entityKind === "Type";
+}
+
+/** Whether a decorator named `name` is applied to `type` (also on template declarations, where it does not run). */
+function applies(type: Model, name: string): boolean {
+  return type.decorators.some((d) => d.definition?.name === `@${name}` || d.decorator.name === `$${name}`);
 }

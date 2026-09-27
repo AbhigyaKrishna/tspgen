@@ -56,6 +56,8 @@ class InMemoryPets : PetsService {
             CreateResult.Created(pet, "/pets/${pet.id}")
         }
 
+    override suspend fun latest(dates: List<Instant>): Instant = dates.max()
+
     override suspend fun remove(petId: Long) {
         pets.remove(petId) ?: throw NotFoundException(NotFound("pet $petId not found"))
     }
@@ -116,6 +118,11 @@ class PetStoreE2ETest {
         assertEquals(emptyList(), api.pets.list(species = Species.BIRD))
         assertEquals(listOf(rex), api.pets.list(bornAfter = Instant.parse("2019-06-01T12:30:00Z")))
         assertEquals(emptyList(), api.pets.list(bornAfter = Instant.parse("2021-01-01T00:00:00Z")))
+
+        assertEquals(
+            Instant.parse("2021-05-01T00:00:00Z"),
+            api.pets.latest(listOf(Instant.parse("2020-01-01T00:00:00Z"), Instant.parse("2021-05-01T00:00:00Z"))),
+        )
 
         val missing = assertFailsWith<NotFoundException> { api.pets.get(99) }
         assertEquals(404, missing.status)

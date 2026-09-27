@@ -159,6 +159,9 @@ fun StatusPagesConfig.petStoreErrors() {
     expect(java).toContain(`?.map { it.convertParam("at") { Instant.parse(it) } }`);
     expect(java).toContain(`val length = call.headerParam("x-length")?.convertParam("x-length") { Duration.parse(it) }`);
     expect(java).toContain(`call.response.header("x-next", result.next.toString())`);
+    const module = (await server().compile(spec)).outputs[`${DIR}/SModule.kt`];
+    expect(module).toContain("json(Json { serializersModule = javaTimeSerializersModule })");
+    expect(module).toContain("import com.acme.models.javaTimeSerializersModule\n");
     const kotlin = (await server({}, { "date-time": "kotlin.time" }).compile(spec)).outputs[`${DIR}/SRoutes.kt`];
     expect(kotlin).toContain(`{ decodeParam<LocalDate>(it) }`);
     expect(kotlin).toContain(`call.response.header("x-next", encodeParam(result.next))`);

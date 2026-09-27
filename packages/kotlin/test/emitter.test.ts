@@ -191,6 +191,27 @@ sealed interface Pet {
     expect(outputs["models/com/acme/other/Remote.kt"]).toBeUndefined();
   });
 
+  it("does not give a nested variant a name its union or siblings refer to", async () => {
+    const { outputs } = await emitter().compile(`
+      @service namespace S;
+      model Catalog { id: string }
+      model CatalogSource { catalog: Catalog }
+      model UrlSource { url: string }
+      @discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
+      union Source { catalog: CatalogSource, url: UrlSource }
+      model ShapeA { x: int32 }
+      model Other { y: int32 }
+      @discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
+      union Shape { shape: ShapeA, other: Other }
+    `);
+    const source = outputs["models/com/acme/models/Source.kt"];
+    expect(source).toContain("    data class CatalogSource(\n        val catalog: Catalog,\n    ) : Source");
+    expect(source).toContain("    data class Url(");
+    const shape = outputs["models/com/acme/models/Shape.kt"];
+    expect(shape).toContain("    data class ShapeA(");
+    expect(shape).toContain("    data class Other(");
+  });
+
   it("keeps every variant top-level with union-variants: top-level", async () => {
     const { outputs } = await emitter({ "union-variants": "top-level" }).compile(`
       @service namespace S;

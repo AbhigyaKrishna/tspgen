@@ -2,7 +2,7 @@ import { NoTarget, resolvePath, type Program } from "@typespec/compiler";
 import { fileURLToPath } from "node:url";
 import { buildApiIR } from "../ir/build.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
-import { writeOutputs, type OutputFile } from "../output/manifest.js";
+import { normalizeDir, writeOutputs, type OutputFile } from "../output/manifest.js";
 import type { PluginContext, TspGenPlugin } from "../plugins/plugin.js";
 import { resolveMeta, type MetaScopes } from "../meta.js";
 import { ExtensionRegistry } from "../plugins/registry.js";
@@ -29,7 +29,13 @@ export interface PipelineOptions<L> {
 const FAILED = Symbol("failed");
 
 /** build IR → language transform → plugin transforms → target files → plugin file hooks → render → write. */
-export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
+export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
+  // One key per physical directory: "/out" and "/out/" must share a manifest, or one run deletes the other's files.
+  const opts: PipelineOptions<L> = {
+    ...input,
+    outputDir: normalizeDir(input.outputDir),
+    targets: input.targets.map((t) => (t.outputDir ? { ...t, outputDir: normalizeDir(t.outputDir) } : t)),
+  };
   const { program, language } = opts;
   const emitterOptions = opts.emitterOptions ?? {};
   const registry = new ExtensionRegistry();
@@ -67,7 +73,7 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
       target.files(ir, { program, language: language.name, emitterOptions, options, registry, outputDir, modelsOutputDir }),
     );
     if (result === FAILED) return;
-    files.push(...result.map((file) => (file.outputDir ? file : { ...file, outputDir })));
+    files.push(...result.map((file) => ({ ...file, outputDir: normalizeDir(file.outputDir ?? outputDir) })));
   }
   for (const plugin of plugins) {
     if (!plugin.files) continue;
@@ -75,6 +81,7 @@ export async function runPipeline<L>(opts: PipelineOptions<L>): Promise<void> {
     if (result === FAILED) return;
     if (result !== undefined) files = result;
   }
+  files = files.map((file) => ({ ...file, outputDir: normalizeDir(file.outputDir ?? opts.outputDir) }));
 
   const seen = new Set<string>();
   for (const file of files) {

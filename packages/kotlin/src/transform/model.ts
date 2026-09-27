@@ -150,6 +150,13 @@ export interface KotlinIR {
   apiDeclarations: KtApiDecl[];
   services: KtService[];
   api: ApiIR;
+  /** java.time classes used anywhere (models, parameters, bodies); each gets a generated serializer. */
+  javaTime: string[];
+  /**
+   * FQN of the generated `SerializersModule` with contextual java.time serializers, when `javaTime` is not
+   * empty: bodies that are java.time values themselves (`List<Instant>`) need it in the Json configuration.
+   */
+  javaTimeModule?: string;
 }
 
 export type KtResult =

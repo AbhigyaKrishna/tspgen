@@ -80,14 +80,19 @@ client rewrites its imports of the models when they live elsewhere.
 **Generics.** A template model is generated once as a generic class and every use passes its arguments:
 `model Page<T> { items: T[]; total: int64 }` → `data class Page<T>(val items: List<T>, val total: Long)` and
 `Page<Pet>` at each use (TypeScript: `interface Page<T>`, with zod a `PageSchema(itemSchema)` function). A
-template that needs per-instance models — a base model or `@discriminator`, HTTP metadata, `...T` spreads, or
-`@friendlyName` — still gets one model per instance (`PagePet`), as does everything with `generics: false`.
+template that needs per-instance models — a base model or `@discriminator`, HTTP metadata, `...T` spreads,
+`@friendlyName`, or a type parameter inside an inline model or union (`meta: { first: T }`, `T | string`) —
+still gets one model per instance (`PagePet`), as does a template used directly as a variant of a
+discriminated union, and everything with `generics: false`.
 
 **Date and time.** With `date-time: java.time` (the default) `utcDateTime`, `offsetDateTime`, `plainDate`,
 `plainTime` and `duration` map to `java.time.Instant`, `OffsetDateTime`, `LocalDate`, `LocalTime` and
 `Duration`. kotlinx.serialization has no serializers for them, so `models/<pkg>/models/JavaTimeSerializers.kt`
 holds ISO-8601 serializers for the ones in use and each model file using them declares
-`@file:UseSerializers(...)`; Ktor parameters and headers of these types use `X.parse` / `toString()`.
+`@file:UseSerializers(...)`; Ktor parameters and headers of these types use `X.parse` / `toString()`. The
+same file declares `javaTimeSerializersModule`, which the generated server module and client defaults put in
+their `Json` so bodies that are java.time values themselves (`List<Instant>`) work; with `module: false`, use
+`json(Json { serializersModule = javaTimeSerializersModule })` in your own `ContentNegotiation`.
 
 **Sealed unions.** A `@discriminated(#{ envelope: "none" })` union of models becomes a sealed interface. A
 variant model nothing else references is declared inside it, named after its variant key

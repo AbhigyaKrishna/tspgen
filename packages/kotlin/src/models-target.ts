@@ -9,9 +9,12 @@ function simpleName(fqn: string): string {
   return fqn.slice(fqn.lastIndexOf(".") + 1);
 }
 
-/** The ISO-8601 serializers for the java.time classes the models use, in one file of the models package. */
-function javaTimeSerializersFile(ir: KotlinIR, used: ReadonlySet<string>): FileSpec[] {
-  const classes = JAVA_TIME_CLASSES.filter((fqn) => used.has(fqn));
+/**
+ * ISO-8601 serializers for the java.time classes the API uses, plus a SerializersModule registering them
+ * contextually (for bodies that are java.time values themselves), in one file of the models package.
+ */
+function javaTimeSerializersFile(ir: KotlinIR): FileSpec[] {
+  const classes = ir.javaTime;
   if (classes.length === 0) return [];
   return [
     {
@@ -28,6 +31,7 @@ function javaTimeSerializersFile(ir: KotlinIR, used: ReadonlySet<string>): FileS
             "kotlinx.serialization.descriptors.SerialDescriptor",
             "kotlinx.serialization.encoding.Decoder",
             "kotlinx.serialization.encoding.Encoder",
+            "kotlinx.serialization.modules.SerializersModule",
           ],
           ir.modelsPackage,
         ),
@@ -44,7 +48,6 @@ export const modelsTarget: Target<KotlinIR> = {
   kind: "models",
   language: "kotlin",
   files: (ir) => {
-    const usedTime = new Set<string>();
     const declFiles = ir.declarations.map((decl): FileSpec => {
       const resolved = resolveDeclImports(decl);
       const { qualified } = resolved;
@@ -54,7 +57,6 @@ export const modelsTarget: Target<KotlinIR> = {
       const time = decl.kind === "typealias" ? [] : JAVA_TIME_CLASSES.filter((fqn) => [...imports, ...qualified].includes(fqn));
       const serializers = time.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`);
       if (time.length > 0) {
-        time.forEach((fqn) => usedTime.add(fqn));
         imports = organizeImports([...imports, USE_SERIALIZERS, ...serializers], decl.package);
       }
       return {
@@ -72,7 +74,7 @@ export const modelsTarget: Target<KotlinIR> = {
         },
       };
     });
-    return [...declFiles, ...javaTimeSerializersFile(ir, usedTime), ...apiFiles(ir)];
+    return [...declFiles, ...javaTimeSerializersFile(ir), ...apiFiles(ir)];
   },
 };
 

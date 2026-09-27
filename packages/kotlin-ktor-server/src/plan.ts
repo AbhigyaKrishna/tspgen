@@ -261,7 +261,8 @@ function moduleFile(
   const unitImports = units
     .filter((u) => u.package && u.package !== pkg)
     .flatMap((u) => [`${u.package}.${u.serviceName}`, ...functions.get(u)!.map((f) => `${u.package}.${f.name}`)]);
-  const imports = [...MODULE_IMPORTS, ...installs, ...exceptions.keys(), `${ir.apiPackage}.ApiException`, ...unitImports];
+  const javaTime = ir.javaTimeModule ? [ir.javaTimeModule, "kotlinx.serialization.json.Json"] : [];
+  const imports = [...MODULE_IMPORTS, ...installs, ...exceptions.keys(), `${ir.apiPackage}.ApiException`, ...unitImports, ...javaTime];
   const base = camel(service.name);
   return {
     path: `${dir}/${service.name}Module.kt`,
@@ -275,6 +276,7 @@ function moduleFile(
       /** Route function names per unit, in unit order. */
       mounts: units.map((u) => functions.get(u)!.map((f) => f.name)),
       installs,
+      json: ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "",
       exceptions: [...exceptions.values()],
       moduleFn: `${base}Module`,
       apiRoutesFn: `${base}ApiRoutes`,

@@ -11,7 +11,7 @@ class <%= it.clientName %>(http: HttpClient, baseUrl: String) {
 /**
  * Installs JSON content negotiation compatible with the generated models.
  */
-fun HttpClientConfig<*>.<%= it.defaultsFn %>(format: Json = Json) {
+fun HttpClientConfig<*>.<%= it.defaultsFn %>(format: Json = <%~ it.json %>) {
     install(ContentNegotiation) {
         json(format)
     }

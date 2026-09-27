@@ -2,8 +2,8 @@ import type { ApiIR } from "@abhigyakrishna/tspgen-core";
 import type { Program } from "@typespec/compiler";
 import type { EnumMemberNaming } from "../lib.js";
 import { DeclarationBuilder } from "./declarations.js";
-import type { KotlinIR } from "./model.js";
-import type { DateTimeMapping } from "./type-map.js";
+import type { KotlinIR, KtDecl, KtService, KtTypeUse } from "./model.js";
+import { JAVA_TIME_CLASSES, type DateTimeMapping } from "./type-map.js";
 import { ApiBuilder } from "./operations.js";
 
 export * from "./model.js";
@@ -49,6 +49,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
   const declarations = builder.build();
   const apiBuilder = new ApiBuilder(builder, apiPackage, { errors: options.errors, packages: options.packages });
   const services = apiBuilder.services(api, options.package);
+  const javaTime = usedJavaTime(declarations, services);
   return {
     basePackage: options.package,
     modelsPackage,
@@ -57,5 +58,22 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     apiDeclarations: apiBuilder.declarations(),
     services,
     api,
+    javaTime,
+    ...(javaTime.length > 0 ? { javaTimeModule: `${modelsPackage}.javaTimeSerializersModule` } : {}),
   };
+}
+
+function usedJavaTime(declarations: KtDecl[], services: KtService[]): string[] {
+  const types: KtTypeUse[] = [];
+  const addDecl = (d: KtDecl): void => {
+    if (d.kind === "data-class" || d.kind === "sealed-interface") types.push(...d.properties.map((p) => p.type));
+    if (d.kind === "sealed-interface") d.variants.forEach(addDecl);
+  };
+  declarations.forEach(addDecl);
+  for (const op of services.flatMap((s) => s.groups.flatMap((g) => g.operations))) {
+    types.push(...op.params.map((p) => p.type), ...(op.body ? [op.body.type] : []));
+    for (const r of op.responses) types.push(...(r.body ? [r.body] : []), ...r.headers.map((h) => h.type));
+  }
+  const imports = new Set(types.flatMap((t) => t.imports));
+  return JAVA_TIME_CLASSES.filter((fqn) => imports.has(fqn));
 }

@@ -180,6 +180,62 @@ describe("type IR", () => {
     expect(ir.types.some((t) => t.name === "PagePet")).toBe(false);
   });
 
+  it("keeps docs, encoded names and constraints of generic template properties", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      /** A page */
+      model Page<T> {
+        /** The items */ @maxItems(100) items: T[];
+        @encodedName("application/json", "next_link") nextLink?: string;
+        @minLength(3) cursor: string;
+      }
+      model Pet { id: int64 }
+      model Use { p: Page<Pet> }
+    `);
+    const page = ir.types.find((t) => t.name === "Page");
+    if (page?.kind !== "model") throw new Error("expected generic Page");
+    expect(page.docs).toBe("A page");
+    expect(page.properties.map((p) => [p.name, p.wireName, p.docs, p.constraints])).toEqual([
+      ["items", "items", "The items", { maxItems: 100 }],
+      ["nextLink", "next_link", undefined, undefined],
+      ["cursor", "cursor", undefined, { minLength: 3 }],
+    ]);
+  });
+
+  it("keeps templates per-instance when a type parameter appears where no generic class can hold it", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      model Pet { id: int64 }
+      model Base { id: string }
+      model Link<T> extends Base { target: T }
+      model Inline<T> { meta: { first: T } }
+      model Either<T> { either: T | string }
+      model Linked<T> { next: Link<T> }
+      model Fine<T> { a: T | null; b: Record<T>[]; c: Fine<T>[] }
+      model Use { a: Inline<Pet>; b: Either<Pet>; c: Linked<Pet>; d: Fine<Pet> }
+    `);
+    const generic = ir.types.filter((t) => t.kind === "model" && t.typeParameters).map((t) => t.name);
+    expect(generic).toEqual(["Fine"]);
+    const all = JSON.stringify(ir.types);
+    expect(ir.types.filter((t) => t.name !== "Fine").some((t) => JSON.stringify(t).includes('"typeParam"'))).toBe(false);
+    expect(all).toContain('"InlinePet"');
+  });
+
+  it("gives variants of discriminated unions their own models instead of generic uses", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      model Pet { id: int64 }
+      model Created<T> { data: T }
+      model Deleted { id: string }
+      @discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
+      union Event { created: Created<Pet>, deleted: Deleted }
+    `);
+    const event = find(ir, "Pets.Event");
+    if (event.kind !== "union") throw new Error("expected union");
+    expect(event.variants[0].type).toEqual({ kind: "named", id: "Pets.Created<Pets.Pet>" });
+    expect(find(ir, "Pets.Created<Pets.Pet>")).toMatchObject({ name: "CreatedPet" });
+  });
+
   it("keeps per-instance models for templates that cannot be generic", async () => {
     const ir = await build(`
       @service namespace Pets;
@@ -188,7 +244,8 @@ describe("type IR", () => {
       model Spread<T> { ...T; extra: string }
       model Derived<T> extends Base { item: T }
       @friendlyName("{name}Named", T) model Named<T> { item: T }
-      model Holder { a: Spread<Pet>; b: Derived<Pet>; c: Named<Pet> }
+      model Holder { a: Spread<Pet>; b: Derived<Pet>; c: Named<Pet>; d: Paged<Pet> }
+      model Paged<T> { next: Named<T> }
     `);
     const holder = find(ir, "Pets.Holder");
     if (holder.kind !== "model") throw new Error("expected model");

@@ -94,6 +94,9 @@ interface Pets {
     | ApiError;
 
   @delete remove(@path petId: int64): void | NotFound;
+
+  /** Bare java.time bodies need the generated contextual serializers. */
+  @post @route("/latest") latest(@body dates: utcDateTime[]): utcDateTime;
 }
 
 @route("/toys")

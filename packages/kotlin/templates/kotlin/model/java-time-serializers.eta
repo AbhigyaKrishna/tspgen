@@ -8,3 +8,11 @@ object <%= c.name %>Serializer : KSerializer<<%= c.name %>> {
 
     override fun deserialize(decoder: Decoder): <%= c.name %> = <%= c.name %>.parse(decoder.decodeString())
 }<% }) %>
+
+/**
+ * Registers the serializers above as contextual, for java.time values outside the models (e.g. a
+ * `List<Instant>` request body): `Json { serializersModule = javaTimeSerializersModule }`.
+ */
+val javaTimeSerializersModule: SerializersModule = SerializersModule {
+<% for (const c of it.classes) { %>    contextual(<%= c.name %>::class, <%= c.name %>Serializer)
+<% } %>}

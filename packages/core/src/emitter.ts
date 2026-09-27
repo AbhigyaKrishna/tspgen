@@ -2,6 +2,7 @@ import { resolvePath, type EmitContext } from "@typespec/compiler";
 import type { CoreEmitterOptions } from "./options.js";
 import { loadPlugins } from "./plugins/load.js";
 import type { TspGenPlugin } from "./plugins/plugin.js";
+import { normalizeDir } from "./output/manifest.js";
 import { runPipeline } from "./pipeline/run.js";
 import { loadTargets, type TargetSpec } from "./targets/load.js";
 import type { LanguageModule, Target } from "./targets/target.js";
@@ -42,5 +43,5 @@ export async function emitLanguage<L>(
 /** `{project-root}` / `{emitter-output-dir}` interpolated; relative paths resolve against the project root. */
 export function resolveOutputDir(spec: string, projectRoot: string, emitterOutputDir: string): string {
   const interpolated = spec.replaceAll("{project-root}", projectRoot).replaceAll("{emitter-output-dir}", emitterOutputDir);
-  return resolvePath(projectRoot, interpolated);
+  return normalizeDir(resolvePath(projectRoot, interpolated));
 }

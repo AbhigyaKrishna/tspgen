@@ -59,5 +59,7 @@ describe("resolveOutputDir", () => {
     expect(resolveOutputDir("{project-root}/../core/build", "/p/spec", "/o")).toBe("/p/core/build");
     expect(resolveOutputDir("{emitter-output-dir}/server", "/p", "/p/out")).toBe("/p/out/server");
     expect(resolveOutputDir("/abs/dir", "/p", "/o")).toBe("/abs/dir");
+    expect(resolveOutputDir("{emitter-output-dir}/", "/p", "/p/out")).toBe("/p/out");
+    expect(resolveOutputDir("/", "/p", "/o")).toBe("/");
   });
 });

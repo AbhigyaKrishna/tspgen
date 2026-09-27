@@ -4,7 +4,7 @@
  */
 fun Application.<%= it.moduleFn %>(<%= params %>) {
     install(ContentNegotiation) {
-        json()
+        json(<%~ it.json %>)
     }
 <% for (const p of it.installs) { -%>
     install(<%= it.h.simpleName(p) %>)

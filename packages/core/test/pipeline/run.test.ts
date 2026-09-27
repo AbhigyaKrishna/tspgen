@@ -128,6 +128,26 @@ describe("runPipeline", () => {
     expect(await manifest(serverDir)).toEqual(["server/Routes.txt"]);
   });
 
+  it("treats a directory with a trailing slash as the same directory", async () => {
+    const { program } = await Tester.compile(spec);
+    const out = resolveVirtualPath("out");
+    const server: Target<FakeIR> = {
+      name: "fake-server",
+      kind: "server",
+      language: "fake",
+      files: () => [{ path: "server/R.txt", template: "fake/model", data: { model: { name: "R" } } }],
+    };
+    await runPipeline({
+      program,
+      outputDir: out,
+      language,
+      targets: [{ target, options: {}, outputDir: `${out}/` }, { target: server, options: {} }],
+    });
+    expect((await program.host.readFile(resolvePath(out, "server/R.txt"))).text).toBe("model R");
+    const manifest = JSON.parse((await program.host.readFile(resolvePath(out, ".generated-manifest.json"))).text);
+    expect(manifest.files).toEqual(["models/Owner.txt", "models/Pet.txt", "server/R.txt"]);
+  });
+
   it("allows the same relative path in different output dirs", async () => {
     const { program } = await Tester.compile(spec);
     const other = { ...target, name: "other" };

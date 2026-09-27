@@ -75,8 +75,9 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, progra
       template: "kotlin/file",
       data: {
         package: pkg,
-        imports: API_CLIENT_IMPORTS,
+        imports: organizeImports([...API_CLIENT_IMPORTS, ...(ir.javaTimeModule ? [ir.javaTimeModule] : [])], pkg),
         body: "ktor-client/api-client",
+        json: ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "Json",
         service,
         clientName: `${service.name}ApiClient`,
         defaultsFn: `${camel(service.name)}Defaults`,
