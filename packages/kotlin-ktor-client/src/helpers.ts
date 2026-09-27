@@ -10,6 +10,7 @@ import {
   type KtPart,
   type KtResultVariant,
 } from "@abhigyakrishna/tspgen-kotlin";
+import { emitLines, preludeLines, streamOf } from "./sse.js";
 
 const PARSE: Record<string, string> = {
   Int: "toInt()",
@@ -39,7 +40,7 @@ function encode(expr: string, typeText: string, imports: readonly string[]): str
 }
 
 /** Kotlin expression parsing a wire string. */
-function decode(expr: string, typeText: string, imports: readonly string[]): string {
+export function decode(expr: string, typeText: string, imports: readonly string[]): string {
   if (typeText === "String") return expr;
   if (javaTimeCodec(typeText, imports)) return `${typeText}.parse(${expr})`;
   const parse = PARSE[typeText];
@@ -211,6 +212,10 @@ export const ktorClientHelpers = {
     if (!branches.some((b) => b.match === "else")) branches.push({ match: "else", expr: fallback });
     return branches;
   },
+
+  stream: streamOf,
+  emitLines,
+  preludeLines,
 
   propertyName(group: KtGroup): string {
     return camel(group.name);

@@ -15,4 +15,7 @@ fun HttpClientConfig<*>.<%= it.defaultsFn %>(format: Json = <%~ it.json %>) {
     install(ContentNegotiation) {
         json(format)
     }
+<% if (it.sseJson) { -%>
+    install(sseJsonPlugin(format))
+<% } -%>
 }

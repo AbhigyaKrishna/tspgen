@@ -184,7 +184,7 @@ internal suspend fun PartData.partFile(): HttpFile =
  * The parts of a multipart request as a flow that reads the request while it is collected: `emitPart` emits the
  * declared parts, the others are released unread. The flow can be collected once; a part over `limit` bytes answers 413.
  */
-internal fun <T> ApplicationCall.partsFlow(limit: Long, emitPart: suspend FlowCollector<T>.(PartData) -> Unit): Flow<T> {
+internal fun <T> ApplicationCall.partsFlow(limit: Long, emitPart: suspend FlowCollector<T>.(PartData) -> Unit): <%= it.flowType %><T> {
     val collected = AtomicBoolean()
     return flow {
         check(collected.compareAndSet(false, true)) { "The parts of a multipart request can be collected only once" }
@@ -232,4 +232,76 @@ internal suspend fun ApplicationCall.receiveFile(limit: Long): HttpFile {
         bytes,
     )
 }
+<% } -%><% if (it.sse) { -%>
+
+
+
+/**
+ * One server-sent event as written: `event:` (none for the default "message" type), `data:` and `id:`. CR and LF
+ * would end the `event:` / `id:` line early and let the rest forge fields or whole events, so they are removed; an
+ * id containing NUL is dropped (clients ignore it).
+ */
+internal class TspgenSseFrame(event: String?, val data: String, id: String? = null, val terminal: Boolean = false) {
+    val event: String? = event?.filterNot { it == '\r' || it == '\n' }?.ifEmpty { null }
+    val id: String? = id?.takeUnless { '\u0000' in it }?.filterNot { it == '\r' || it == '\n' }
+}
+
+/** The frames of [events] up to and including the first terminal one: the stream ends after it. */
+internal fun <T> kotlinx.coroutines.flow.Flow<T>.sseFrames(frame: (T) -> TspgenSseFrame): kotlinx.coroutines.flow.Flow<TspgenSseFrame> =
+    map(frame).transformWhile {
+        emit(it)
+        !it.terminal
+    }
+<% if (it.sse.json) { -%>
+
+/**
+ * JSON of event payloads: the configuration the generated module's content negotiation installs (it uses this value),
+ * so an event carries the same JSON as a REST response.
+ */
+internal val sseJson: Json = <%~ it.sse.jsonExpr %>
+<% } -%>
+<% if (it.sse.textWriter) { -%>
+
+/**
+ * Responds with [events] as `text/event-stream`, written (without blocking) and flushed one event at a time; multi-line
+ * data is sent as several `data:` lines (CR and CRLF line breaks as LF). The flow is collected only once the response
+ * has started: throw before returning it to answer with an error status instead.
+ */
+internal suspend fun <T> ApplicationCall.respondEventStream(events: kotlinx.coroutines.flow.Flow<T>, frame: (T) -> TspgenSseFrame) {
+    response.header(HttpHeaders.CacheControl, "no-store")
+    response.header("X-Accel-Buffering", "no")
+    respondBytesWriter(ContentType.Text.EventStream) {
+        events.sseFrames(frame).collect { f ->
+            val text = StringBuilder()
+            f.event?.let { text.append("event: ").append(it).append('\n') }
+            for (line in f.data.split("\r\n", "\r", "\n")) text.append("data: ").append(line).append('\n')
+            f.id?.let { text.append("id: ").append(it).append('\n') }
+            writeStringUtf8(text.append('\n').toString())
+            flush()
+        }
+    }
+}
+<% } -%>
+<% if (it.sse.plugin) { -%>
+
+/**
+ * Responds with [events] through the ktor-server-sse plugin's session ([SSE] must be installed), one
+ * [ServerSentEvent] per event. The flow is collected only once the response has started: throw before returning it
+ * to answer with an error status instead.
+ */
+internal suspend fun <T> ApplicationCall.respondSse(events: kotlinx.coroutines.flow.Flow<T>, frame: (T) -> TspgenSseFrame) {
+    application.plugin(SSE)
+    response.header(HttpHeaders.CacheControl, "no-store")
+    response.header("X-Accel-Buffering", "no")
+    respond(
+        SSEServerContent(this, {
+            events.sseFrames(frame).collect { send(ServerSentEvent(data = it.data, event = it.event, id = it.id)) }
+        }),
+    )
+}
+<% } -%>
+<% for (const f of it.sse.frames) { -%>
+
+<%~ f %>
+<% } -%>
 <% } -%>

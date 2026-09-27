@@ -1,6 +1,8 @@
 <% const r = it.op.result; const s = it.h.ktorServer; -%>
 <% if (r.kind === "single") { -%>
-<% if (r.type.text === "Unit") { -%>
+<% if (it.op.sse) { -%>
+        <%~ s.streamLine(it.op, it.call) %>
+<% } else if (r.type.text === "Unit") { -%>
         <%= it.call %>
         call.respond(<%= s.status(r.status) %>)
 <% } else { -%>

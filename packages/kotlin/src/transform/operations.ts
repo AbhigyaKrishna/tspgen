@@ -19,6 +19,7 @@ import type {
 import { nullable } from "./type-map.js";
 
 const UNIT: KtTypeUse = { text: "Unit", imports: [], nullable: false };
+const FLOW = "kotlinx.coroutines.flow.Flow";
 
 const STATUS_NAMES: Record<number, string> = {
   200: "Ok",
@@ -152,7 +153,7 @@ export class ApiBuilder {
           explode: false,
         };
       }),
-      ...(r.body ? { body: this.types.typeUse(r.body.type), contentType: r.body.contentTypes[0] ?? "application/json" } : {}),
+      ...(r.body ? this.responseBody(r.body) : {}),
     }));
     const name = identifier(decoratorArg(op.decorators, "Kotlin.name") ?? camel(op.name));
     const result: KtOperation = {
@@ -200,9 +201,29 @@ export class ApiBuilder {
     return result;
   }
 
+  private responseBody(body: NonNullable<OperationIR["responses"][number]["body"]>): Pick<KtResponse, "body" | "contentType" | "stream"> {
+    const contentType = body.contentTypes[0] ?? "application/json";
+    if (!body.stream) return { body: this.types.typeUse(body.type), contentType };
+    const stream = this.types.stream(body.stream, body.type);
+    return { body: stream.type, contentType, stream };
+  }
+
   private result(opName: string, groupName: string, success: KtResponse[]): KtResult {
     if (success.length === 0) return { kind: "single", type: UNIT, status: 204 };
     const [only] = success;
+    // Core streams only a single success response without headers.
+    if (only.stream && typeof only.statusCodes === "number") {
+      return {
+        kind: "single",
+        // Written qualified when a generated type is named Flow (its import would clash).
+        type: this.types.hasName("Flow")
+          ? { text: `${FLOW}<${only.stream.type.text}>`, imports: only.stream.type.imports, nullable: false }
+          : { text: `Flow<${only.stream.type.text}>`, imports: [FLOW, ...only.stream.type.imports], nullable: false },
+        status: only.statusCodes,
+        ...(only.contentType ? { contentType: only.contentType } : {}),
+        stream: only.stream,
+      };
+    }
     if (success.length === 1 && typeof only.statusCodes === "number" && only.headers.length === 0) {
       return {
         kind: "single",

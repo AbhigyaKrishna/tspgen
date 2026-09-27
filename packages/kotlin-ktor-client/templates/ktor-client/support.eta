@@ -30,3 +30,108 @@ internal fun fileHeaders(file: HttpFile, part: String, defaultType: String): Hea
         HttpHeaders.ContentDisposition to listOf("${ContentDisposition.Parameters.FileName}=${(file.filename ?: part).quote()}"),
     )
 <% } -%>
+<% if (it.sse) { -%>
+
+
+
+/** One server-sent event: its `event:` (null when absent: the default "message" type), `data:` lines joined with "\n" and the last `id:`. */
+internal class TspgenSseEvent(val event: String?, val data: String, val id: String?)
+
+/** Longest line and longest event data a stream may send (1 MiB); longer ones fail the stream. */
+internal const val MAX_SSE_SIZE: Int = 1 shl 20
+
+/**
+ * Reads a `text/event-stream` body, calling [onEvent] for each event until it returns false or the body ends. Lines end
+ * with CRLF, LF or CR (also split across reads); a leading byte order mark, comments and `retry:` are skipped; an event
+ * without `data:` is not dispatched, nor is an unterminated one at the end of the body. A line or event data over
+ * [MAX_SSE_SIZE] fails with an [IllegalStateException].
+ */
+internal suspend fun ByteReadChannel.readSse(onEvent: suspend (TspgenSseEvent) -> Boolean) {
+    var line = ByteArray(256)
+    var lineSize = 0
+    var firstLine = true
+    val data = StringBuilder()
+    var hasData = false
+    var event: String? = null
+    var id: String? = null
+    var afterCr = false
+    val buffer = ByteArray(8192)
+    fun append(from: Int, to: Int) {
+        val size = to - from
+        if (size == 0) return
+        check(lineSize + size <= MAX_SSE_SIZE) { "Server-sent event line longer than $MAX_SSE_SIZE bytes" }
+        if (lineSize + size > line.size) line = line.copyOf(maxOf(line.size * 2, lineSize + size))
+        buffer.copyInto(line, lineSize, from, to)
+        lineSize += size
+    }
+    while (true) {
+        val read = readAvailable(buffer, 0, buffer.size)
+        if (read == -1) return
+        var start = 0
+        for (i in 0 until read) {
+            val byte = buffer[i].toInt()
+            if (byte != LF && byte != CR) {
+                afterCr = false
+                continue
+            }
+            if (byte == LF && afterCr) {
+                afterCr = false
+                start = i + 1
+                continue
+            }
+            afterCr = byte == CR
+            append(start, i)
+            start = i + 1
+            var text = String(line, 0, lineSize, Charsets.UTF_8)
+            lineSize = 0
+            if (firstLine) {
+                text = text.removePrefix("\uFEFF")
+                firstLine = false
+            }
+            if (text.isEmpty()) {
+                if (hasData && !onEvent(TspgenSseEvent(event, data.toString(), id))) return
+                data.setLength(0)
+                hasData = false
+                event = null
+                continue
+            }
+            if (text.startsWith(":")) continue
+            val colon = text.indexOf(':')
+            val field = if (colon < 0) text else text.substring(0, colon)
+            val value = if (colon < 0) "" else text.substring(colon + 1).removePrefix(" ")
+            when (field) {
+                "data" -> {
+                    if (hasData) data.append('\n')
+                    data.append(value)
+                    check(data.length <= MAX_SSE_SIZE) { "Server-sent event data longer than $MAX_SSE_SIZE characters" }
+                    hasData = true
+                }
+                "event" -> event = value.ifEmpty { null }
+                "id" -> if ('\u0000' !in value) id = value
+            }
+        }
+        append(start, read)
+    }
+}
+
+private const val CR = '\r'.code
+private const val LF = '\n'.code
+<% if (it.sse.json) { -%>
+
+private val sseJsonKey = AttributeKey<Json>("tspgen.sseJson")
+
+/** Installed by the API client's defaults function: remembers its Json, so events decode like REST responses. */
+internal fun sseJsonPlugin(format: Json): ClientPlugin<Unit> =
+    createClientPlugin("TspgenSseJson") { client.attributes.put(sseJsonKey, format) }
+
+/** JSON of event payloads: the format given to the API client's defaults function, else its default. */
+internal val HttpClient.sseJson: Json
+    get() = attributes.getOrNull(sseJsonKey) ?: defaultSseJson
+
+private val defaultSseJson: Json = <%~ it.partJson %>
+<% } -%>
+<% for (const f of it.sse.functions) { -%>
+
+<%~ f %>
+<% } -%>
+<% } -%>

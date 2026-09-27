@@ -57,6 +57,13 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
       }
     }
   }
+  if (builder.sseMessageUsed) {
+    for (const d of declarations) {
+      if (d.fqn === builder.sseMessageFqn) {
+        reportDiagnostic(program, { code: "sse-message-conflict", format: { id: d.id, fqn: d.fqn }, target: NoTarget });
+      }
+    }
+  }
   return {
     basePackage: options.package,
     modelsPackage,
@@ -68,6 +75,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     javaTime,
     apiVersions: apiVersionConstants(api),
     ...(builder.fileUsed ? { httpFile: builder.httpFileFqn } : {}),
+    ...(builder.sseMessageUsed ? { sseMessage: builder.sseMessageFqn } : {}),
     ...(javaTime.length > 0 ? { javaTimeModule: `${modelsPackage}.javaTimeSerializersModule` } : {}),
   };
 }
@@ -77,6 +85,8 @@ function usedJavaTime(declarations: KtDecl[], services: KtService[]): string[] {
   const addDecl = (d: KtDecl): void => {
     if (d.kind === "data-class" || d.kind === "sealed-interface") types.push(...d.properties.map((p) => p.type));
     if (d.kind === "sealed-interface") d.variants.forEach(addDecl);
+    // Event payloads are encoded with the models' Json: a java.time payload needs its serializer.
+    if (d.kind === "events") types.push(...d.events.flatMap((e) => (e.data ? [e.data] : [])));
   };
   declarations.forEach(addDecl);
   for (const op of services.flatMap((s) => s.groups.flatMap((g) => g.operations))) {

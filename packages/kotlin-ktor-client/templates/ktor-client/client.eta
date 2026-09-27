@@ -7,7 +7,43 @@
 <% if (i > 0) { -%>
 
 <% } -%>
-<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations([...op.annotations, ...it.extras[op.id].annotations], "    ") %>    suspend fun <%= op.name %>(<%= c.signature(op) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %> {
+<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations([...op.annotations, ...it.extras[op.id].annotations], "    ") %><% const stream = c.stream(op); if (stream) { -%>
+    fun <%= op.name %>(<%= c.signature(op) %>): <%= op.result.type.text %> = flow {
+<% for (const line of c.preludeLines(stream)) { -%>
+        <%~ line %>
+<% } -%>
+        http.prepareRequest {
+            method = HttpMethod.<%= c.method(op.verb) %>
+            url {
+                takeFrom(baseUrl)
+<% if (segments) { -%>
+                appendPathSegments(<%~ segments %>)
+<% } -%>
+<% for (const line of c.queryLines(op)) { -%>
+                <%~ line %>
+<% } -%>
+            }
+            header(HttpHeaders.Accept, "text/event-stream")
+<% for (const line of c.requestLines(op)) { -%>
+            <%~ line %>
+<% } -%>
+        }.execute { response ->
+            if (!response.status.isSuccess()) {
+                throw when (response.status.value) {
+<% for (const e of c.errorBranches(op)) { -%>
+                    <%= e.match %> -> <%~ e.expr %>
+<% } -%>
+                }
+            }
+            response.bodyAsChannel().readSse { event ->
+<% for (const line of c.emitLines(stream)) { -%>
+                <%~ line %>
+<% } -%>
+            }
+        }
+    }
+<% } else { -%>
+    suspend fun <%= op.name %>(<%= c.signature(op) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %> {
         val response = http.request {
             method = HttpMethod.<%= c.method(op.verb) %>
             url {
@@ -25,5 +61,6 @@
         }
 <%~ include("ktor-client/response", { op, h: it.h }) %>
     }
+<% } -%>
 <% }) -%>
 }

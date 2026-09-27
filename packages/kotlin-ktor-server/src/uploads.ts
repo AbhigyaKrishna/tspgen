@@ -106,11 +106,18 @@ function freeName(op: ServerOperation, preferred: string): string {
 }
 
 /** The upload plan of an operation with a multipart or file body; undefined for other bodies. */
-export function planUpload(op: ServerOperation, mode: MultipartMode, limit: number, classes: PartClasses): ServerUpload | undefined {
+/** `flowClash`: a generated type is named Flow, so the streaming mode writes kotlinx's Flow qualified (its import would clash). */
+export function planUpload(
+  op: ServerOperation,
+  mode: MultipartMode,
+  limit: number,
+  classes: PartClasses,
+  flowClash = false,
+): ServerUpload | undefined {
   const body = op.body;
   if (!body || body.kind === "single") return undefined;
   if (body.kind === "file") return fileUpload(op, body, mode, `${limit}L`);
-  return multipartUpload(op, body, mode, `${limit}L`, classes);
+  return multipartUpload(op, body, mode, `${limit}L`, classes, flowClash);
 }
 
 function fileUpload(op: ServerOperation, body: KtBody, mode: MultipartMode, limit: string): ServerUpload {
@@ -153,7 +160,14 @@ function fileUpload(op: ServerOperation, body: KtBody, mode: MultipartMode, limi
   }
 }
 
-function multipartUpload(op: ServerOperation, body: KtBody, mode: MultipartMode, limit: string, classes: PartClasses): ServerUpload {
+function multipartUpload(
+  op: ServerOperation,
+  body: KtBody,
+  mode: MultipartMode,
+  limit: string,
+  classes: PartClasses,
+  flowClash: boolean,
+): ServerUpload {
   const parts = body.parts ?? [];
   const partImports = parts.filter((p) => p.kind !== "file").flatMap((p) => p.type.imports);
   const json = parts.some((p) => p.kind === "json") ? (["json"] as const) : [];
@@ -190,7 +204,7 @@ function multipartUpload(op: ServerOperation, body: KtBody, mode: MultipartMode,
       return {
         mode,
         kind: "multipart",
-        fields: [{ name: param, type: use(`Flow<${decl.name}>`, [FLOW, own]) }],
+        fields: [{ name: param, type: flowClash ? use(`${FLOW}<${decl.name}>`, [own]) : use(`Flow<${decl.name}>`, [FLOW, own]) }],
         lines: [
           `val ${param} = call.partsFlow<${decl.name}>(${limit}) { part ->`,
           "    when (part.name) {",

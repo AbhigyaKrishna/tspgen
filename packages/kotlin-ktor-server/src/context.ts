@@ -1,6 +1,7 @@
 import { metaObjects, metaStrings, type MetaData } from "@abhigyakrishna/tspgen-core";
 import { fqnTypeUse, identifier, type KtOperation, type KtTypeUse } from "@abhigyakrishna/tspgen-kotlin";
 import type { Program } from "@typespec/compiler";
+import type { SseMode } from "./sse.js";
 import type { ServerUpload } from "./uploads.js";
 
 /** A service parameter supplied by a route-handler expression instead of the HTTP request. */
@@ -16,6 +17,8 @@ export interface ServerOperation extends KtOperation {
   context: ContextParam[];
   /** How a multipart or file body is received; absent for JSON bodies. */
   upload?: ServerUpload;
+  /** How a server-sent event stream is written; set only on streaming operations. */
+  sse?: SseMode;
 }
 
 function plain(name: string): string {

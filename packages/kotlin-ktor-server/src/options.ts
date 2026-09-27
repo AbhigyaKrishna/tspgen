@@ -10,6 +10,7 @@ export interface KtorServerOptions {
   "max-upload-size": number;
   "generate-auth": boolean;
   "auth-providers": Record<string, string>;
+  sse: "text-writer" | "plugin";
   package?: string;
 }
 
@@ -57,6 +58,13 @@ export const ktorServerOptionsSchema = {
       default: {},
       description:
         'Auth scheme id → Kotlin expression naming its Ktor authentication provider (e.g. { BearerAuth: "JWT_AUTH" }); unmapped ids are used as string literals.',
+    },
+    sse: {
+      type: "string",
+      enum: ["text-writer", "plugin"],
+      default: "text-writer",
+      description:
+        'How server-sent event streams are written: text-writer (respondBytesWriter, no extra dependency) or plugin (the ktor-server-sse plugin, installed by the module); per operation via @meta("kotlin:ktor-server", #{ sse }).',
     },
     package: { type: "string", description: 'Server package (default "<package>.server").' },
   },

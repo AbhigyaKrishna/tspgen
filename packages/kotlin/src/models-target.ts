@@ -5,7 +5,8 @@ import { JAVA_TIME_CLASSES, javaTimeIn } from "./transform/type-map.js";
 
 /** Property types of a declaration, including those of variants nested in it. */
 function declTypes(decl: KtDecl): KtTypeUse[] {
-  if (decl.kind === "typealias" || decl.kind === "enum") return [];
+  // Events classes are not serialized: their payloads are encoded by the server and client routes.
+  if (decl.kind === "typealias" || decl.kind === "enum" || decl.kind === "events") return [];
   const own = decl.properties.map((p) => p.type);
   return decl.kind === "sealed-interface" ? [...own, ...decl.variants.flatMap(declTypes)] : own;
 }
@@ -76,6 +77,18 @@ function apiVersionFile(ir: KotlinIR): FileSpec[] {
   ];
 }
 
+/** `SseMessage`, the element of untyped server-sent event streams, when an operation streams them. */
+function sseMessageFile(ir: KotlinIR): FileSpec[] {
+  if (!ir.sseMessage) return [];
+  return [
+    {
+      path: `models/${ir.modelsPackage.replaceAll(".", "/")}/SseMessage.kt`,
+      template: "kotlin/file",
+      data: { package: ir.modelsPackage, imports: [], body: "kotlin/model/sse-message" },
+    },
+  ];
+}
+
 /** Built-in target: one Kotlin file per declaration under `models/`. */
 export const modelsTarget: Target<KotlinIR> = {
   name: "kotlin-models",
@@ -109,7 +122,7 @@ export const modelsTarget: Target<KotlinIR> = {
         },
       };
     });
-    return [...declFiles, ...httpFileFile(ir), ...javaTimeSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
+    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...javaTimeSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
   },
 };
 

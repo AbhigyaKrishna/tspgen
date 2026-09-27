@@ -86,7 +86,30 @@ export interface KtTypeAlias extends KtDeclBase {
   target: KtTypeUse;
 }
 
-export type KtDecl = KtDataClass | KtSealedInterface | KtEnum | KtTypeAlias;
+/** One event of an `@events` union: a class nested in the events interface. */
+export interface KtEvent {
+  /** Nested class name. */
+  name: string;
+  /** SSE `event:` value. */
+  event: string;
+  /** Payload type (`val data`); absent for a literal payload, whose class is a `data object`. */
+  data?: KtTypeUse;
+  /** Wire `data:` of a literal payload (JSON-encoded for a JSON payload). */
+  literal?: string;
+  /** The payload is JSON (else text: a string payload as-is, other scalars by `toString()` / parsing). */
+  json: boolean;
+  /** `@terminalEvent`: the stream ends after it. */
+  terminal: boolean;
+  docs?: string;
+}
+
+/** An `@events` union: a sealed interface with one nested class per event; not `@Serializable`. */
+export interface KtEvents extends KtDeclBase {
+  kind: "events";
+  events: KtEvent[];
+}
+
+export type KtDecl = KtDataClass | KtSealedInterface | KtEnum | KtTypeAlias | KtEvents;
 
 export interface KtParam {
   name: string;
@@ -136,8 +159,18 @@ export interface KtResponse {
   isError: boolean;
   description?: string;
   headers: KtParam[];
+  /** The body type; for a stream, its element type (the events interface or `SseMessage`). */
   body?: KtTypeUse;
   contentType?: string;
+  stream?: KtStream;
+}
+
+/** A server-sent event stream: a `Flow` of events. */
+export interface KtStream {
+  /** Element type: the events interface of a typed stream, else `SseMessage`. */
+  type: KtTypeUse;
+  /** The events declaration of a typed stream. */
+  events?: KtEvents;
 }
 
 export interface KtOperation {
@@ -193,6 +226,8 @@ export interface KotlinIR {
   apiVersions: ApiVersionConstant[];
   /** FQN of the generated `HttpFile` class, when any type uses `Http.File`. */
   httpFile?: string;
+  /** FQN of the generated `SseMessage` class, when an operation streams untyped server-sent events. */
+  sseMessage?: string;
   /** java.time classes used anywhere (models, parameters, bodies); each gets a generated serializer. */
   javaTime: string[];
   /**
@@ -203,7 +238,8 @@ export interface KotlinIR {
 }
 
 export type KtResult =
-  | { kind: "single"; type: KtTypeUse; status: number; contentType?: string }
+  /** `stream`: a server-sent event stream; `type` is then `Flow<element>`. */
+  | { kind: "single"; type: KtTypeUse; status: number; contentType?: string; stream?: KtStream }
   | { kind: "sealed"; type: KtTypeUse; decl: KtResultDecl };
 
 export interface KtResultVariant {

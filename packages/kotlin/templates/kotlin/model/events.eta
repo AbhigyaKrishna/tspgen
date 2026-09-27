@@ -1,0 +1,14 @@
+<% const d = it.decl; -%>
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>sealed interface <%= d.name %><% if (d.events.length) { %> {
+<% d.events.forEach((e, i) => { -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+<%~ it.h.kdoc(it.h.eventDoc(e), "    ") -%>
+<% if (e.data) { -%>
+    data class <%= e.name %>(val data: <%= e.data.text %>) : <%= d.name %>
+<% } else { -%>
+    data object <%= e.name %> : <%= d.name %>
+<% } -%>
+<% }) -%>
+}<% } %>

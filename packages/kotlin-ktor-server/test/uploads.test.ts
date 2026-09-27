@@ -342,4 +342,25 @@ interface UploadsService {
       'times = parts.text("times").required("times").convertParam("times") { partJson.decodeFromString<List<Instant>>(it) },',
     );
   });
+
+  it("writes kotlinx's Flow qualified in the streaming path where a model is named Flow", async () => {
+    const { outputs } = await server({ multipart: "streaming" }).compile(`
+      @service namespace S;
+      model Flow { rate: int32 }
+      model Upload { name: HttpPart<string>; flow: HttpPart<Flow> }
+      @route("/u") interface Uploads {
+        @post upload(@header contentType: "multipart/form-data", @multipartBody body: Upload): void;
+        @get flow(): Flow;
+      }
+    `);
+    const service = outputs[`${DIR}/UploadsService.kt`];
+    expect(service).toContain("    suspend fun upload(parts: kotlinx.coroutines.flow.Flow<UploadPart>)\n");
+    expect(service).toContain("    suspend fun flow(): Flow\n");
+    expect(service).toContain("import com.acme.models.Flow\n");
+    expect(service).not.toContain("import kotlinx.coroutines.flow.Flow\n");
+    const support = outputs[`${DIR}/ServerSupport.kt`];
+    expect(support).toContain("-> Unit): kotlinx.coroutines.flow.Flow<T> {");
+    expect(support).not.toContain("import kotlinx.coroutines.flow.Flow\n");
+    expect(support).toContain("import kotlinx.coroutines.flow.FlowCollector\n");
+  });
 });

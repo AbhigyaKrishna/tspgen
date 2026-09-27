@@ -9,6 +9,7 @@ import {
   type KtTypeUse,
 } from "@abhigyakrishna/tspgen-kotlin";
 import type { ServerOperation } from "./context.js";
+import { streamLine } from "./sse.js";
 import type { KtorServerOptions } from "./options.js";
 import type { ServerUnit } from "./units.js";
 
@@ -58,7 +59,7 @@ export function convert(expr: string, wire: string, typeText: string, imports: r
 }
 
 /** Kotlin expression turning a value into its wire string (kotlinx encoding for non-primitives). */
-function encode(expr: string, typeText: string, imports: readonly string[]): string {
+export function encode(expr: string, typeText: string, imports: readonly string[]): string {
   if (typeText === "String") return expr;
   if (javaTimeCodec(typeText, imports)) return `${expr}.toString()`;
   return CONVERTERS[typeText] ? `${expr}.toString()` : `encodeParam(${expr})`;
@@ -137,6 +138,11 @@ export const ktorServerHelpers = {
 
   requestFields,
   requestName,
+
+  /** The route statement streaming a server-sent event operation's flow. */
+  streamLine(op: ServerOperation, call: string): string {
+    return streamLine(op.sse ?? "text-writer", call);
+  },
 
   handlerParams(op: KtOperation, options: KtorServerOptions): string {
     const params = options["call-access"] ? ["call: ApplicationCall"] : [];

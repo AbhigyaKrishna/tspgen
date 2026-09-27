@@ -1,0 +1,9 @@
+/**
+ * One server-sent event of an untyped event stream: its `event:` name (absent for the default "message" type),
+ * `data:` lines (joined with "\n") and `id:`.
+ */
+data class SseMessage(
+    val data: String,
+    val event: String? = null,
+    val id: String? = null,
+)

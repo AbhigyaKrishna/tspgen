@@ -31,3 +31,25 @@ export const petSpec = `
     @delete remove(@path petId: int64): void;
   }
 `;
+
+/** Tester with the optional SSE libraries (`@typespec/streams`, `@typespec/events`, `@typespec/sse`). */
+export const SseTester = createTester(resolvePath(import.meta.dirname, ".."), {
+  libraries: [
+    "@typespec/http",
+    "@typespec/streams",
+    "@typespec/events",
+    "@typespec/sse",
+    "@abhigyakrishna/tspgen-core",
+    "@abhigyakrishna/tspgen-kotlin",
+  ],
+})
+  .importLibraries()
+  .using("Http", "SSE", "Events", "TspGen");
+
+export function sseServer(targetOptions: Record<string, unknown> = {}, emitterOptions: Record<string, unknown> = {}) {
+  return SseTester.emit("@abhigyakrishna/tspgen-kotlin", {
+    package: "com.acme",
+    targets: [{ [TARGET]: targetOptions }],
+    ...emitterOptions,
+  });
+}

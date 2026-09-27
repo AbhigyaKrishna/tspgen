@@ -109,6 +109,12 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Kotlin type '${"fqn"}' is generated from both '${"first"}' and '${"second"}'. Use @Kotlin.name or @Kotlin.packageName to disambiguate.`,
       },
     },
+    "sse-message-conflict": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Model '${"id"}' is generated as '${"fqn"}', the class untyped server-sent events map to. Rename it with @Kotlin.name.`,
+      },
+    },
     "http-file-conflict": {
       severity: "error",
       messages: {

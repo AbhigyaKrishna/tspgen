@@ -29,6 +29,7 @@ export function kotlinxImports(decl: KtDecl): string[] {
         "kotlinx.serialization.Serializable",
       ];
     case "typealias":
+    case "events":
       return [];
   }
 }

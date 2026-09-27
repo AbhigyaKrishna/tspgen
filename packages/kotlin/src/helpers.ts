@@ -1,6 +1,6 @@
 import { kotlinString } from "./kotlin-string.js";
 import { needsSerialName } from "./serialization/kotlinx.js";
-import type { KtResultVariant } from "./transform/model.js";
+import type { KtEvent, KtResultVariant } from "./transform/model.js";
 
 /** Helpers exposed to templates as `it.h`. */
 export const kotlinHelpers = {
@@ -38,6 +38,11 @@ export const kotlinHelpers = {
   initBlock(checks: readonly string[] = []): string {
     if (checks.length === 0) return "";
     return ` {\n    init {\n${checks.map((c) => `        ${c}\n`).join("")}    }\n}`;
+  },
+  /** KDoc of an event class: its docs, the event name and data it travels as, and whether it ends the stream. */
+  eventDoc(e: KtEvent): string {
+    const wire = e.literal !== undefined ? `\`event: ${e.event}\`, \`data: ${e.literal}\`` : `\`event: ${e.event}\``;
+    return [e.docs, `${e.docs ? "\n" : ""}Sent as ${wire}${e.terminal ? "; ends the stream" : ""}.`].filter(Boolean).join("\n");
   },
   needsSerialName,
   str: kotlinString,

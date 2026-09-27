@@ -4,6 +4,7 @@ import type {
   EnumIR,
   ModelIR,
   PropertyIR,
+  StreamIR,
   TypeIR,
   TypeRef,
   UnionIR,
@@ -14,7 +15,17 @@ import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { camel, identifier, typeName, upperSnake } from "../naming.js";
 import { decoratorArg, decoratorArgs } from "./decorators.js";
-import type { KtDataClass, KtDecl, KtEnumMember, KtProperty, KtSealedInterface, KtTypeUse } from "./model.js";
+import type {
+  KtDataClass,
+  KtDecl,
+  KtEnumMember,
+  KtEvent,
+  KtEvents,
+  KtProperty,
+  KtSealedInterface,
+  KtStream,
+  KtTypeUse,
+} from "./model.js";
 import { mappedPackage } from "./packages.js";
 import {
   fqnTypeUse,
@@ -67,6 +78,7 @@ export class DeclarationBuilder {
   /** Ids of multipart models (with parts, or request bodies): plain (non-@Serializable) classes, as they hold files. */
   private readonly multipartModels: Set<string>;
   private usesFile = false;
+  private usesSseMessage = false;
 
   constructor(
     private readonly program: Program,
@@ -92,6 +104,24 @@ export class DeclarationBuilder {
   /** Whether any type use so far mapped `Http.File` to `HttpFile`. */
   get fileUsed(): boolean {
     return this.usesFile;
+  }
+
+  /** FQN of the generated `SseMessage` class (models package): the element of untyped event streams. */
+  get sseMessageFqn(): string {
+    return `${this.options.modelsPackage}.SseMessage`;
+  }
+
+  /** Whether some operation streams untyped server-sent events (so `SseMessage` is generated). */
+  get sseMessageUsed(): boolean {
+    return this.usesSseMessage;
+  }
+
+  /** The Kotlin side of a response stream whose body type is `ref`: its events declaration, else `SseMessage`. */
+  stream(stream: StreamIR, ref: TypeRef): KtStream {
+    const decl = stream.events && ref.kind === "named" ? this.decls.get(ref.id) : undefined;
+    if (decl?.kind === "events") return { type: this.typeUse(ref), events: decl };
+    this.usesSseMessage = true;
+    return { type: { text: "SseMessage", imports: [this.sseMessageFqn], nullable: false } };
   }
 
   /** Kotlin name of property `name` declared on model `modelId`, as its data class declares it. */
@@ -237,6 +267,7 @@ export class DeclarationBuilder {
           ? { ...base, kind: "enum", members: [] }
           : { ...base, kind: "typealias", target: JSON_ELEMENT };
       case "union":
+        if (t.events) return { ...base, kind: "events", events: [] };
         switch (this.unionShape(t)) {
           case "enum":
             return { ...base, kind: "enum", members: [] };
@@ -293,6 +324,10 @@ export class DeclarationBuilder {
 
   private fillUnion(u: UnionIR): void {
     const decl = this.decls.get(u.id)!;
+    if (decl.kind === "events") {
+      this.fillEvents(u, decl);
+      return;
+    }
     const shape = this.unionShape(u);
     if (decl.kind === "enum") {
       decl.members = u.variants.map((v) => {
@@ -322,6 +357,36 @@ export class DeclarationBuilder {
         reportDiagnostic(this.program, { code: "unsupported-union", format: { id: u.id }, target: NoTarget });
       }
     }
+  }
+
+  /**
+   * One nested class per event, named after the variant (an unnamed one after its literal payload, else its event
+   * name). A nested class shadows same-named types inside the interface, so names the payload types use (and the
+   * interface's own) get an `Event` suffix.
+   */
+  private fillEvents(u: UnionIR, decl: KtEvents): void {
+    const events = u.events ?? [];
+    const payloads = events.map((e) => (e.payload.kind === "literal" ? undefined : this.typeUse(e.payload)));
+    const referenced = new Set([decl.name, ...payloads.flatMap((p) => (p ? identifiers(p.text) : []))]);
+    const taken = new Set<string>();
+    decl.events = events.map((e, i): KtEvent => {
+      const variant = u.variants[i]?.name;
+      const literal = e.payload.kind === "literal" ? e.payload.value : undefined;
+      const label = variant ?? (literal !== undefined && /[A-Za-z]/.test(String(literal)) ? String(literal) : e.name);
+      const base = typeName(label.replace(/[^A-Za-z0-9]+/g, " ").trim());
+      let name = base;
+      for (let n = 1; referenced.has(name) || taken.has(name); n++) name = `${base}Event${n > 1 ? n : ""}`;
+      taken.add(name);
+      const json = /[/+]json(;|$)/.test(e.contentType);
+      return {
+        name,
+        event: e.name,
+        ...(literal !== undefined ? { literal: json ? JSON.stringify(literal) : String(literal) } : { data: payloads[i]! }),
+        json,
+        terminal: e.terminal,
+        ...(e.docs ? { docs: e.docs } : {}),
+      };
+    });
   }
 
   /**

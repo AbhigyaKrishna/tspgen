@@ -13,6 +13,7 @@ import type { KtorServerOptions } from "./options.js";
 import { commonPrefix, routeTree, type RouteFunction } from "./routes.js";
 import { builtinStyles, resolveStyle, type RoutingStyle } from "./styles.js";
 import { buildUnits, type ServerUnit } from "./units.js";
+import { frameFunction, sseFunctions, sseImports, sseJsonExpr, sseMode, ssePlan } from "./sse.js";
 import { multipartMode, PartClasses, planUpload, uploadLimit, type SupportNeed } from "./uploads.js";
 
 const TARGET_NAME = "@abhigyakrishna/tspgen-kotlin-ktor-server";
@@ -113,10 +114,22 @@ const UPLOAD_SUPPORT: Record<SupportNeed, { imports: (ir: KotlinIR) => string[];
 
 const SUPPORT_NEEDS: readonly SupportNeed[] = ["limit", "parts", "json", "buffered", "files", "streaming", "channel", "file"];
 
-function withUpload(program: Program, op: ServerOperation, options: KtorServerOptions, classes: PartClasses): ServerOperation {
+function withSse(program: Program, op: ServerOperation, options: KtorServerOptions): ServerOperation {
+  if (op.result.kind !== "single" || !op.result.stream) return op;
+  return { ...op, sse: sseMode(program, op, options.sse ?? "text-writer") };
+}
+
+function withUpload(
+  program: Program,
+  op: ServerOperation,
+  options: KtorServerOptions,
+  classes: PartClasses,
+  flowClash: boolean,
+): ServerOperation {
   if (!op.body || op.body.kind === "single") return op;
   const mode = multipartMode(program, op, options.multipart ?? "buffered");
-  const upload = planUpload(op, mode, uploadLimit(program, op, options["max-upload-size"] ?? DEFAULT_UPLOAD_LIMIT), classes);
+  const limit = uploadLimit(program, op, options["max-upload-size"] ?? DEFAULT_UPLOAD_LIMIT);
+  const upload = planUpload(op, mode, limit, classes, flowClash);
   return upload ? { ...op, upload } : op;
 }
 
@@ -129,7 +142,8 @@ function typeImports(ops: ServerOperation[], file: "service" | "routes" = "servi
         ? op.upload.fields.flatMap((f) => f.type.imports)
         : []
       : (op.body?.type.imports ?? [])),
-    ...op.result.type.imports,
+    // Routes hand a stream to ServerSupport's writer without naming its types.
+    ...(file === "routes" && op.sse ? [] : op.result.type.imports),
     ...op.context.flatMap((c) => c.type.imports),
   ]);
 }
@@ -408,26 +422,57 @@ export function planServerFiles(
   const dirOf = (pkg: string) => `server/${pkg.replaceAll(".", "/")}`;
   const files: FileSpec[] = [];
   const partClasses = new PartClasses(supportPkg);
+  // A generated type named Flow: kotlinx's Flow is written qualified in the streaming upload path.
+  const flowClash = ir.declarations.some((d) => d.name === "Flow");
   const serviceUnits = ir.services.map((service) =>
     buildUnits(service, options.grouping, options["service-suffix"]).map((unit) => ({
       ...unit,
       operations: unit.operations.map((op) =>
-        withUpload(program, withContext(program, op, op.meta["kotlin:ktor-server"] ?? {}), options, partClasses),
+        withSse(
+          program,
+          withUpload(program, withContext(program, op, op.meta["kotlin:ktor-server"] ?? {}), options, partClasses, flowClash),
+          options,
+        ),
       ),
     })),
   );
   const used = new Set(serviceUnits.flat().flatMap((u) => u.operations.flatMap((op) => op.upload?.support ?? [])));
   const needs = SUPPORT_NEEDS.filter((n) => used.has(n));
-  const supportFunctions = [...SUPPORT_FUNCTIONS, ...needs.flatMap((n) => UPLOAD_SUPPORT[n].functions)].sort();
+  const sse = ssePlan(serviceUnits.flat().flatMap((u) => u.operations));
+  const supportFunctions = [
+    ...SUPPORT_FUNCTIONS,
+    ...needs.flatMap((n) => UPLOAD_SUPPORT[n].functions),
+    ...(sse ? sseFunctions(sse) : []),
+  ].sort();
   files.push({
     path: `${dirOf(supportPkg)}/ServerSupport.kt`,
     template: "kotlin/file",
     data: {
       package: supportPkg,
-      imports: organizeImports([...SUPPORT_IMPORTS, ...needs.flatMap((n) => UPLOAD_SUPPORT[n].imports(ir))], supportPkg),
+      imports: organizeImports(
+        [
+          ...SUPPORT_IMPORTS,
+          ...needs.flatMap((n) => UPLOAD_SUPPORT[n].imports(ir)).filter((i) => !flowClash || i !== "kotlinx.coroutines.flow.Flow"),
+          ...(sse ? sseImports(sse, ir) : []),
+        ],
+        supportPkg,
+      ),
       body: "ktor-server/support",
       uploads: Object.fromEntries(needs.map((n) => [n, true])),
+      flowType: flowClash ? "kotlinx.coroutines.flow.Flow" : "Flow",
       partJson: ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "Json",
+      ...(sse
+        ? {
+            sse: {
+              ...sse,
+              jsonExpr: sseJsonExpr(ir),
+              frames: [
+                ...sse.events.map((d) => frameFunction(d).join("\n")),
+                ...(sse.sseMessage ? ["internal fun SseMessage.sseFrame(): TspgenSseFrame = TspgenSseFrame(event, data, id)"] : []),
+              ],
+            },
+          }
+        : {}),
     },
   });
   for (const part of partClasses.all()) {
@@ -451,7 +496,7 @@ export function planServerFiles(
         routesFile(unit, pkg, dirOf(pkg), options, style, extras, support, functions.get(unit)!),
       );
     }
-    if (options.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style));
+    if (options.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style, sse?.json ?? false));
   }
   return files;
 }
@@ -523,6 +568,7 @@ function moduleFile(
   pkg: string,
   dir: string,
   style: RoutingStyle,
+  sharedJson: boolean,
 ): FileSpec {
   const exceptions = new Map<string, string>();
   for (const unit of units) {
@@ -532,11 +578,14 @@ function moduleFile(
       }
     }
   }
-  const installs = style.plugins ?? [];
+  // The SSE plugin when an operation streams through it.
+  const sse = units.some((u) => u.operations.some((op) => op.sse === "plugin")) ? ["io.ktor.server.sse.SSE"] : [];
+  const installs = [...(style.plugins ?? []), ...sse];
   const unitImports = units
     .filter((u) => u.package && u.package !== pkg)
     .flatMap((u) => [`${u.package}.${u.serviceName}`, ...functions.get(u)!.map((f) => `${u.package}.${f.name}`)]);
-  const javaTime = ir.javaTimeModule ? [ir.javaTimeModule, "kotlinx.serialization.json.Json"] : [];
+  // With JSON event payloads, content negotiation installs ServerSupport's sseJson: REST and events share one Json.
+  const javaTime = ir.javaTimeModule && !sharedJson ? [ir.javaTimeModule, "kotlinx.serialization.json.Json"] : [];
   const imports = [...MODULE_IMPORTS, ...installs, ...exceptions.keys(), `${ir.apiPackage}.ApiException`, ...unitImports, ...javaTime];
   const base = camel(service.name);
   return {
@@ -551,7 +600,7 @@ function moduleFile(
       /** Route function names per unit, in unit order. */
       mounts: units.map((u) => functions.get(u)!.map((f) => f.name)),
       installs,
-      json: ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "",
+      json: sharedJson ? "sseJson" : ir.javaTimeModule ? `Json { serializersModule = ${ir.javaTimeModule.slice(ir.javaTimeModule.lastIndexOf(".") + 1)} }` : "",
       exceptions: [...exceptions.values()],
       moduleFn: `${base}Module`,
       apiRoutesFn: `${base}ApiRoutes`,

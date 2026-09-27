@@ -49,7 +49,9 @@ function declImportCandidates(decl: KtDecl): string[] {
       ? decl.target.imports
       : decl.kind === "enum"
         ? []
-        : [...decl.properties.flatMap((p) => p.type.imports), ...decl.implements];
+        : decl.kind === "events"
+          ? decl.events.flatMap((e) => e.data?.imports ?? [])
+          : [...decl.properties.flatMap((p) => p.type.imports), ...decl.implements];
   const variants = decl.kind === "sealed-interface" ? decl.variants.flatMap(declImportCandidates) : [];
   return [...typeImports, ...decl.imports, ...kotlinxImports(decl), ...variants];
 }
@@ -75,6 +77,8 @@ export function qualifyDecl(decl: KtDecl, qualified: readonly string[]): KtDecl 
       return { ...decl, target: fix(decl.target) };
     case "enum":
       return decl;
+    case "events":
+      return { ...decl, events: decl.events.map((e) => (e.data ? { ...e, data: fix(e.data) } : e)) };
     case "sealed-interface":
       return {
         ...decl,
