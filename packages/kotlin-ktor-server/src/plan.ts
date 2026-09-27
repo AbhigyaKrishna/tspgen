@@ -7,12 +7,14 @@ import {
   organizeImports,
   SERIALIZED_CLASSES,
   serializedIn,
+  serializerExpr,
+  serializerImports,
   typeName,
   type KotlinIR,
   type KtService,
 } from "@abhigyakrishna/tspgen-kotlin";
 import { withContext, type ServerOperation } from "./context.js";
-import { resourceSerializedClasses } from "./helpers.js";
+import { bodySerializerImports, receivesJson, resourceSerializedClasses, respondsJson } from "./helpers.js";
 import type { KtorServerOptions } from "./options.js";
 import { commonPrefix, routeTree, type RouteFunction } from "./routes.js";
 import { builtinStyles, resolveStyle, type RoutingStyle } from "./styles.js";
@@ -64,9 +66,41 @@ const PROBLEM_IMPORTS = [
   "io.ktor.http.HttpStatusCode",
   "io.ktor.server.plugins.BadRequestException",
   "io.ktor.server.response.respondText",
+  "kotlinx.serialization.ExperimentalSerializationApi",
+  "kotlinx.serialization.MissingFieldException",
+  "kotlinx.serialization.SerializationException",
   "kotlinx.serialization.json.buildJsonObject",
   "kotlinx.serialization.json.put",
 ];
+
+/** ServerSupport.kt imports of `receiveJson` / `respondJson` (bodies read or written with an explicit serializer). */
+const RECEIVE_JSON_IMPORTS = [
+  "io.ktor.http.ContentType",
+  "io.ktor.server.plugins.BadRequestException",
+  "io.ktor.server.plugins.UnsupportedMediaTypeException",
+  "io.ktor.server.request.contentType",
+  "io.ktor.server.request.receiveText",
+  "kotlinx.serialization.KSerializer",
+];
+
+const RESPOND_JSON_IMPORTS = [
+  "io.ktor.http.ContentType",
+  "io.ktor.http.HttpStatusCode",
+  "io.ktor.server.response.respondText",
+  "kotlinx.serialization.KSerializer",
+];
+
+/** Typed error bodies written with an explicit serializer: exception simple name → serializer expression. */
+function errorSerializers(ops: ServerOperation[]): Map<string, { serializer: string; imports: string[] }> {
+  const found = new Map<string, { serializer: string; imports: string[] }>();
+  for (const op of ops) {
+    for (const error of op.errors) {
+      const serializer = error.body && error.exception.text !== "ApiException" ? serializerExpr(error.body) : undefined;
+      if (serializer) found.set(error.exception.text, { serializer, imports: serializerImports(error.body!) });
+    }
+  }
+  return found;
+}
 
 /** ServerSupport.kt helpers per upload need, their imports, and the functions routes elsewhere import. */
 const UPLOAD_SUPPORT: Record<SupportNeed, { imports: (ir: KotlinIR) => string[]; functions: string[] }> = {
@@ -453,11 +487,15 @@ export function planServerFiles(
   );
   const used = new Set(serviceUnits.flat().flatMap((u) => u.operations.flatMap((op) => op.upload?.support ?? [])));
   const needs = SUPPORT_NEEDS.filter((n) => used.has(n));
-  const sse = ssePlan(serviceUnits.flat().flatMap((u) => u.operations));
-  // One Json for bodies (the module's content negotiation), JSON parts and JSON events.
-  const serverJson = runtime.module || used.has("json") || (sse?.json ?? false);
+  const allOps = serviceUnits.flat().flatMap((u) => u.operations);
+  const sse = ssePlan(allOps);
+  // Bodies whose JSON form needs an explicit serializer (`@encode(string)` values): ServerSupport's JSON helpers.
+  const receiveJson = allOps.some(receivesJson);
+  const respondJson = allOps.some(respondsJson) || errorSerializers(allOps).size > 0;
   const supportFunctions = [
     ...SUPPORT_FUNCTIONS,
+    ...(receiveJson ? ["receiveJson"] : []),
+    ...(respondJson ? ["respondJson"] : []),
     ...needs.flatMap((n) => UPLOAD_SUPPORT[n].functions),
     ...(sse ? sseFunctions(sse) : []),
   ].sort();
@@ -471,8 +509,12 @@ export function planServerFiles(
           ...SUPPORT_IMPORTS,
           ...needs.flatMap((n) => UPLOAD_SUPPORT[n].imports(ir)).filter((i) => !flowClash || i !== "kotlinx.coroutines.flow.Flow"),
           ...(sse ? sseImports(sse, ir, runtime.sseHeaders.length > 0) : []),
-          ...(serverJson ? ["io.ktor.serialization.kotlinx.json.DefaultJson", ...(ir.serializersModule ? [ir.serializersModule] : [])] : []),
+          // One Json for bodies (the module's or the application's content negotiation), JSON parts and JSON events.
+          "io.ktor.serialization.kotlinx.json.DefaultJson",
+          ...(ir.serializersModule ? [ir.serializersModule] : []),
           ...(runtime.errorBody === "problem" ? PROBLEM_IMPORTS : []),
+          ...(receiveJson ? RECEIVE_JSON_IMPORTS : []),
+          ...(respondJson ? RESPOND_JSON_IMPORTS : []),
         ],
         supportPkg,
       ),
@@ -480,7 +522,9 @@ export function planServerFiles(
       uploads: Object.fromEntries(needs.map((n) => [n, true])),
       flowType: flowClash ? "kotlinx.coroutines.flow.Flow" : "Flow",
       problem: runtime.errorBody === "problem",
-      ...(serverJson ? { serverJson: serverJsonLines(ir, runtime).join("\n") } : {}),
+      receiveJson,
+      respondJson,
+      serverJson: serverJsonLines(ir, runtime).join("\n"),
       ...(sse
         ? {
             sse: {
@@ -578,6 +622,7 @@ function routesFile(
   const serializers = resourceSerialized.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`);
   const imports = [
     ...typeImports(unit.operations, "routes"),
+    ...unit.operations.flatMap(bodySerializerImports),
     ...style.imports(unit, options),
     ...support,
     ...unit.operations.flatMap((op) => extras[op.id].imports),
@@ -658,13 +703,23 @@ function errorsFile(ir: KotlinIR, service: KtService, units: ServerUnit[], pkg: 
     }
   }
   const problem = runtime.errorBody === "problem";
+  const serializers = errorSerializers(units.flatMap((u) => u.operations));
+  const plainErrors = [...exceptions.values()].filter((name) => !serializers.has(name));
   const imports = [
     `${ir.apiPackage}.ApiException`,
+    ...[...serializers.values()].flatMap((s) => s.imports),
     "io.ktor.http.HttpStatusCode",
     "io.ktor.server.plugins.statuspages.StatusPagesConfig",
     ...exceptions.keys(),
-    ...(exceptions.size > 0 || !problem ? ["io.ktor.server.response.respond"] : []),
-    ...(problem ? ["io.ktor.server.plugins.BadRequestException", "io.ktor.server.plugins.PayloadTooLargeException"] : []),
+    ...(plainErrors.length > 0 || !problem ? ["io.ktor.server.response.respond"] : []),
+    ...(problem
+      ? [
+          "io.ktor.server.plugins.BadRequestException",
+          "io.ktor.server.plugins.ContentTransformationException",
+          "io.ktor.server.plugins.PayloadTooLargeException",
+          "io.ktor.server.request.contentType",
+        ]
+      : []),
   ];
   return {
     path: `${dir}/${service.name}Errors.kt`,
@@ -675,6 +730,8 @@ function errorsFile(ir: KotlinIR, service: KtService, units: ServerUnit[], pkg: 
       body: "ktor-server/errors",
       service,
       exceptions: [...exceptions.values()],
+      /** Exception simple name → explicit serializer of its body (`respondJson`), for bodies whose JSON form needs one. */
+      exceptionSerializers: Object.fromEntries([...serializers].map(([name, s]) => [name, s.serializer])),
       problem,
       errorsFn: `${camel(service.name)}Errors`,
     },

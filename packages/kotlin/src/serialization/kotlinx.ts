@@ -15,6 +15,9 @@ export function kotlinxImports(decl: KtDecl): string[] {
         ...(decl.serialName !== undefined || decl.properties.some((p) => p.serialName !== undefined)
           ? ["kotlinx.serialization.SerialName"]
           : []),
+        ...(decl.properties.some((p) => p.encodeDefault)
+          ? ["kotlinx.serialization.EncodeDefault", "kotlinx.serialization.ExperimentalSerializationApi"]
+          : []),
       ];
     case "sealed-interface":
       return [

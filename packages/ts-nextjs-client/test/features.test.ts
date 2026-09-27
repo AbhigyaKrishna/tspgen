@@ -117,7 +117,7 @@ describe("features.error-getters", () => {
     const { outputs } = await nextjs({ "client-style": "flat", features: { "error-getters": false } }, HOUSE).compile(flatSpec);
     const client = outputs["client.ts"]!;
     for (const getter of ["isUnauthorized", "isForbidden", "isNotFound", "isConflict"]) expect(client).not.toContain(getter);
-    expect(client).toContain("    this.body = body;\n  }\n}\n");
+    expect(client).toContain("    this.problem = problem;\n  }\n}\n");
     expect(typecheck(outputs)).toBe("");
   });
 

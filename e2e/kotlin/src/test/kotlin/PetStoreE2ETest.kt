@@ -57,6 +57,7 @@ import java.io.Serializable
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
@@ -73,8 +74,11 @@ class InMemoryPets : PetsService {
             .take(limit ?: Int.MAX_VALUE)
     }
 
-    override suspend fun get(petId: Long, trace: String?): Pet =
-        pets[petId] ?: throw NotFoundException(NotFound("pet $petId not found"))
+    override suspend fun get(petId: Long, trace: String?): Pet {
+        // An unmapped ApiException: a problem+json response, though get declares ApiError as its default error.
+        if (petId < 0) throw ApiException(422, "petId must not be negative")
+        return pets[petId] ?: throw NotFoundException(NotFound("pet $petId not found"))
+    }
 
     override suspend fun create(pet: Pet): CreateResult =
         if (pets.containsKey(pet.id)) {
@@ -197,6 +201,16 @@ class PetStoreE2ETest {
         assertEquals(HttpStatusCode.Created, created.status)
         // No "tags":null / "born_at":null, and weight (default 1.0) is omitted.
         assertEquals("""{"id":7,"name":"Tom","species":"cat"}""", client.get("/pets/7").bodyAsText())
+
+        // Required properties with a default are written even when equal to it (the TypeScript schemas require them).
+        client.post("/accessories") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"type":"collar","size":3}""")
+        }
+        assertEquals(
+            """{"items":[{"type":"collar","size":3,"material":"leather","rings":1}],"total":1}""",
+            client.get("/accessories").bodyAsText(),
+        )
     }
 
     @Test
@@ -224,6 +238,34 @@ class PetStoreE2ETest {
         assertTrue(missing["detail"]?.jsonPrimitive?.content.orEmpty().contains("count"), missing.toString())
         val unparsable = problem(client.get("/pets/abc"), HttpStatusCode.BadRequest)
         assertTrue(unparsable["detail"]?.jsonPrimitive?.content.orEmpty().contains("petId"), unparsable.toString())
+
+        // Bodies that do not decode: a generic detail (missing fields, JSON path), never the models' package or the body.
+        val details = listOf(
+            "{" to "Malformed request body at path $",
+            """{"id":7}""" to "Malformed request body: missing 'name', 'species'",
+            """{"id":7,"name":"Tom","species":"dragon"}""" to "Malformed request body at path $.species",
+            """{"id":"x","name":"Tom","species":"cat"}""" to "Malformed request body at path $.id",
+        ).map { (body, expected) ->
+            val response = client.post("/pets") {
+                contentType(ContentType.Application.Json)
+                setBody(body)
+            }
+            val detail = problem(response, HttpStatusCode.BadRequest)["detail"]?.jsonPrimitive?.content.orEmpty()
+            assertEquals(expected, detail, body)
+            detail
+        }
+        for (detail in details + listOf(missing.toString(), unparsable.toString())) {
+            assertFalse("com.example.petstore" in detail || "JSON input" in detail || "Tom" in detail, detail)
+        }
+        val unsupported = client.post("/pets") {
+            contentType(ContentType.Text.Plain)
+            setBody("Tom")
+        }
+        // Ktor's own message would name the model class.
+        assertEquals(
+            "Content type text/plain; charset=UTF-8 is not supported",
+            problem(unsupported, HttpStatusCode.UnsupportedMediaType)["detail"]?.jsonPrimitive?.content,
+        )
     }
 
     @Test
@@ -276,6 +318,12 @@ class PetStoreE2ETest {
         assertEquals(404, missing.status)
         assertEquals("pet 99 not found", missing.error.message)
 
+        // A problem+json response is never decoded as the declared error model (ApiError).
+        val problem = assertFailsWith<ApiException> { api.pets.get(-1) }
+        assertFalse(problem is ApiErrorException)
+        assertEquals(422, problem.status)
+        assertEquals("petId must not be negative", problem.message)
+
         val bad = assertFailsWith<ApiErrorException> { api.pets.list(limit = -1) }
         assertEquals(400, bad.status)
         assertEquals("bad_limit", bad.error.code)
@@ -289,7 +337,7 @@ class PetStoreE2ETest {
         api.toys.add(Ball(name = "red", diameter = 3.5f))
         api.toys.add(Rope(name = "long", length = 2))
         assertEquals(listOf(Ball("red", 3.5f), Rope("long", 2)), api.toys.list())
-        assertTrue(Ball("x", 1f) is Serializable)
+        assertTrue(Serializable::class.java.isAssignableFrom(Ball::class.java))
 
         val taken = assertFailsWith<ApiException> { api.toys.add(Ball(name = "taken", diameter = 1f)) }
         assertEquals(409, taken.status)

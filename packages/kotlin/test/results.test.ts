@@ -97,4 +97,47 @@ open class ApiException(
     const { outputs } = await emitter().compile(`model Lonely { x: int32 }`);
     expect(Object.keys(outputs).some((k) => k.includes("/api/"))).toBe(false);
   });
+
+  it("names exceptions for non-model error bodies (array, map, scalar) with valid Kotlin identifiers", async () => {
+    const arraySpec = `
+      @service namespace PetStore;
+      model Pet { id: int64 }
+      @error model Conflict { @statusCode _: 409; @body ids: int64[]; }
+      @error model Duplicate { @statusCode _: 410; @body names: string[]; }
+      @error model Busy { @statusCode _: 429; @body retryAfter: int64; }
+      @route("/pets") interface Pets {
+        @get get(@path id: int64): Pet | Conflict | Duplicate | Busy;
+      }
+    `;
+    const { program } = await Tester.compile(arraySpec);
+    const ir = transformToKotlin(program, buildApiIR(program), { package: "com.acme", enumMemberNaming: "UPPER_SNAKE" });
+    const [get] = ir.services[0].groups[0].operations;
+
+    expect(get.errors).toMatchObject([
+      { statusCodes: 409, exception: { text: "ListOfLongException" } },
+      { statusCodes: 410, exception: { text: "ListOfStringException" } },
+      { statusCodes: 429, exception: { text: "LongException" } },
+    ]);
+    for (const e of get.errors) {
+      expect(e.exception.text).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/);
+    }
+    expect(ir.apiDeclarations.map((d) => d.name)).toEqual(
+      expect.arrayContaining(["ListOfLongException", "ListOfStringException", "LongException"]),
+    );
+  });
+
+  it("names exceptions for a map error body with a valid Kotlin identifier", async () => {
+    const mapSpec = `
+      @service namespace PetStore;
+      model Pet { id: int64 }
+      @error model Throttled { @statusCode _: 503; @body counts: Record<int64>; }
+      @route("/pets") interface Pets {
+        @get get(@path id: int64): Pet | Throttled;
+      }
+    `;
+    const { program } = await Tester.compile(mapSpec);
+    const ir = transformToKotlin(program, buildApiIR(program), { package: "com.acme", enumMemberNaming: "UPPER_SNAKE" });
+    const [get] = ir.services[0].groups[0].operations;
+    expect(get.errors).toMatchObject([{ statusCodes: 503, exception: { text: "MapOfLongException" } }]);
+  });
 });

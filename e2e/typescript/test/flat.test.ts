@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ApiError, PetFeedClient } from "../generated/flat";
+import { PetFeedError, PetFeedClient } from "../generated/flat";
 import { startStubServer } from "./stub-server";
 
 let server: Server;
@@ -43,11 +43,11 @@ describe("generated flat client streams against a stub server", () => {
     ]);
   });
 
-  it("throws ApiError before streaming and aborts mid-stream", async () => {
+  it("throws PetFeedError before streaming and aborts mid-stream", async () => {
     const error = await collect(api.watch({ fail: 404 })).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).status).toBe(404);
-    expect((error as ApiError).body).toEqual({ message: "no feed" });
+    expect(error).toBeInstanceOf(PetFeedError);
+    expect((error as PetFeedError).status).toBe(404);
+    expect((error as PetFeedError).body).toEqual({ message: "no feed" });
 
     const closedBefore = requests.filter((r) => r === "closed /feed").length;
     const controller = new AbortController();

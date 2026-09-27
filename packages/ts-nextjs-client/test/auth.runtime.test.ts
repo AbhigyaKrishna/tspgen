@@ -15,6 +15,7 @@ const spec = `
     @get @route("/basic") @useAuth(BasicAuth | Key | NoAuth) either(@query q?: string): void;
     @get @route("/both") @useAuth([Session, Partner]) both(): void;
     @get @route("/cookie") @useAuth(Session) cookie(@cookie theme?: string): void;
+    #suppress "@abhigyakrishna/tspgen-core/auth-header-conflict" "the credential replacing the parameter is under test"
     @get @route("/dup") @useAuth(Key) dup(@query("api-key") apiKey?: string, @query q?: string): void;
   }
 `;

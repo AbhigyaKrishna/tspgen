@@ -1,9 +1,10 @@
 import { metaStrings, type FileSpec } from "@abhigyakrishna/tspgen-core";
 import type { Program } from "@typespec/compiler";
-import { camel, codecImports, organizeImports, type KotlinIR, type KtGroup } from "@abhigyakrishna/tspgen-kotlin";
+import { camel, codecImports, organizeImports, serializerExpr, type KotlinIR, type KtGroup } from "@abhigyakrishna/tspgen-kotlin";
 import { serviceAuth, type ServiceAuth } from "./auth.js";
 import type { KtorClientOptions } from "./options.js";
 import { clientJsonExpr, DEFAULT_CLIENT_RUNTIME, type ClientRuntime } from "./runtime.js";
+import { serializerCallImports, usesSerializers } from "./helpers.js";
 import { eventFunctions, streamOf, streamsOf, supportImports, usesJson } from "./sse.js";
 
 const SUPPORT_IMPORTS = [
@@ -59,6 +60,7 @@ function groupImports(ir: KotlinIR, group: KtGroup): string[] {
       : []),
     ...(ops.some((o) => o.body?.kind === "file") ? ["io.ktor.http.ContentDisposition", "io.ktor.http.HttpHeaders"] : []),
     ...ops.flatMap((o) => [
+      ...serializerCallImports(o),
       ...o.params.flatMap((p) => p.type.imports),
       ...(o.body?.type.imports ?? []),
       ...o.result.type.imports,
@@ -87,8 +89,12 @@ export function planClientFiles(
   // File helpers (and HttpFile) only when some multipart body has a file part: HttpFile exists only then.
   const fileParts = multipartBodies.some((b) => (b.parts ?? []).some((p) => p.kind === "file"));
   const streams = streamsOf(services.flatMap((s) => s.groups.flatMap((g) => g.operations)));
-  // Multipart JSON parts and JSON events read the defaults' Json from the client (apiJson).
-  const apiJson = multipart || streams.events.some(usesJson);
+  const allOps = services.flatMap((s) => s.groups.flatMap((g) => g.operations));
+  // Bodies (and parts) whose JSON form needs an explicit serializer (`@encode(string)` values).
+  const serializers = allOps.some(usesSerializers);
+  const jsonPartSerializers = multipartBodies.some((b) => (b.parts ?? []).some((p) => p.kind === "json" && serializerExpr(p.type)));
+  // Multipart JSON parts, JSON events and explicitly serialized bodies read the defaults' Json from the client (apiJson).
+  const apiJson = multipart || streams.events.some(usesJson) || serializers;
   const auths = new Map<string, ServiceAuth | undefined>(services.map((s) => [s.id, runtime.auth ? serviceAuth(program, s) : undefined]));
   const used = [...auths.values()].filter((a): a is ServiceAuth => a !== undefined);
   const basic = used.some((a) => a.basic);
@@ -114,11 +120,13 @@ export function planClientFiles(
               : []),
             ...(used.length > 0 ? ["io.ktor.client.request.HttpRequestBuilder", "io.ktor.client.request.cookie", "io.ktor.http.HttpHeaders"] : []),
             ...(basic ? ["io.ktor.util.encodeBase64"] : []),
+            ...(jsonPartSerializers ? ["kotlinx.serialization.KSerializer"] : []),
           ],
           pkg,
         ),
         body: "ktor-client/support",
         multipart,
+        jsonPartSerializers,
         fileParts,
         apiJson,
         defaultJson: `${services[0].name}Json`,

@@ -26,6 +26,7 @@ export function tsc(outputs: Record<string, string>, extra: Record<string, unkno
     JSON.stringify({
       compilerOptions: {
         strict: true,
+        noPropertyAccessFromIndexSignature: true,
         noEmit: true,
         target: "es2022",
         module: "esnext",

@@ -60,6 +60,7 @@ class PetsClient(
         if (response.status.isSuccess()) {
             return response.body()
         }
+        if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
         throw when (response.status.value) {
             404 -> NotFoundException(response.body(), response.status.value)
             else -> ApiErrorException(response.body(), response.status.value)

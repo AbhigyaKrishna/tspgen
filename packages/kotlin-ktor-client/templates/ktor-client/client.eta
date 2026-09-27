@@ -39,6 +39,9 @@
 <% } -%>
         }.execute { response ->
             if (!response.status.isSuccess()) {
+<% if (c.typedErrors(op)) { -%>
+                if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
+<% } -%>
                 throw when (response.status.value) {
 <% for (const e of c.errorBranches(op)) { -%>
                     <%= e.match %> -> <%~ e.expr %>

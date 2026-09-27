@@ -54,11 +54,14 @@ export function checkRuntime(program: Program, options: KtorServerOptions, featu
   return false;
 }
 
-/** `internal val serverJson`: Ktor's DefaultJson with the target's features and the models' serializers. */
+/**
+ * `val serverJson`: Ktor's DefaultJson with the target's features and the models' serializers. The template prefixes
+ * the `visibility` modifier (public by default: `features.module: false` users install it, maybe from another module).
+ */
 export function serverJsonLines(ir: KotlinIR, runtime: ServerRuntime): string[] {
   const module = ir.serializersModule ? ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1) : undefined;
   return [
-    "internal val serverJson: Json = Json(DefaultJson) {",
+    "val serverJson: Json = Json(DefaultJson) {",
     `    encodeDefaults = ${runtime.encodeDefaults}`,
     ...(runtime.ignoreUnknownKeys ? ["    ignoreUnknownKeys = true"] : []),
     ...(module ? [`    serializersModule = ${module}`] : []),

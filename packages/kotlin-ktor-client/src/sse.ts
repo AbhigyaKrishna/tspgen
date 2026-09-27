@@ -1,4 +1,4 @@
-import { kotlinString as str, type KtEvent, type KtEvents, type KtOperation, type KtStream } from "@abhigyakrishna/tspgen-kotlin";
+import { kotlinString as str, serializerExpr, serializerImports, type KtEvent, type KtEvents, type KtOperation, type KtStream } from "@abhigyakrishna/tspgen-kotlin";
 import { decode } from "./helpers.js";
 
 /** The stream of a server-sent event operation, if it is one. */
@@ -19,7 +19,10 @@ export function usesJson(decl: KtEvents): boolean {
 /** Kotlin expression of an event's payload from `event.data`. */
 function payloadExpr(e: KtEvent): string {
   const data = e.data!;
-  if (e.json) return `json.decodeFromString<${data.text}>(event.data)`;
+  if (e.json) {
+    const serializer = serializerExpr(data);
+    return serializer ? `json.decodeFromString(${serializer}, event.data)` : `json.decodeFromString<${data.text}>(event.data)`;
+  }
   return decode("event.data", data);
 }
 
@@ -81,7 +84,10 @@ export function supportImports(streams: ReturnType<typeof streamsOf>): string[] 
   return [
     "io.ktor.utils.io.ByteReadChannel",
     "io.ktor.utils.io.readAvailable",
-    ...streams.events.flatMap((d) => [d.fqn, ...d.events.flatMap((e) => (e.data ? e.data.imports : []))]),
+    ...streams.events.flatMap((d) => [
+      d.fqn,
+      ...d.events.flatMap((e) => (e.data ? [...e.data.imports, ...(e.json ? serializerImports(e.data) : [])] : [])),
+    ]),
   ];
 }
 

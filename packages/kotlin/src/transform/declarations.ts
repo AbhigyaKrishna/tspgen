@@ -690,8 +690,10 @@ export class DeclarationBuilder {
       if (type.serialText) prop.serialType = type.serialText;
       if (type.serialImports?.length) prop.serialImports = type.serialImports;
     }
-    if (defaultValue !== undefined) prop.default = defaultValue;
-    else if (p.optional) prop.default = "null";
+    if (defaultValue !== undefined) {
+      prop.default = defaultValue;
+      if (!p.optional && !this.multipartModels.has(owner)) prop.encodeDefault = true;
+    } else if (p.optional) prop.default = "null";
     return prop;
   }
 

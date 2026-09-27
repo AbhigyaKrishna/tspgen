@@ -8,6 +8,7 @@ import com.example.graph.GraphService
 import com.example.graph.Node
 import com.example.graph.NodeKind
 import com.example.models.ProbeResponse
+import com.example.server.serverJson
 import com.example.server.shopErrors
 import io.ktor.client.call.body
 import io.ktor.client.plugins.defaultRequest
@@ -34,12 +35,14 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation as ClientContentNegotiation
 
 class HouseStyleE2ETest {
     private fun ApplicationTestBuilder.serve(service: GraphService) {
         application {
-            install(ContentNegotiation) { json() }
+            // No generated module (features.module: false): the application installs the generated serverJson itself.
+            install(ContentNegotiation) { json(serverJson) }
             install(Authentication) {
                 bearer(JWT_AUTH) { authenticate { credential -> UserIdPrincipal(credential.token) } }
             }
@@ -87,6 +90,9 @@ class HouseStyleE2ETest {
         assertEquals(listOf("events"), second.items.map { it.name })
         assertEquals(listOf("primary-db"), client.get("/graph/nodes?kind=DATABASE").body<Page<Node>>().items.map { it.name })
         assertEquals(db, client.get("/graph/nodes/${db.id}").body<Node>())
+        // serverJson's encode-defaults: false leaves unset optionals out instead of writing null.
+        val raw = client.get("/graph/nodes/${db.id}").bodyAsText()
+        assertFalse("description" in raw || "null" in raw, raw)
         assertEquals(listOf("alice", "alice"), service.actors)
     }
 

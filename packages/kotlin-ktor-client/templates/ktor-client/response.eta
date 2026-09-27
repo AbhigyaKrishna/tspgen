@@ -1,7 +1,7 @@
 <% const r = it.op.result; const c = it.h.ktorClient; -%>
 <% if (r.kind === "single") { -%>
         if (response.status.isSuccess()) {
-            return<%= r.type.text === "Unit" ? "" : " response.body()" %>
+            return<%~ r.type.text === "Unit" ? "" : " " + c.bodyRead(r.type) %>
         }
 <% } else { -%>
         when (response.status.value) {
@@ -9,6 +9,9 @@
             <%= c.statusMatch(v.statusCodes) %> -> return <%= r.decl.name %>.<%= v.name %><%~ c.variantArgs(v) %>
 <% } -%>
         }
+<% } -%>
+<% if (c.typedErrors(it.op)) { -%>
+        if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
 <% } -%>
         throw when (response.status.value) {
 <% for (const e of c.errorBranches(it.op)) { -%>

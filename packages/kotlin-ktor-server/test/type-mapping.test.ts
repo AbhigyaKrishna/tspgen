@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { server } from "./tester.js";
+import { server, sseServer } from "./tester.js";
 
 const DIR = "server/com/acme/server";
 
@@ -91,5 +91,107 @@ describe("ktor server type mapping", () => {
       @route("/pets/{id}") op get(@path id: string): void;
     `);
     expect(outputs[`${DIR}/SRoutes.kt`]).not.toContain("UseSerializers");
+  });
+
+  describe("@encode(string) on top-level JSON values", () => {
+    const spec = `
+      @service namespace S;
+      @encode(string) scalar BigId extends int64;
+      @error model Missing { @statusCode _: 404; ids: BigId[] }
+      @route("/ids") interface Ids {
+        @get list(): BigId[];
+        @get @route("/one") one(): BigId;
+        @post take(@body ids: BigId[]): void;
+        @put @route("/maybe") maybe(@header contentType: "application/json", @body id?: BigId): void;
+        @put @route("/text") text(@body id: BigId): void;
+        @post @route("/raw") raw(@header contentType: "application/json", @body @encode(string) raw: int64): void;
+        @get @route("/either") either(): { @statusCode _: 200; @body ids: BigId[] } | { @statusCode _: 201; @header location: string } | Missing;
+        @get @route("/plain") plain(): int64[];
+      }
+    `;
+
+    for (const style of ["inline", "typealias"] as const) {
+      it(`${style}: receives and responds through the explicit serializer`, async () => {
+        const { outputs } = await server({}, { "scalar-style": style }).compile(spec);
+        const routes = outputs[`${DIR}/IdsRoutes.kt`];
+        expect(routes).toContain("call.respondJson(HttpStatusCode.OK, ListSerializer(LongAsStringSerializer), service.list())");
+        expect(routes).toContain("call.respondJson(HttpStatusCode.OK, LongAsStringSerializer, service.one())");
+        expect(routes).toContain("val ids = call.receiveJson(ListSerializer(LongAsStringSerializer))");
+        expect(routes).toContain("val id = call.receiveJson(LongAsStringSerializer.nullable)");
+        expect(routes).toContain("val raw = call.receiveJson(LongAsStringSerializer)");
+        expect(routes).toContain("call.respondJson(HttpStatusCode.OK, ListSerializer(LongAsStringSerializer), result.body)");
+        // A text/plain scalar body is no JSON: unchanged.
+        expect(routes).toContain(`val id = call.receive<${style === "inline" ? "Long" : "BigId"}>()`);
+        // Values without an @encode(string) inside keep Ktor's content negotiation.
+        expect(routes).toContain("call.respond(HttpStatusCode.OK, service.plain())");
+        expect(routes).toContain("import kotlinx.serialization.builtins.ListSerializer\n");
+        expect(routes).toContain("import kotlinx.serialization.builtins.LongAsStringSerializer\n");
+        expect(routes).toContain("import kotlinx.serialization.builtins.nullable\n");
+        const support = outputs[`${DIR}/ServerSupport.kt`];
+        expect(support).toContain("internal suspend fun <T> ApplicationCall.receiveJson(serializer: KSerializer<T>): T {");
+        expect(support).toContain(
+          "internal suspend fun <T> ApplicationCall.respondJson(status: HttpStatusCode, serializer: KSerializer<T>, value: T) =\n" +
+            "    respondText(serverJson.encodeToString(serializer, value), ContentType.Application.Json, status)",
+        );
+      });
+    }
+
+    it("writes a typed error body through its serializer", async () => {
+      const { outputs } = await server().compile(`
+        @service namespace S;
+        @encode(string) scalar BigId extends int64;
+        @error model Missing { @statusCode _: 404; @body id: BigId }
+        @route("/ids") op list(): BigId[] | Missing;
+      `);
+      const errors = outputs[`${DIR}/SErrors.kt`];
+      expect(errors).toContain("call.respondJson(HttpStatusCode.fromValue(cause.status), LongAsStringSerializer, cause.error)");
+      expect(errors).toContain("import kotlinx.serialization.builtins.LongAsStringSerializer\n");
+      expect(errors).not.toContain("import io.ktor.server.response.respond\n");
+    });
+
+    it("leaves ordinary output alone: no JSON helpers without a serializer to apply", async () => {
+      const { outputs } = await server().compile(`
+        @service namespace S;
+        model Pet { id: int64 }
+        @route("/pets") op list(): Pet[];
+      `);
+      expect(outputs[`${DIR}/ServerSupport.kt`]).not.toContain("receiveJson");
+      expect(outputs[`${DIR}/ServerSupport.kt`]).not.toContain("respondJson");
+      expect(outputs[`${DIR}/SRoutes.kt`]).toContain("call.respond(HttpStatusCode.OK, service.list())");
+    });
+
+    it("imports the JSON helpers into routes of mapped packages", async () => {
+      const { outputs } = await server({}, { packages: [{ namespace: "S.Ids", package: "com.acme.ids" }] }).compile(`
+        @service namespace S;
+        @encode(string) scalar BigId extends int64;
+        namespace Ids {
+          @route("/ids") op list(@body ids: BigId[]): BigId[];
+        }
+      `);
+      const routes = outputs["server/com/acme/ids/IdsRoutes.kt"];
+      expect(routes).toContain("import com.acme.server.receiveJson\n");
+      expect(routes).toContain("import com.acme.server.respondJson\n");
+    });
+
+    it("encodes JSON event payloads and decodes JSON parts with the serializer", async () => {
+      const events = await sseServer().compile(`
+        @service namespace S;
+        @encode(string) scalar BigId extends int64;
+        @events union Feed { ids: BigId[] }
+        @route("/feed") op watch(): SSEStream<Feed>;
+      `);
+      const support = events.outputs[`${DIR}/ServerSupport.kt`];
+      expect(support).toContain("serverJson.encodeToJsonElement(ListSerializer(LongAsStringSerializer), data).toString()");
+      expect(support).toContain("import kotlinx.serialization.builtins.ListSerializer\n");
+      const parts = await server().compile(`
+        @service namespace S;
+        @encode(string) scalar BigId extends int64;
+        model Form { ids: HttpPart<BigId[]>; name: HttpPart<string> }
+        @route("/form") op send(@header contentType: "multipart/form-data", @multipartBody body: Form): void;
+      `);
+      const routes = parts.outputs[`${DIR}/SRoutes.kt`];
+      expect(routes).toContain('convertParam("ids") { serverJson.decodeFromString(ListSerializer(LongAsStringSerializer), it) }');
+      expect(routes).toContain("import kotlinx.serialization.builtins.ListSerializer\n");
+    });
   });
 });

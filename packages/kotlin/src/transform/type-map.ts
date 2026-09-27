@@ -123,6 +123,7 @@ export function mapOf(value: KtTypeUse): KtTypeUse {
     text: `Map<String, ${value.text}>`,
     imports: value.imports,
     nullable: false,
+    value,
     ...serialFields(value, (e) => `Map<String, ${e}>`),
     ...(value.needs ? { needs: value.needs } : {}),
   };
@@ -134,6 +135,59 @@ export function genericOf(base: KtTypeUse, args: readonly KtTypeUse[]): KtTypeUs
     text: `${base.text}<${args.map((a) => a.text).join(", ")}>`,
     imports: [...base.imports, ...args.flatMap((a) => a.imports)],
     nullable: false,
+    generic: { base, args: [...args] },
     ...(args.some((a) => a.needs) ? { needs: args.flatMap((a) => a.needs ?? []) } : {}),
   };
+}
+
+const BUILTINS = "kotlinx.serialization.builtins";
+
+/** Imports of the serializer object a type use names in `serializer` (not the `@Serializable` annotation). */
+function ownSerializerImports(t: KtTypeUse): string[] {
+  const own = (t.serialImports ?? []).filter((i) => i.endsWith(`.${t.serializer}`));
+  return own.length > 0 ? own : [`${BUILTINS}.${t.serializer}`];
+}
+
+/** `[expression, imports]` of an explicit serializer for `t`; undefined when nothing in it needs one (unless `force`). */
+function serializerOf(t: KtTypeUse, force: boolean): [string, string[]] | undefined {
+  let inner: [string, string[]] | undefined;
+  if (t.serializer) {
+    inner = [t.serializer, ownSerializerImports(t)];
+  } else if (t.element) {
+    const e = serializerOf(t.element, false);
+    if (e) inner = [`ListSerializer(${e[0]})`, [`${BUILTINS}.ListSerializer`, ...e[1]]];
+  } else if (t.value) {
+    const v = serializerOf(t.value, false);
+    if (v) inner = [`MapSerializer(String.serializer(), ${v[0]})`, [`${BUILTINS}.MapSerializer`, `${BUILTINS}.serializer`, ...v[1]]];
+  } else if (t.generic) {
+    const { base, args } = t.generic;
+    if (args.some((a) => serializerOf(a, false))) {
+      const parts = args.map((a) => serializerOf(a, true)!);
+      inner = [`${base.text}.serializer(${parts.map((p) => p[0]).join(", ")})`, [...base.imports, ...parts.flatMap((p) => p[1])]];
+    }
+  }
+  if (!inner) return force ? [`serializer<${t.text}>()`, ["kotlinx.serialization.serializer", ...t.imports]] : undefined;
+  return t.nullable ? [`${inner[0]}.nullable`, [...inner[1], `${BUILTINS}.nullable`]] : inner;
+}
+
+/**
+ * Kotlin expression of an explicit `KSerializer` for a body, event payload or part of type `t`, when something in it
+ * has a JSON form its Kotlin type alone does not give (`@encode(string)` on int64/uint64: `LongAsStringSerializer`,
+ * the generated `ULongAsStringSerializer` / `<Name>AsStringSerializer`), also inside lists, records, nullables and
+ * generic arguments; undefined otherwise (the type's own serializer then applies). Type arguments and serializer
+ * annotations are not seen at runtime by `call.receive<T>()` / `body<T>()`, so such values must be (de)serialized with
+ * this serializer.
+ */
+export function serializerExpr(t: KtTypeUse): string | undefined {
+  return serializerOf(t, false)?.[0];
+}
+
+/** Imports `serializerExpr(t)` needs; empty when it is undefined. */
+export function serializerImports(t: KtTypeUse): string[] {
+  return [...new Set(serializerOf(t, false)?.[1] ?? [])];
+}
+
+/** A JSON media type: `application/json` or a `+json` suffix (parameters ignored). */
+export function isJsonContentType(contentType: string): boolean {
+  return /^[^;]*[/+]json\s*(;|$)/i.test(contentType.trim());
 }

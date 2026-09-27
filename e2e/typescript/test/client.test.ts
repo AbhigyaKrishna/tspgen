@@ -5,7 +5,7 @@ import { ApiErrorError, NotFoundError } from "../generated/api";
 import { HttpError } from "../generated/api/errors";
 import { createPetStoreClient, type PetStoreApiClient } from "../generated/client";
 import { petsCreateAction, petsRemoveAction } from "../generated/client/actions/pets";
-import type { Pet } from "../generated/models";
+import { AccessorySchema, type Pet } from "../generated/models";
 import { startStubServer } from "./stub-server";
 
 let server: Server;
@@ -54,6 +54,13 @@ describe("generated Next.js client against a stub server", () => {
       { kind: "ball", name: "red", diameter: 3.5 },
       { kind: "rope", name: "long", length: 2 },
     ]);
+  });
+
+  it("accepts required defaults as the Kotlin server writes them, and requires them", () => {
+    // The Kotlin server's body for Accessory.Collar(size = 3) (PetStoreE2ETest.responsesOmitUnsetOptionalProperties).
+    const wire = { type: "collar", size: 3, material: "leather", rings: 1 };
+    expect(AccessorySchema.parse(wire)).toEqual(wire);
+    expect(AccessorySchema.safeParse({ type: "collar", size: 3 }).success).toBe(false);
   });
 
   it("validates responses with zod unless disabled", async () => {

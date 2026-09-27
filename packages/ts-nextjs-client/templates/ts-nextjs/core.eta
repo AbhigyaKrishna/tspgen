@@ -161,10 +161,10 @@ function resolveUrl(baseUrl: string, path: string): URL {
  */
 function safeInit(options: RequestOptions): RequestOptions {
   const rest = { ...options } as Record<string, unknown>;
-  delete rest.method;
-  delete rest.body;
-  delete rest.headers;
-  delete rest.window;
+  delete rest["method"];
+  delete rest["body"];
+  delete rest["headers"];
+  delete rest["window"];
   return rest as RequestOptions;
 }
 
@@ -248,10 +248,27 @@ export async function parse<T>(config: ClientConfig, res: Response, schema?: Sch
 }
 <% } -%>
 
-/** Maps an error response to an error instance by exact status, status class ("4XX") or default. */
+/** Whether the response is an RFC 9457 `application/problem+json` body. */
+function isProblem(res: Response): boolean {
+  return (res.headers.get("content-type") ?? "").trim().toLowerCase().startsWith("application/problem+json");
+}
+
+/** A problem body's `detail`, else its `title`. */
+function problemMessage(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const { detail, title } = body as { detail?: unknown; title?: unknown };
+  return typeof detail === "string" ? detail : typeof title === "string" ? title : undefined;
+}
+
+/**
+ * Maps an error response to an error instance by exact status, status class ("4XX") or default. An
+ * `application/problem+json` body is never a declared error model: it becomes an HttpError carrying the problem as
+ * `body` and its `detail` (else `title`) as message.
+ */
 export async function toError(res: Response, factories: Record<string, ErrorFactory>): Promise<Error> {
   const body = await readBody(res).catch(() => undefined);
-  const factory = factories[String(res.status)] ?? factories[`${Math.floor(res.status / 100)}XX`] ?? factories.default;
+  if (isProblem(res)) return new HttpError(res.status, body, problemMessage(body));
+  const factory = factories[String(res.status)] ?? factories[`${Math.floor(res.status / 100)}XX`] ?? factories["default"];
   return factory ? factory(res.status, body) : new HttpError(res.status, body);
 }
 

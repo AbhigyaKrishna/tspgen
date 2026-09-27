@@ -40,6 +40,8 @@ describe("@abhigyakrishna/tspgen-kotlin models", () => {
 package com.acme.models
 
 import java.time.Instant
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
@@ -47,6 +49,7 @@ import kotlinx.serialization.UseSerializers
 /**
  * A pet
  */
+@OptIn(ExperimentalSerializationApi::class) // @EncodeDefault
 @Serializable
 data class Pet(
     val id: Long,
@@ -54,10 +57,29 @@ data class Pet(
     val tags: List<String>,
     @SerialName("born_at")
     val bornAt: Instant,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val color: Color = Color.RED,
     val weight: Double = 1.5,
 )
 `);
+  });
+
+  it("always encodes required properties that have a default, not optional ones", async () => {
+    const { outputs } = await emitter().compile(`
+      @service namespace S;
+      model Opts { reqDefault: int32 = 5; kind: "a" | "b" = "a"; optDefault?: int32 = 3; plain: string }
+    `);
+    const opts = outputs["models/com/acme/models/Opts.kt"];
+    expect(opts).toContain("import kotlinx.serialization.EncodeDefault\nimport kotlinx.serialization.ExperimentalSerializationApi\n");
+    expect(opts).toContain(`@OptIn(ExperimentalSerializationApi::class) // @EncodeDefault
+@Serializable
+data class Opts(
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val reqDefault: Int = 5,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    val kind: `);
+    expect(opts).toContain("    val optDefault: Int = 3,\n    val plain: String,\n)");
+    expect(opts.match(/@EncodeDefault\(/g)).toHaveLength(2);
   });
 
   it("maps date/time scalars to java.time with generated ISO-8601 serializers", async () => {
@@ -408,7 +430,7 @@ typealias Loose = String
       };`,
     });
     const { outputs } = await emitter({ plugins: [join(dir, "plugin.mjs")] }).compile(petSpec);
-    expect(outputs["models/com/acme/models/Pet.kt"]).toContain("@Audited\n@Serializable\ndata class Pet(");
+    expect(outputs["models/com/acme/models/Pet.kt"]).toContain("@Audited\n@OptIn(ExperimentalSerializationApi::class) // @EncodeDefault\n@Serializable\ndata class Pet(");
   });
 
   it("loads external targets with their templates and options", async () => {

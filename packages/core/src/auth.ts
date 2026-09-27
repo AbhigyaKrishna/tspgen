@@ -67,6 +67,36 @@ export function authHeaderConflicts(
 }
 
 /**
+ * Query parameters of an operation (`params`: wire names) that an API key sent in the query under the same name
+ * replaces, in an alternative of `options` all of whose schemes are `supported`; each name reported once.
+ */
+export function authQueryConflicts(
+  options: readonly (readonly string[])[],
+  supported: ReadonlyMap<string, { auth: AuthIR; kind: AuthKind }>,
+  params: readonly string[],
+): { name: string; id: string }[] {
+  const conflicts: { name: string; id: string }[] = [];
+  const reported = new Set<string>();
+  for (const option of options) {
+    if (!option.every((id) => supported.has(id))) continue;
+    for (const id of new Set(option)) {
+      const { auth, kind } = supported.get(id)!;
+      const name = kind === "apiKey" && auth.in === "query" ? auth.name : undefined;
+      if (name === undefined || !params.includes(name) || reported.has(name)) continue;
+      reported.add(name);
+      conflicts.push({ name, id });
+    }
+  }
+  return conflicts;
+}
+
+/** The TypeSpec operation an IR operation id names, as a diagnostic target (so `#suppress` works); NoTarget if none. */
+export function operationTarget(program: Program, id: string): DiagnosticTarget | typeof NoTarget {
+  const [type] = program.resolveTypeReference(id);
+  return type?.kind === "Operation" ? type : NoTarget;
+}
+
+/**
  * The model declaring a scheme, found through the service's `@useAuth` declarations: same type and http scheme,
  * and the IR id is the scheme id possibly with `_` appended (see `AuthIR.id`). NoTarget when not found.
  */

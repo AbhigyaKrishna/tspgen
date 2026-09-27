@@ -79,7 +79,7 @@ fun Route.feedRoutes(service: FeedService) {
     }
 `);
     expect(support).toContain("internal fun SseMessage.sseFrame(): TspgenSseFrame = TspgenSseFrame(event, data, id)\n");
-    expect(support).toContain("internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n    serializersModule = modelSerializersModule\n}\n");
+    expect(support).toContain("val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n    serializersModule = modelSerializersModule\n}\n");
     expect(support).toContain(`    map(frame).transformWhile {
         emit(it)
         !it.terminal
@@ -186,7 +186,7 @@ fun Route.feedRoutes(service: FeedService) {
     expect(routes).toContain("import com.acme.server.sseFrame\n");
     expect(routes).not.toContain("import kotlinx.coroutines.flow.Flow\n");
     // No java.time: Ktor's DefaultJson without encoding defaults, which the module's content negotiation installs too.
-    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n}\n");
+    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n}\n");
     expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("import io.ktor.serialization.kotlinx.json.DefaultJson\n");
     expect(outputs[`${DIR}/SModule.kt`]).toContain("        json(serverJson)\n");
   });
@@ -205,7 +205,7 @@ fun Route.feedRoutes(service: FeedService) {
       @route("/raw") op raw(): { @header contentType: "text/event-stream"; @body body: string };
     `);
     expect(outputs[`${DIR}/SModule.kt`]).toContain("        json(serverJson)\n");
-    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("internal val serverJson: Json = Json(DefaultJson) {");
+    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("val serverJson: Json = Json(DefaultJson) {");
   });
 
   it("writes Flow qualified where a model is named Flow", async () => {

@@ -2,13 +2,15 @@ import {
   authDocs,
   authHeaderConflicts,
   authKind,
+  authQueryConflicts,
+  operationTarget,
   authSchemeTarget,
   reportDiagnostic,
   type AuthIR,
   type AuthKind,
 } from "@abhigyakrishna/tspgen-core";
-import { propertyKey, reportDiagnostic as reportTsDiagnostic, type TsOperation, type TsService } from "@abhigyakrishna/tspgen-typescript";
-import { NoTarget, type Program } from "@typespec/compiler";
+import { propertyKey, type TsOperation, type TsService } from "@abhigyakrishna/tspgen-typescript";
+import type { Program } from "@typespec/compiler";
 
 export type { AuthKind };
 
@@ -39,7 +41,10 @@ function schemeExpr(auth: AuthIR, kind: AuthKind): string {
   return `{ id: ${str(auth.id)}, kind: ${str(kind)}${location} }`;
 }
 
-/** Warns, per operation and header, when one alternative sends several credentials as the same header. */
+/**
+ * Warns (core's `auth-header-conflict`), per operation and header, when one alternative sends several credentials as
+ * the same header, and per query parameter an API key in the query replaces.
+ */
 function checkHeaderConflicts(
   program: Program,
   service: TsService,
@@ -48,10 +53,20 @@ function checkHeaderConflicts(
 ): void {
   for (const op of service.groups.flatMap((g) => g.operations)) {
     for (const { header, ids } of authHeaderConflicts(op.auth?.options ?? [], supported)) {
-      reportTsDiagnostic(program, {
+      reportDiagnostic(program, {
         code: "auth-header-conflict",
+        messageId: "default",
         format: { operation: op.id, schemes: ids.join(", "), header, target },
-        target: NoTarget,
+        target: operationTarget(program, op.id),
+      });
+    }
+    const query = op.params.filter((p) => p.location === "query").map((p) => p.wireName);
+    for (const { name, id } of authQueryConflicts(op.auth?.options ?? [], supported, query)) {
+      reportDiagnostic(program, {
+        code: "auth-header-conflict",
+        messageId: "parameter",
+        format: { operation: op.id, header: name, location: "query", scheme: id, target },
+        target: operationTarget(program, op.id),
       });
     }
   }

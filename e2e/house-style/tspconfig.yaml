@@ -27,5 +27,6 @@ options:
       - "@abhigyakrishna/tspgen-ts-nextjs-client":
           client-style: flat
           error-model: ErrorResponse
+          error-class: ApiError
           features:
             react-query: false

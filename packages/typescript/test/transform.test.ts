@@ -161,6 +161,30 @@ describe("transformToTs", () => {
     expect(ir.apiActive).toBe(true);
   });
 
+  it("names error classes for non-model error bodies (array, map, scalar) with valid TS identifiers", async () => {
+    const ir = await transform(`
+      @service namespace PetStore;
+      model Pet { id: int64 }
+      @error model Conflict { @statusCode _: 409; @body ids: int64[]; }
+      @error model Duplicate { @statusCode _: 410; @body names: string[]; }
+      @error model Busy { @statusCode _: 429; @body retryAfter: int64; }
+      @error model Throttled { @statusCode _: 503; @body counts: Record<int64>; }
+      @route("/pets") interface Pets {
+        @get get(@path petId: int64): Pet | Conflict | Duplicate | Busy | Throttled;
+      }
+    `);
+    const [get] = ir.services[0].groups[0].operations;
+    expect(get.errors.map((e) => [e.statusCodes, e.errorClass.text])).toEqual([
+      [409, "ArrayOfNumberError"],
+      [410, "ArrayOfStringError"],
+      [429, "NumberError"],
+      [503, "RecordOfNumberError"],
+    ]);
+    for (const e of get.errors) {
+      expect(e.errorClass.text).toMatch(/^[A-Za-z_$][A-Za-z0-9_$]*$/);
+    }
+  });
+
   it("inherits @meta from every enclosing namespace onto a group and its operations (matching Kotlin)", async () => {
     const ir = await transform(`
       using TspGen;

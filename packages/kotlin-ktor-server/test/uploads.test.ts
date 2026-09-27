@@ -77,7 +77,7 @@ fun Route.uploadsRoutes(service: UploadsService) {
     expect(support).toContain("if (size > limit) throw PayloadTooLargeException(limit)");
     expect(support).toContain("internal suspend fun ApplicationCall.receiveFile(limit: Long): HttpFile {");
     expect(support).toContain("is PartData.FormItem -> throw BadRequestException(\"File part '$name' must be sent with a filename\")");
-    expect(support).toContain("internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n}\n");
+    expect(support).toContain("val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n}\n");
     expect(support).not.toContain("partChannel");
   });
 
@@ -340,7 +340,7 @@ interface UploadsService {
     const support = outputs[`${DIR}/ServerSupport.kt`];
     expect(support).toContain("import com.acme.models.modelSerializersModule\n");
     expect(support).toContain(
-      "internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n    serializersModule = modelSerializersModule\n}\n",
+      "val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n    serializersModule = modelSerializersModule\n}\n",
     );
     expect(outputs[`${DIR}/SRoutes.kt`]).toContain(
       'times = parts.text("times").required("times").convertParam("times") { serverJson.decodeFromString<List<Instant>>(it) },',

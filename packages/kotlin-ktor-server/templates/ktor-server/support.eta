@@ -33,9 +33,39 @@ internal inline fun <reified T> encodeParam(value: T): String =
 
 /**
  * JSON of request and response bodies, multipart JSON parts and event payloads: Ktor's DefaultJson with this
- * target's `features.encode-defaults` / `features.ignore-unknown-keys` and the models' serializers.
+ * target's `features.encode-defaults` / `features.ignore-unknown-keys` and the models' serializers. Without the
+ * generated module, install it yourself: `install(ContentNegotiation) { json(serverJson) }`.
  */
-<%~ it.serverJson %>
+<%= it.h.visibility(it) %><%~ it.serverJson %>
+<% } -%>
+<% if (it.receiveJson) { -%>
+
+/**
+ * Reads a JSON request body with [serializer] and [serverJson]: bodies whose JSON form their Kotlin type does not carry
+ * (`@encode(string)` int64 values in a list, …), which `receive<T>()` would read with the type's own serializer. A
+ * non-JSON content type fails with [UnsupportedMediaTypeException] (415), a body that does not decode with
+ * [BadRequestException] (400); an empty body is null for a nullable [serializer] (an optional body).
+ */
+internal suspend fun <T> ApplicationCall.receiveJson(serializer: KSerializer<T>): T {
+    val text = receiveText()
+    if (text.isBlank() && serializer.descriptor.isNullable) return serverJson.decodeFromString(serializer, "null")
+    val type = request.contentType()
+    if (!type.match(ContentType.Application.Json) && !type.contentSubtype.endsWith("+json")) {
+        throw UnsupportedMediaTypeException(type)
+    }
+    return try {
+        serverJson.decodeFromString(serializer, text)
+    } catch (e: IllegalArgumentException) {
+        // SerializationException (malformed JSON, missing or unknown fields) and model checks (`require`).
+        throw BadRequestException("Failed to convert request body", e)
+    }
+}
+<% } -%>
+<% if (it.respondJson) { -%>
+
+/** Responds with [value] as JSON written by [serializer] and [serverJson] (see `receiveJson`). */
+internal suspend fun <T> ApplicationCall.respondJson(status: HttpStatusCode, serializer: KSerializer<T>, value: T) =
+    respondText(serverJson.encodeToString(serializer, value), ContentType.Application.Json, status)
 <% } -%>
 <% if (it.problem) { -%>
 
@@ -54,15 +84,31 @@ internal suspend fun ApplicationCall.respondProblem(status: HttpStatusCode, deta
 }
 
 /**
- * The detail of a 400 problem: for a request body that failed to decode or a model check that failed, the innermost
- * cause's message (e.g. "name must not be blank"); else the exception's own message.
+ * The detail of a 400 problem. A missing or unconvertible parameter keeps its message, as do the multipart checks and
+ * a model check that failed (`require`: an IllegalArgumentException, e.g. "name must not be blank"). A body that does not decode reads
+ * "Malformed request body", with the fields missing and the JSON path of the failure when known: kotlinx's own messages
+ * name model classes and echo the request body, so they are not sent.
  */
-internal fun BadRequestException.problemDetail(): String? =
-    if (this is MissingRequestParameterException || this is ParameterConversionException) {
-        message
-    } else {
-        generateSequence(cause) { it.cause }.lastOrNull()?.message ?: message
+@OptIn(ExperimentalSerializationApi::class) // MissingFieldException.missingFields
+internal fun BadRequestException.problemDetail(): String? {
+    if (this is MissingRequestParameterException || this is ParameterConversionException) return message
+    val causes = generateSequence(cause) { it.cause }.toList()
+    val innermost = causes.lastOrNull() ?: return message
+    // A copy of our own exception (coroutines' stack-trace recovery chains the original as its cause), or a model check.
+    if (innermost is BadRequestException || (innermost is IllegalArgumentException && innermost !is SerializationException)) {
+        return innermost.message
     }
+    val missing = causes.filterIsInstance<MissingFieldException>().lastOrNull()?.missingFields.orEmpty()
+    val path = causes.lastOrNull { it is SerializationException }?.message?.let { JSON_PATH.find(it)?.groupValues?.get(1) }
+    return buildString {
+        append("Malformed request body")
+        if (missing.isNotEmpty()) append(missing.joinToString(prefix = ": missing ") { "'$it'" })
+        if (path != null) append(" at path ").append(path)
+    }
+}
+
+/** The `at path: $.x` part of a kotlinx decoding message. */
+private val JSON_PATH = Regex("""at path:? (\$\S*)""")
 <% } -%>
 <% if (it.uploads?.limit) { -%>
 

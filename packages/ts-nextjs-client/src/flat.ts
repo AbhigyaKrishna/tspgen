@@ -22,7 +22,7 @@ import type { NextClientOptions } from "./options.js";
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 /** Error-model fields not copied onto the error class (set from the response or owned by Error). */
-const RESERVED_FIELDS = new Set(["status", "message", "name", "stack", "cause", "body"]);
+const RESERVED_FIELDS = new Set(["status", "message", "name", "stack", "cause", "body", "problem"]);
 /** Members of the generated client class; an operation with one of these names would shadow it. */
 const CLIENT_MEMBERS = new Set(["constructor", "send", "request", "baseUrl", "doFetch", "headers"]);
 /**
@@ -312,6 +312,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
     model = found;
   }
 
+  const errorName = options["error-class"] ?? `${services[0]!.name}Error`;
   const clientNames = services.map((s) => `${s.name}Client`);
   const usesUploads = services.some((s) => s.groups.some((g) => g.operations.some(isUpload)));
   const auths = new Map<string, ClientAuth>();
@@ -323,7 +324,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   const rqNames = reactQuery ? reactQueryNames(services, hooks) : [];
   const usesStreams = services.some((s) => s.groups.some((g) => g.operations.some(nextjsHelpers.isStream)));
   const exported = new Set([
-    options["error-class"],
+    errorName,
     "ClientOptions",
     "RequestOptions",
     "RequestDefaults",
@@ -432,7 +433,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         imports: renderImports("client", imports, ext, prefix),
         body: "ts-nextjs/flat-client",
         clients,
-        error: errorClass(options["error-class"], model),
+        error: errorClass(errorName, model),
         usesQuery: queryParams.length > 0,
         usesUploads,
         usesAuth: auths.size > 0,

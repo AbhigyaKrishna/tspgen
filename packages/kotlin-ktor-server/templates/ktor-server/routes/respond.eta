@@ -6,7 +6,7 @@
         <%= it.call %>
         call.respond(<%= s.status(r.status) %>)
 <% } else { -%>
-        call.respond(<%= s.status(r.status) %>, <%= it.call %>)
+        <%~ s.respond(s.status(r.status), r.type, it.call) %>
 <% } -%>
 <% } else { -%>
         when (val result = <%= it.call %>) {
@@ -15,7 +15,12 @@
 <% for (const h of v.headers) { -%>
                 <%~ s.headerWrite(h) %>
 <% } -%>
-                call.respond(<%= v.status === undefined ? "HttpStatusCode.fromValue(result.status)" : s.status(v.status) %><%= v.body ? ", result.body" : "" %>)
+<% const status = v.status === undefined ? "HttpStatusCode.fromValue(result.status)" : s.status(v.status); -%>
+<% if (v.body) { -%>
+                <%~ s.respond(status, v.body, "result.body") %>
+<% } else { -%>
+                call.respond(<%= status %>)
+<% } -%>
             }
 <% } -%>
         }

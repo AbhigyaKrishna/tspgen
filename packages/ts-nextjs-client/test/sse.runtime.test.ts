@@ -218,11 +218,11 @@ describe("flat client streams (runtime)", () => {
     expect(await collect(new ChatClient({ baseUrl: "http://x", fetch: raw }).raw())).toEqual([{ data: "x", id: "3" }]);
   });
 
-  it("throws ApiError for a non-2xx response and passes the abort signal to fetch", async () => {
-    const { ChatClient, ApiError } = await loadFlat();
+  it("throws ChatError for a non-2xx response and passes the abort signal to fetch", async () => {
+    const { ChatClient, ChatError } = await loadFlat();
     const failing = vi.fn(async () => new Response(JSON.stringify({ code: "nope" }), { status: 500 }));
     const error = await collect(new ChatClient({ baseUrl: "http://x", fetch: failing }).watch({ room: "a" })).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toBeInstanceOf(ChatError);
     expect((error as { status: number }).status).toBe(500);
 
     const cancel = vi.fn();

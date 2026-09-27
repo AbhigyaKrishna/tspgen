@@ -6,6 +6,7 @@ export * from "./transform/index.js";
 export {
   fqnTypeUse,
   genericOf,
+  isJsonContentType,
   JAVA_TIME_CLASSES,
   javaTimeCodec,
   JSON_ELEMENT,
@@ -15,6 +16,8 @@ export {
   scalarTypeUse,
   SERIALIZED_CLASSES,
   serializedIn,
+  serializerExpr,
+  serializerImports,
   type DateTimeMapping,
   type DecimalMapping,
 } from "./transform/type-map.js";

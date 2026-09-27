@@ -10,12 +10,18 @@ internal inline fun <reified T> encodeParam(value: T): String =
 internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))
 
 /**
+ * Whether the response is an RFC 9457 `application/problem+json` body: never a declared error model, so it raises an
+ * [ApiException] with its `detail` rather than being decoded as one.
+ */
+internal fun HttpResponse.isProblem(): Boolean = contentType()?.match(ContentType.Application.ProblemJson) == true
+
+/**
  * The message of an error response without a declared body: the `detail` of an `application/problem+json` body (what
  * the generated Ktor server sends), else the body text.
  */
 internal suspend fun HttpResponse.errorMessage(): String {
     val text = bodyAsText()
-    if (contentType()?.match(ContentType.Application.ProblemJson) != true) return text
+    if (!isProblem()) return text
     return runCatching { Json.parseToJsonElement(text).jsonObject["detail"]?.jsonPrimitive?.contentOrNull }.getOrNull() ?: text
 }
 <% if (it.apiJson) { -%>
@@ -23,8 +29,8 @@ internal suspend fun HttpResponse.errorMessage(): String {
 private val apiJsonKey = AttributeKey<Json>("tspgen.json")
 
 /**
- * Installed by the API client's defaults function: remembers its Json, so multipart JSON parts and event payloads use
- * the configuration bodies use.
+ * Installed by the API client's defaults function: remembers its Json, so multipart JSON parts, event payloads and
+ * bodies written with an explicit serializer use the configuration content negotiation uses.
  */
 internal fun apiJsonPlugin(format: Json): ClientPlugin<Unit> =
     createClientPlugin("TspgenJson") { client.attributes.put(apiJsonKey, format) }
@@ -37,6 +43,12 @@ internal val HttpClient.apiJson: Json
 
 /** JSON text of a multipart JSON part, encoded with the API client's Json ([apiJson]). */
 internal inline fun <reified T> HttpClient.encodeJson(value: T): String = apiJson.encodeToJsonElement(value).toString()
+<% if (it.jsonPartSerializers) { -%>
+
+/** JSON text of a multipart JSON part whose JSON form needs an explicit [serializer] (`@encode(string)` values). */
+internal fun <T> HttpClient.encodeJson(serializer: KSerializer<T>, value: T): String =
+    apiJson.encodeToJsonElement(serializer, value).toString()
+<% } -%>
 
 /** Headers of a JSON multipart part: the part's declared JSON content type, else `application/json`. */
 internal fun jsonPartHeaders(contentType: String = "application/json"): Headers = headersOf(HttpHeaders.ContentType, contentType)

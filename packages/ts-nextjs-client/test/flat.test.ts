@@ -91,7 +91,7 @@ describe("flat client", () => {
     });
   });
 
-  it("emits one class with a method per operation and an ApiError from the error model", async () => {
+  it("emits one class with a method per operation and an ShopError from the error model", async () => {
     const { outputs } = await nextjs({ ...flat, features: { "react-query": false } }, house).compile(shopSpec);
     expect(outputs["client.ts"]).toBe(`${HEADER}
 import type { CreateNodeRequest, ErrorResponse, Kind, Node } from "./types";
@@ -122,10 +122,10 @@ export interface RequestOptions extends RequestDefaults {
  */
 function safeInit(options: RequestOptions): RequestOptions {
   const rest = { ...options } as Record<string, unknown>;
-  delete rest.method;
-  delete rest.body;
-  delete rest.headers;
-  delete rest.window;
+  delete rest["method"];
+  delete rest["body"];
+  delete rest["headers"];
+  delete rest["window"];
   return rest as RequestOptions;
 }
 
@@ -140,18 +140,22 @@ export interface ClientOptions {
 }
 
 /** Thrown for every non-2xx response. */
-export class ApiError extends Error {
+export class ShopError extends Error {
   readonly status: number;
   /** The decoded error body (ErrorResponse), when the response carried one. */
   readonly body: ErrorResponse | undefined;
   readonly code: string | undefined;
   readonly correlationId: string | undefined;
+  /** The RFC 9457 \`application/problem+json\` body, when the response carried one (never the error model). */
+  readonly problem: Record<string, unknown> | undefined;
 
-  constructor(status: number, body: ErrorResponse | undefined) {
-    super(body?.message ?? \`Request failed with status \${status}\`);
-    this.name = "ApiError";
+  /** \`message\` defaults to the problem's \`detail\` (else \`title\`), then the body's message, then the status. */
+  constructor(status: number, body: ErrorResponse | undefined, problem?: Record<string, unknown>) {
+    super(problemMessage(problem) ?? body?.message ?? \`Request failed with status \${status}\`);
+    this.name = "ShopError";
     this.status = status;
     this.body = body;
+    this.problem = problem;
     this.code = body?.code;
     this.correlationId = body?.correlationId;
   }
@@ -227,15 +231,32 @@ ${banner("Nodes", "  ")}
   }
 }
 
-async function toError(response: Response): Promise<ApiError> {
+async function toError(response: Response): Promise<ShopError> {
   const body: unknown = await response.json().catch(() => undefined);
-  return new ApiError(response.status, isErrorBody(body) ? body : undefined);
+  // An application/problem+json body is never the error model.
+  if (isProblem(response)) {
+    const problem = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    return new ShopError(response.status, undefined, problem);
+  }
+  return new ShopError(response.status, isErrorBody(body) ? body : undefined);
 }
 
 function isErrorBody(value: unknown): value is ErrorResponse {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return ["status", "code", "message"].every((key) => record[key] !== undefined);
+}
+
+/** Whether the response is an RFC 9457 \`application/problem+json\` body. */
+function isProblem(response: Response): boolean {
+  return (response.headers.get("content-type") ?? "").trim().toLowerCase().startsWith("application/problem+json");
+}
+
+/** A problem body's \`detail\`, else its \`title\`. */
+function problemMessage(problem: Record<string, unknown> | undefined): string | undefined {
+  const detail = problem?.["detail"];
+  const title = problem?.["title"];
+  return typeof detail === "string" ? detail : typeof title === "string" ? title : undefined;
 }
 
 function toQuery(params: Record<string, unknown>): string {
@@ -261,7 +282,7 @@ export * from "./types";
     const client = outputs["client.ts"];
     expect(client).toContain("export class HttpFailure extends Error {");
     expect(client).toContain("  readonly body: unknown;");
-    expect(client).toContain("    super(`Request failed with status ${status}`);");
+    expect(client).toContain("    super(problemMessage(problem) ?? `Request failed with status ${status}`);");
     expect(client).toContain("  return new HttpFailure(response.status, body);");
     expect(client).not.toContain("isErrorBody");
   });
@@ -291,6 +312,9 @@ export * from "./types";
     const client = outputs["client.ts"];
     expect(client).toContain("export class NotificationsClient {");
     expect(client).toContain("export class OrdersClient {");
+    // One error class for every client, named after the first service.
+    expect(client).toContain("export class NotificationsError extends Error {");
+    expect(client).not.toContain("OrdersError");
     // Only OrdersClient's list() reads a body, so only it needs send(); NotificationsClient's
     // ping() is void and awaits request() directly.
     expect(client.match(/private async send<T>/g)?.length).toBe(1);
@@ -309,13 +333,22 @@ export * from "./types";
     }
   });
 
+  it("names the error class <Service>Error by default, so a spec model named ApiError does not clash", async () => {
+    const { outputs } = await nextjs({ "client-style": "flat", "error-model": "ApiError" }, house).compile(
+      `${shopSpec}\n@error model ApiError { message: string }`,
+    );
+    expect(outputs["client.ts"]).toContain("export class ShopError extends Error {\n");
+    expect(outputs["client.ts"]).toContain("  readonly body: ApiError | undefined;\n");
+    expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
+  });
+
   it("reports generated types that clash with the flat client's exports", async () => {
     const cases: [Record<string, unknown>, string, string][] = [
-      [flat, `${shopSpec}\nmodel ApiError { x: string }`, "ApiError"],
+      [flat, `${shopSpec}\nmodel ShopError { x: string }`, "ShopError"],
       [flat, `${shopSpec}\nmodel ClientOptions { x: string }`, "ClientOptions"],
       [flat, `${shopSpec}\nmodel ShopClient { x: string }`, "ShopClient"],
       // Even as the error model: index.ts re-exports both, so the name would be ambiguous.
-      [{ "client-style": "flat", "error-model": "ApiError" }, `${shopSpec}\nmodel ApiError { message: string }`, "ApiError"],
+      [{ "client-style": "flat", "error-model": "ShopError" }, `${shopSpec}\nmodel ShopError { message: string }`, "ShopError"],
     ];
     for (const [options, spec, name] of cases) {
       const [result, diagnostics] = await nextjs(options, house).compileAndDiagnose(spec);

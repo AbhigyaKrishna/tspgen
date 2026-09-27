@@ -40,6 +40,8 @@ namespace Graph {
     kind: NodeKind;
     name: string;
     createdAt: isoInstant;
+    /** Unset for nodes created through the API: never written as `null` (serverJson, encode-defaults off). */
+    description?: string;
   }
 
   model CreateNodeRequest {

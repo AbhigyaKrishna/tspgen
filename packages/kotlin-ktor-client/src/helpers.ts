@@ -1,10 +1,13 @@
 import type { StatusCodes } from "@abhigyakrishna/tspgen-core";
 import {
   camel,
+  isJsonContentType,
   kotlinString as str,
   listElement,
   paramDecode,
   paramEncode,
+  serializerExpr,
+  serializerImports,
   type KtBody,
   type KtGroup,
   type KtOperation,
@@ -25,6 +28,51 @@ function encode(expr: string, type: KtTypeUse): string {
 /** Kotlin expression parsing a wire string. */
 export function decode(expr: string, type: KtTypeUse): string {
   return paramDecode(expr, type);
+}
+
+/**
+ * Kotlin expression reading the response body as `type`: through its explicit serializer and the API client's Json when
+ * its JSON form needs one (see `serializerExpr`), else `response.body()` (content negotiation).
+ */
+function bodyRead(type: KtTypeUse): string {
+  const serializer = serializerExpr(type);
+  return serializer ? `http.apiJson.decodeFromString(${serializer}, response.bodyAsText())` : "response.body()";
+}
+
+/** A single JSON request body whose JSON form needs an explicit serializer (see `serializerExpr`). */
+function jsonBody(body: KtBody): boolean {
+  return body.kind !== "multipart" && body.kind !== "file" && isJsonContentType(body.contentType) && serializerExpr(body.type) !== undefined;
+}
+
+/** Bodies of an operation written or read with an explicit serializer: request, success and typed error bodies, JSON parts. */
+function serializedTypes(op: KtOperation): KtTypeUse[] {
+  const r = op.result;
+  const success = r.kind === "sealed" ? r.decl.variants.flatMap((v) => (v.body ? [v.body] : [])) : r.stream || r.type.text === "Unit" ? [] : [r.type];
+  const request =
+    op.body?.kind === "multipart"
+      ? (op.body.parts ?? []).filter((p) => p.kind === "json").map((p) => p.type)
+      : op.body?.kind === "file" || !op.body || !isJsonContentType(op.body.contentType)
+        ? []
+        : [op.body.type];
+  const errors = op.errors.flatMap((e) => (e.body ? [e.body] : []));
+  return [...request, ...success, ...errors].filter((t) => serializerExpr(t) !== undefined);
+}
+
+/** Whether an operation writes or reads a body through an explicit serializer (it then needs the API client's Json). */
+export function usesSerializers(op: KtOperation): boolean {
+  return serializedTypes(op).length > 0;
+}
+
+/** Imports of the explicit serializers an operation's client method uses, and of the calls around them. */
+export function serializerCallImports(op: KtOperation): string[] {
+  const types = serializedTypes(op);
+  if (types.length === 0) return [];
+  const read = [...(op.result.kind === "sealed" ? op.result.decl.variants.flatMap((v) => (v.body ? [v.body] : [])) : [op.result.type]), ...op.errors.flatMap((e) => (e.body ? [e.body] : []))];
+  return [
+    ...types.flatMap(serializerImports),
+    ...(read.some((t) => serializerExpr(t)) ? ["io.ktor.client.statement.bodyAsText"] : []),
+    ...(op.body && jsonBody(op.body) ? ["io.ktor.http.content.TextContent"] : []),
+  ];
 }
 
 function statusMatch(codes: StatusCodes): string {
@@ -70,7 +118,10 @@ function partLine(body: string, p: KtPart): string {
       case "file":
         return `append(${wire}, ${value}.bytes, fileHeaders(${value}, ${wire}, ${str(p.contentTypes[0] ?? OCTET_STREAM)}))`;
       case "json":
-        return `append(${wire}, http.encodeJson(${value}), jsonPartHeaders(${jsonContentType(p)}))`;
+      {
+        const serializer = serializerExpr(p.type);
+        return `append(${wire}, http.encodeJson(${serializer ? `${serializer}, ` : ""}${value}), jsonPartHeaders(${jsonContentType(p)}))`;
+      }
       case "text":
         return `append(${wire}, ${encode(value, p.type)})`;
     }
@@ -99,8 +150,14 @@ function bodyLines(body: KtBody): string[] {
         `${body.name}.filename?.let { header(HttpHeaders.ContentDisposition, ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, it).toString()) }`,
         `setBody(${body.name}.bytes)`,
       ];
-    default:
+    default: {
+      const serializer = jsonBody(body) ? serializerExpr(body.type) : undefined;
+      if (serializer) {
+        // The serializer's JSON as the body: content negotiation would write the value with its type's own serializer.
+        return [`setBody(TextContent(http.apiJson.encodeToString(${serializer}, ${body.name}), ContentType.parse(${str(body.contentType)})))`];
+      }
       return [`contentType(ContentType.parse(${str(body.contentType)}))`, `setBody(${body.name})`];
+    }
   }
 }
 
@@ -169,11 +226,12 @@ export const ktorClientHelpers = {
   },
 
   statusMatch,
+  bodyRead,
 
   variantArgs(v: KtResultVariant): string {
     const args = [
       ...(v.status === undefined ? ["response.status.value"] : []),
-      ...(v.body ? ["response.body()"] : []),
+      ...(v.body ? [bodyRead(v.body)] : []),
       ...v.headers.map(headerExpr),
     ];
     return args.length > 0 ? `(${args.join(", ")})` : "";
@@ -185,10 +243,18 @@ export const ktorClientHelpers = {
       .sort((a, b) => rank(a.statusCodes) - rank(b.statusCodes))
       .map((e) => ({
         match: statusMatch(e.statusCodes),
-        expr: e.body ? `${e.exception.text}(response.body(), response.status.value)` : fallback,
+        expr: e.body ? `${e.exception.text}(${bodyRead(e.body)}, response.status.value)` : fallback,
       }));
     if (!branches.some((b) => b.match === "else")) branches.push({ match: "else", expr: fallback });
     return branches;
+  },
+
+  /**
+   * Whether the error dispatch needs the problem-details guard: some error branch decodes a typed body, which an
+   * `application/problem+json` response (the generated server's own 4xx/5xx) is not.
+   */
+  typedErrors(op: KtOperation): boolean {
+    return op.errors.some((e) => e.body);
   },
 
   stream: streamOf,

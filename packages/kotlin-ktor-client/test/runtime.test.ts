@@ -86,10 +86,32 @@ describe("ktor client error handling", () => {
     expect(pets).toContain("import io.ktor.client.plugins.expectSuccess\n");
     expect(pets).toContain("            else -> ApiException(response.status.value, response.errorMessage())\n");
     expect(pets).not.toContain("bodyAsText");
-    expect(outputs[`${DIR}/ClientSupport.kt`]).toContain(`internal suspend fun HttpResponse.errorMessage(): String {
+    // No typed error body: nothing to guard.
+    expect(pets).not.toContain("isProblem");
+    const support = outputs[`${DIR}/ClientSupport.kt`];
+    expect(support).toContain(
+      "internal fun HttpResponse.isProblem(): Boolean = contentType()?.match(ContentType.Application.ProblemJson) == true\n",
+    );
+    expect(support).toContain(`internal suspend fun HttpResponse.errorMessage(): String {
     val text = bodyAsText()
-    if (contentType()?.match(ContentType.Application.ProblemJson) != true) return text
+    if (!isProblem()) return text
     return runCatching { Json.parseToJsonElement(text).jsonObject["detail"]?.jsonPrimitive?.contentOrNull }.getOrNull() ?: text
 }`);
+  });
+
+  it("raises ApiException for a problem+json response instead of decoding it as a declared error model", async () => {
+    const { outputs } = await client().compile(`
+      @service namespace PetStore;
+      model Pet { id: int64 }
+      @error model BadInput { @statusCode _: 400; code: string }
+      @route("/pets") interface Pets {
+        @get get(@path petId: int64): Pet | BadInput;
+      }
+    `);
+    const pets = outputs[`${DIR}/PetsClient.kt`];
+    expect(pets).toContain(`        if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
+        throw when (response.status.value) {
+            400 -> BadInputException(response.body(), response.status.value)
+`);
   });
 });

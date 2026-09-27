@@ -5,7 +5,12 @@
 <%= it.h.visibility(it) %>fun StatusPagesConfig.<%= it.errorsFn %>() {
 <% for (const e of it.exceptions) { -%>
     exception<<%= e %>> { call, cause ->
+<% const serializer = it.exceptionSerializers?.[e]; -%>
+<% if (serializer) { -%>
+        call.respondJson(HttpStatusCode.fromValue(cause.status), <%~ serializer %>, cause.error)
+<% } else { -%>
         call.respond(HttpStatusCode.fromValue(cause.status), cause.error)
+<% } -%>
     }
 <% } -%>
     exception<ApiException> { call, cause ->
@@ -21,6 +26,9 @@
     }
     exception<PayloadTooLargeException> { call, cause ->
         call.respondProblem(HttpStatusCode.PayloadTooLarge, cause.message)
+    }
+    exception<ContentTransformationException> { call, _ ->
+        call.respondProblem(HttpStatusCode.UnsupportedMediaType, "Content type ${call.request.contentType()} is not supported")
     }
 <% } -%>
 }

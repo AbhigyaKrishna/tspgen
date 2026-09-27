@@ -142,9 +142,11 @@ class ShopAuth(
     const [, diagnostics] = await client().compileAndDiagnose(`
       @service namespace S;
       model Partner is ApiKeyAuth<ApiKeyLocation.header, "X-Partner">;
+      model Key is ApiKeyAuth<ApiKeyLocation.query, "key">;
       @route("/a") interface A {
         @get @useAuth([BearerAuth, BasicAuth]) a(): void;
         @get @route("/b") @useAuth(Partner) b(@header("x-partner") partner: string): void;
+        @get @route("/c") @useAuth(Key) c(@query key?: string): void;
       }
     `);
     expectDiagnostics(diagnostics, [
@@ -155,6 +157,10 @@ class ShopAuth(
       {
         code: "@abhigyakrishna/tspgen-core/auth-header-conflict",
         message: "Operation 'S.A.b' has a 'x-partner' header parameter, which auth scheme 'Partner' also sends; the Ktor client sends the credential instead.",
+      },
+      {
+        code: "@abhigyakrishna/tspgen-core/auth-header-conflict",
+        message: "Operation 'S.A.c' has a 'key' query parameter, which auth scheme 'Key' also sends; the Ktor client sends the credential instead.",
       },
     ]);
   });

@@ -20,7 +20,7 @@ describe("ktor server json", () => {
   it("declares serverJson on Ktor's DefaultJson without encoding defaults, and the module installs it", async () => {
     const { outputs } = await server().compile(petSpec);
     const support = outputs[`${DIR}/ServerSupport.kt`];
-    expect(support).toContain("internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n}\n");
+    expect(support).toContain("val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n}\n");
     expect(support).toContain("import io.ktor.serialization.kotlinx.json.DefaultJson\n");
     expect(outputs[`${DIR}/PetStoreModule.kt`]).toContain("        json(serverJson)\n");
   });
@@ -28,7 +28,7 @@ describe("ktor server json", () => {
   it("applies encode-defaults and ignore-unknown-keys", async () => {
     const { outputs } = await server({ features: { "encode-defaults": true, "ignore-unknown-keys": true } }).compile(petSpec);
     expect(outputs[`${DIR}/ServerSupport.kt`]).toContain(
-      "internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = true\n    ignoreUnknownKeys = true\n}\n",
+      "val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = true\n    ignoreUnknownKeys = true\n}\n",
     );
   });
 
@@ -36,7 +36,7 @@ describe("ktor server json", () => {
     const { outputs } = await server().compile(javaTimeSpec);
     const support = outputs[`${DIR}/ServerSupport.kt`];
     expect(support).toContain(
-      "internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n    serializersModule = modelSerializersModule\n}\n",
+      "val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n    serializersModule = modelSerializersModule\n}\n",
     );
     expect(support).toContain("import com.acme.models.modelSerializersModule\n");
     const module = outputs[`${DIR}/SModule.kt`];
@@ -45,11 +45,14 @@ describe("ktor server json", () => {
     expect(module).not.toContain("import kotlinx.serialization.json.Json\n");
   });
 
-  it("omits serverJson without the module unless a JSON part or event needs it", async () => {
-    const plain = (await server({ features: { module: false } }).compile(petSpec)).outputs;
-    expect(plain[`${DIR}/ServerSupport.kt`]).not.toContain("serverJson");
+  it("declares serverJson without the module too, for the application's own content negotiation", async () => {
+    const plain = (await server({ features: { module: false, "encode-defaults": true } }).compile(petSpec)).outputs;
+    expect(plain[`${DIR}/ServerSupport.kt`]).toContain(
+      "val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = true\n",
+    );
+    expect(plain[`${DIR}/ServerSupport.kt`]).toContain("import io.ktor.serialization.kotlinx.json.DefaultJson\n");
     const parts = (await server({ features: { module: false } }).compile(jsonPartSpec)).outputs;
-    expect(parts[`${DIR}/ServerSupport.kt`]).toContain("internal val serverJson: Json = Json(DefaultJson) {");
+    expect(parts[`${DIR}/ServerSupport.kt`]).toContain("val serverJson: Json = Json(DefaultJson) {");
     expect(parts[`${DIR}/SRoutes.kt`]).toContain('convertParam("meta") { serverJson.decodeFromString<Meta>(it) }');
   });
 
@@ -67,7 +70,7 @@ describe("ktor server json", () => {
 });
 
 describe("ktor server errors", () => {
-  it("emits <Service>Errors.kt with problem bodies for unmapped errors, 400 and 413", async () => {
+  it("emits <Service>Errors.kt with problem bodies for unmapped errors, 400, 413 and 415", async () => {
     const { outputs } = await server().compile(petSpec);
     expect(outputs[`${DIR}/PetStoreErrors.kt`]).toBe(`${HEADER}
 package com.acme.server
@@ -76,8 +79,10 @@ import com.acme.api.ApiErrorException
 import com.acme.api.ApiException
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.ContentTransformationException
 import io.ktor.server.plugins.PayloadTooLargeException
 import io.ktor.server.plugins.statuspages.StatusPagesConfig
+import io.ktor.server.request.contentType
 import io.ktor.server.response.respond
 
 /**
@@ -97,6 +102,9 @@ fun StatusPagesConfig.petStoreErrors() {
     exception<PayloadTooLargeException> { call, cause ->
         call.respondProblem(HttpStatusCode.PayloadTooLarge, cause.message)
     }
+    exception<ContentTransformationException> { call, _ ->
+        call.respondProblem(HttpStatusCode.UnsupportedMediaType, "Content type \${call.request.contentType()} is not supported")
+    }
 }
 `);
     const support = outputs[`${DIR}/ServerSupport.kt`];
@@ -109,13 +117,26 @@ fun StatusPagesConfig.petStoreErrors() {
     }
     respondText(problem.toString(), ContentType.Application.ProblemJson, status)
 }`);
-    expect(support).toContain(`internal fun BadRequestException.problemDetail(): String? =
-    if (this is MissingRequestParameterException || this is ParameterConversionException) {
-        message
-    } else {
-        generateSequence(cause) { it.cause }.lastOrNull()?.message ?: message
-    }`);
-    for (const i of ["io.ktor.http.ContentType", "io.ktor.server.response.respondText", "kotlinx.serialization.json.buildJsonObject", "kotlinx.serialization.json.put"]) {
+    expect(support).toContain(`@OptIn(ExperimentalSerializationApi::class) // MissingFieldException.missingFields
+internal fun BadRequestException.problemDetail(): String? {
+    if (this is MissingRequestParameterException || this is ParameterConversionException) return message
+    val causes = generateSequence(cause) { it.cause }.toList()
+    val innermost = causes.lastOrNull() ?: return message
+    // A copy of our own exception (coroutines' stack-trace recovery chains the original as its cause), or a model check.
+    if (innermost is BadRequestException || (innermost is IllegalArgumentException && innermost !is SerializationException)) {
+        return innermost.message
+    }
+    val missing = causes.filterIsInstance<MissingFieldException>().lastOrNull()?.missingFields.orEmpty()
+    val path = causes.lastOrNull { it is SerializationException }?.message?.let { JSON_PATH.find(it)?.groupValues?.get(1) }
+    return buildString {
+        append("Malformed request body")
+        if (missing.isNotEmpty()) append(missing.joinToString(prefix = ": missing ") { "'$it'" })
+        if (path != null) append(" at path ").append(path)
+    }
+}`);
+    // kotlinx's messages name model classes and echo the request body: never sent.
+    expect(support).not.toContain("lastOrNull()?.message");
+    for (const i of ["io.ktor.http.ContentType", "kotlinx.serialization.ExperimentalSerializationApi", "kotlinx.serialization.MissingFieldException", "kotlinx.serialization.SerializationException", "io.ktor.server.response.respondText", "kotlinx.serialization.json.buildJsonObject", "kotlinx.serialization.json.put"]) {
       expect(support).toContain(`import ${i}\n`);
     }
   });
@@ -153,5 +174,11 @@ fun StatusPagesConfig.petStoreErrors() {
   it("follows visibility: internal", async () => {
     const { outputs } = await server({}, { visibility: "internal" }).compile(petSpec);
     expect(outputs[`${DIR}/PetStoreErrors.kt`]).toContain("\ninternal fun StatusPagesConfig.petStoreErrors() {");
+    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("\ninternal val serverJson: Json = Json(DefaultJson) {");
+  });
+
+  it("declares serverJson public by default, for content negotiation installed in another module", async () => {
+    const { outputs } = await server({ features: { module: false } }).compile(petSpec);
+    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain(" */\nval serverJson: Json = Json(DefaultJson) {");
   });
 });

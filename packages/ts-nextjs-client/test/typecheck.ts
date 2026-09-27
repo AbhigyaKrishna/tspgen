@@ -23,6 +23,7 @@ export function typecheck(outputs: Record<string, string>, extra: Record<string,
       JSON.stringify({
         compilerOptions: {
           strict: true,
+          noPropertyAccessFromIndexSignature: true,
           noEmit: true,
           target: "es2022",
           lib: ["es2022", "dom"],

@@ -27,6 +27,26 @@ function classUse(name: string): TsTypeUse {
 
 export const HTTP_ERROR = classUse("HttpError");
 
+/** Strips one layer of parens `wrap()` adds around a union/intersection element (`(A | B)[]` -> `A | B`). */
+function unwrap(text: string): string {
+  return text.startsWith("(") && text.endsWith(")") ? text.slice(1, -1) : text;
+}
+
+/**
+ * A valid, stable identifier fragment describing an error body's shape: a named declaration (model, enum,
+ * union alias) uses its own name; a container describes its shape instead of its raw type syntax, so
+ * `number[]` becomes `ArrayOfNumber` and `Record<string, number>` becomes `RecordOfNumber` rather than the
+ * syntactically invalid `Number[]` / `RecordStringNumber>` `typeName()` would otherwise produce.
+ */
+function bodyTypeName(text: string): string {
+  const value = text.endsWith(" | null") ? text.slice(0, -" | null".length) : text;
+  const array = /^(.*)\[\]$/.exec(value);
+  if (array) return `ArrayOf${bodyTypeName(unwrap(array[1]))}`;
+  const record = /^Record<string,\s*(.*)>$/.exec(value);
+  if (record) return `RecordOf${bodyTypeName(record[1])}`;
+  return typeName(value) || "Body";
+}
+
 interface Response {
   statusCodes: StatusCodes;
   isError: boolean;
@@ -209,7 +229,7 @@ export class ApiBuilder {
     if (!r.body) return error;
     let cls = this.errorClasses.get(r.body.text);
     if (!cls) {
-      cls = { name: `${typeName(r.body.text)}Error`, file: ERRORS_FILE, body: r.body };
+      cls = { name: `${bodyTypeName(r.body.text)}Error`, file: ERRORS_FILE, body: r.body };
       this.errorClasses.set(r.body.text, cls);
     }
     error.errorClass = classUse(cls.name);

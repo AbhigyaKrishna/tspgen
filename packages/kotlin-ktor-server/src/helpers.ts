@@ -1,10 +1,13 @@
 import {
   camel,
+  isJsonContentType,
   kotlinString as str,
   listElement,
   paramDecode,
   paramEncode,
   serializedIn,
+  serializerExpr,
+  serializerImports,
   typeName,
   type KtBody,
   type KtOperation,
@@ -52,6 +55,33 @@ export function convert(expr: string, wire: string, type: KtTypeUse, safe: boole
 /** Kotlin expression turning a value into its wire string (kotlinx encoding for non-primitives). */
 export function encode(expr: string, type: KtTypeUse): string {
   return paramEncode(expr, type);
+}
+
+/** A JSON request body read with `receiveJson` and an explicit serializer (see `serializerExpr`). */
+function jsonBody(body: KtBody): boolean {
+  return isJsonContentType(body.contentType) && serializerExpr(body.type) !== undefined;
+}
+
+/** The request body is read with `receiveJson` and an explicit serializer (see `serializerExpr`). */
+export function receivesJson(op: KtOperation): boolean {
+  return !(op as Partial<ServerOperation>).upload && op.body !== undefined && jsonBody(op.body);
+}
+
+/** Response bodies of an operation's success results: the single result (not a stream) or each variant's. */
+function responseBodies(op: KtOperation): KtTypeUse[] {
+  const r = op.result;
+  if (r.kind === "sealed") return r.decl.variants.flatMap((v) => (v.body ? [v.body] : []));
+  return r.stream || r.type.text === "Unit" ? [] : [r.type];
+}
+
+/** Some success body is written with `respondJson` and an explicit serializer. */
+export function respondsJson(op: KtOperation): boolean {
+  return responseBodies(op).some((t) => serializerExpr(t) !== undefined);
+}
+
+/** Imports of the explicit serializers an operation's routes use for its request and response bodies. */
+export function bodySerializerImports(op: KtOperation): string[] {
+  return [...(receivesJson(op) ? serializerImports(op.body!.type) : []), ...responseBodies(op).flatMap(serializerImports)];
 }
 
 function plain(name: string): string {
@@ -128,6 +158,7 @@ export const ktorServerHelpers = {
   },
 
   bodyExpr(body: KtBody): string {
+    if (jsonBody(body)) return `call.receiveJson(${serializerExpr(body.type)})`;
     return body.optional
       ? `call.receiveNullable<${body.type.text.replace(/\?$/, "")}>()`
       : `call.receive<${body.type.text}>()`;
@@ -135,6 +166,15 @@ export const ktorServerHelpers = {
 
   requestFields,
   requestName,
+
+  /**
+   * The statement responding with `value` of `type`: through its explicit serializer (`respondJson`) when its JSON
+   * form needs one (see `serializerExpr`), else Ktor's content negotiation.
+   */
+  respond(status: string, type: KtTypeUse, value: string): string {
+    const serializer = serializerExpr(type);
+    return serializer ? `call.respondJson(${status}, ${serializer}, ${value})` : `call.respond(${status}, ${value})`;
+  },
 
   /** The route statement streaming a server-sent event operation's flow. */
   streamLine(op: ServerOperation, call: string): string {

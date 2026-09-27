@@ -16,6 +16,10 @@ export interface KtTypeUse {
   nullable: boolean;
   /** Element of a `List` (set by `listOf`); parameter codecs convert list items with it. */
   element?: KtTypeUse;
+  /** Value of a `Map<String, …>` (set by `mapOf`); keys are always `String`. */
+  value?: KtTypeUse;
+  /** A generic type's base (`Page`) and type arguments (set by `genericOf`). */
+  generic?: { base: KtTypeUse; args: KtTypeUse[] };
   /**
    * Serializer (simple name) giving this scalar its JSON form, e.g. `LongAsStringSerializer` for `@encode(string)`:
    * a model property of this type is annotated `@Serializable(with = <serializer>::class)`.
@@ -63,6 +67,11 @@ export interface KtProperty {
   serialType?: string;
   /** Imports the property's serializer annotations need. */
   serialImports?: string[];
+  /**
+   * A required property with a default: written as `@EncodeDefault(EncodeDefault.Mode.ALWAYS)` so the key stays on the
+   * wire when the Json omits defaults (`encodeDefaults = false`) — other languages' models require it.
+   */
+  encodeDefault?: boolean;
 }
 
 export interface KtDataClass extends KtDeclBase {

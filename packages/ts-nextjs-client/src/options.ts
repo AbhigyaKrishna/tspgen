@@ -39,7 +39,8 @@ export const nextClientMovedOptions: MovedOptions = {
 export interface NextClientOptions {
   "base-url-env": string;
   "client-style": "grouped" | "flat";
-  "error-class": string;
+  /** Default: `<Service>Error` (see flatErrorClassName). */
+  "error-class"?: string;
   "error-model"?: string;
   /** React Query: first element of every generated query key. */
   "query-key-prefix"?: string;
@@ -62,7 +63,11 @@ export const nextClientOptionsSchema = {
       default: "grouped",
       description: "grouped: client/ with per-group classes, hooks, actions; flat: client.ts with one class.",
     },
-    "error-class": { type: "string", default: "ApiError", description: "Error class of the flat client." },
+    "error-class": {
+      type: "string",
+      description:
+        'Error class of the flat client (default "<Service>Error", after the first service when there are several).',
+    },
     "error-model": {
       type: "string",
       description: "Model (TypeScript name or TypeSpec id) whose fields the flat client's error class exposes.",

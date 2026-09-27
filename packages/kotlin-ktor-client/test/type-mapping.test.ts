@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { client } from "./tester.js";
+import { client, sseClient } from "./tester.js";
 
 const DIR = "client/com/acme/client";
 
@@ -75,5 +75,83 @@ describe("ktor client type mapping", () => {
     expect(aliasedCode).toContain(
       `(response.headers["total"] ?: throw ApiException(response.status.value, "missing header total")).toBigDecimal()`,
     );
+  });
+
+  describe("@encode(string) on top-level JSON values", () => {
+    const spec = `
+      @service namespace S;
+      @encode(string) scalar BigId extends int64;
+      @error model Missing { @statusCode _: 404; @body id: BigId }
+      @route("/ids") interface Ids {
+        @get list(): BigId[] | Missing;
+        @post take(@body ids: BigId[]): void;
+        @put @route("/maybe") maybe(@header contentType: "application/json", @body id?: BigId): void;
+        @put @route("/text") text(@body id: BigId): void;
+        @get @route("/either") either(): { @statusCode _: 200; @body ids: BigId[] } | { @statusCode _: 201; @header location: string };
+        @get @route("/plain") plain(): int64[];
+      }
+    `;
+
+    for (const style of ["inline", "typealias"] as const) {
+      it(`${style}: writes and reads bodies through the explicit serializer and the API client's Json`, async () => {
+        const { outputs } = await client({}, { "scalar-style": style }).compile(spec);
+        const code = outputs[`${DIR}/IdsClient.kt`];
+        expect(code).toContain("return http.apiJson.decodeFromString(ListSerializer(LongAsStringSerializer), response.bodyAsText())");
+        expect(code).toContain(
+          'setBody(TextContent(http.apiJson.encodeToString(ListSerializer(LongAsStringSerializer), ids), ContentType.parse("application/json")))',
+        );
+        expect(code).toContain(
+          'setBody(TextContent(http.apiJson.encodeToString(LongAsStringSerializer.nullable, id), ContentType.parse("application/json")))',
+        );
+        expect(code).toContain("200 -> return EitherResult.Ok(http.apiJson.decodeFromString(ListSerializer(LongAsStringSerializer), response.bodyAsText()))");
+        const exception = style === "inline" ? "LongException" : "BigIdException";
+        expect(code).toContain(`404 -> ${exception}(http.apiJson.decodeFromString(LongAsStringSerializer, response.bodyAsText()), response.status.value)`);
+        // A text/plain scalar body is no JSON: unchanged.
+        expect(code).toContain('contentType(ContentType.parse("text/plain"))');
+        // Values without an @encode(string) inside keep content negotiation.
+        expect(code).toContain("return response.body()");
+        expect(code).toContain("import io.ktor.http.content.TextContent\n");
+        expect(code).toContain("import io.ktor.client.statement.bodyAsText\n");
+        expect(code).toContain("import kotlinx.serialization.builtins.ListSerializer\n");
+        expect(code).toContain("import kotlinx.serialization.builtins.nullable\n");
+        expect(outputs[`${DIR}/ClientSupport.kt`]).toContain("internal val HttpClient.apiJson: Json");
+        expect(outputs[`${DIR}/SApiClient.kt`]).toContain("install(apiJsonPlugin(format))");
+      });
+    }
+
+    it("leaves ordinary output alone: no apiJson without a serializer to apply", async () => {
+      const { outputs } = await client().compile(`
+        @service namespace S;
+        model Pet { id: int64 }
+        @route("/pets") op list(@body pets: Pet[]): Pet[];
+      `);
+      expect(outputs[`${DIR}/ClientSupport.kt`]).not.toContain("apiJson");
+      expect(outputs[`${DIR}/SClient.kt`]).toContain("setBody(pets)");
+    });
+
+    it("decodes JSON event payloads and encodes JSON parts with the serializer", async () => {
+      const events = await sseClient().compile(`
+        @service namespace S;
+        @encode(string) scalar BigId extends int64;
+        @events union Feed { ids: BigId[] }
+        @route("/feed") op watch(): SSEStream<Feed>;
+      `);
+      const support = events.outputs[`${DIR}/ClientSupport.kt`];
+      expect(support).toContain("json.decodeFromString(ListSerializer(LongAsStringSerializer), event.data)");
+      expect(support).toContain("import kotlinx.serialization.builtins.ListSerializer\n");
+      const parts = await client().compile(`
+        @service namespace S;
+        @encode(string) scalar BigId extends int64;
+        model Form { ids: HttpPart<BigId[]>; name: HttpPart<string> }
+        @route("/form") op send(@header contentType: "multipart/form-data", @multipartBody body: Form): void;
+      `);
+      expect(parts.outputs[`${DIR}/SClient.kt`]).toContain(
+        'append("ids", http.encodeJson(ListSerializer(LongAsStringSerializer), body.ids), jsonPartHeaders())',
+      );
+      expect(parts.outputs[`${DIR}/SClient.kt`]).toContain("import kotlinx.serialization.builtins.ListSerializer\n");
+      expect(parts.outputs[`${DIR}/ClientSupport.kt`]).toContain(
+        "internal fun <T> HttpClient.encodeJson(serializer: KSerializer<T>, value: T): String =\n    apiJson.encodeToJsonElement(serializer, value).toString()",
+      );
+    });
   });
 });

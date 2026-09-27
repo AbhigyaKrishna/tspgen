@@ -25,10 +25,10 @@ export interface RequestOptions extends RequestDefaults {
  */
 function safeInit(options: RequestOptions): RequestOptions {
   const rest = { ...options } as Record<string, unknown>;
-  delete rest.method;
-  delete rest.body;
-  delete rest.headers;
-  delete rest.window;
+  delete rest["method"];
+  delete rest["body"];
+  delete rest["headers"];
+  delete rest["window"];
   return rest as RequestOptions;
 }
 
@@ -67,12 +67,16 @@ export class <%= e.name %> extends Error {
   /** The decoded response body, if any. */
   readonly body: unknown;
 <% } -%>
+  /** The RFC 9457 `application/problem+json` body, when the response carried one (never <%= e.model ? "the error model" : "a declared error body" %>). */
+  readonly problem: Record<string, unknown> | undefined;
 
-  constructor(status: number, body: <%= e.model ? e.model + " | undefined" : "unknown" %>) {
-    super(<%~ e.message %>);
+  /** `message` defaults to the problem's `detail` (else `title`), then <%= e.model && e.message.startsWith("body?.message") ? "the body's message, then " : "" %>the status. */
+  constructor(status: number, body: <%= e.model ? e.model + " | undefined" : "unknown" %>, problem?: Record<string, unknown>) {
+    super(problemMessage(problem) ?? <%~ e.message %>);
     this.name = <%~ it.h.str(e.name) %>;
     this.status = status;
     this.body = body;
+    this.problem = problem;
 <% for (const f of e.fields) { -%>
     this.<%= f.key %> = body?.<%= f.key %>;
 <% } -%>
@@ -286,6 +290,11 @@ function toFormData(value: object, parts: readonly PartSpec[]): globalThis.FormD
 <% } -%>
 async function toError(response: Response): Promise<<%= e.name %>> {
   const body: unknown = await response.json().catch(() => undefined);
+  // An application/problem+json body is never <%= e.model ? "the error model" : "a declared error body" %>.
+  if (isProblem(response)) {
+    const problem = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    return new <%= e.name %>(response.status, <%= e.model ? "undefined" : "body" %>, problem);
+  }
 <% if (e.model) { -%>
 <% if (e.decode) { -%>
   // A codec error body failing decode (e.g. an invalid Date) must not become undefined; fall back to the raw body.
@@ -304,6 +313,18 @@ function isErrorBody(value: unknown): value is <%= e.model %> {
   return new <%= e.name %>(response.status, body);
 }
 <% } -%>
+
+/** Whether the response is an RFC 9457 `application/problem+json` body. */
+function isProblem(response: Response): boolean {
+  return (response.headers.get("content-type") ?? "").trim().toLowerCase().startsWith("application/problem+json");
+}
+
+/** A problem body's `detail`, else its `title`. */
+function problemMessage(problem: Record<string, unknown> | undefined): string | undefined {
+  const detail = problem?.["detail"];
+  const title = problem?.["title"];
+  return typeof detail === "string" ? detail : typeof title === "string" ? title : undefined;
+}
 <% if (it.usesQuery && it.usesArrays) { -%>
 
 /** Arrays are comma-joined into one value unless their key is listed in `explode` (then the key repeats). */

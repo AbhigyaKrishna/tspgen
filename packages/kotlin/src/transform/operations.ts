@@ -57,6 +57,18 @@ function errorKey(body: KtTypeUse): string {
   return body.imports.length === 1 && fqn.endsWith(`.${body.text}`) ? fqn : body.text;
 }
 
+/**
+ * A valid, stable identifier fragment describing an error body's shape: a named declaration (model, enum,
+ * union, user scalar) uses its own name; a container describes its shape instead of its raw type syntax, so
+ * `List<Long>` becomes `ListOfLong` rather than the syntactically invalid `ListLong>` `pascal()` would produce.
+ */
+function bodyTypeName(body: KtTypeUse): string {
+  if (body.element) return `ListOf${bodyTypeName(body.element)}`;
+  if (body.value) return `MapOf${bodyTypeName(body.value)}`;
+  if (body.generic) return `${typeName(body.generic.base.text)}Of${body.generic.args.map(bodyTypeName).join("And")}`;
+  return typeName(body.text.replace(/\?$/, ""));
+}
+
 export interface ApiOptions {
   errors?: "typed" | "thrown";
   packages?: Record<string, string>;
@@ -273,7 +285,7 @@ export class ApiBuilder {
   /** Exception name for an error body; a clash with another model's exception is qualified by its package. */
   private exceptionName(body: KtTypeUse, key: string): string {
     const taken = (n: string) => [...this.exceptions.values()].some((e) => e.decl.name === n);
-    const base = `${typeName(body.text)}Exception`;
+    const base = `${bodyTypeName(body)}Exception`;
     if (!taken(base)) return base;
     const pkg = key.endsWith(`.${body.text}`) ? key.slice(0, -body.text.length - 1) : "";
     const segment = pkg.split(".").pop() ?? "";

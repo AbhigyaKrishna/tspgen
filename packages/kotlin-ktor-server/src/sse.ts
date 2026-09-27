@@ -1,5 +1,12 @@
 import { reportDiagnostic } from "@abhigyakrishna/tspgen-core";
-import { kotlinString as str, type KotlinIR, type KtEvent, type KtEvents } from "@abhigyakrishna/tspgen-kotlin";
+import {
+  kotlinString as str,
+  serializerExpr,
+  serializerImports,
+  type KotlinIR,
+  type KtEvent,
+  type KtEvents,
+} from "@abhigyakrishna/tspgen-kotlin";
 import { NoTarget, type Program } from "@typespec/compiler";
 import type { ServerOperation } from "./context.js";
 import { encode } from "./helpers.js";
@@ -31,7 +38,10 @@ export function streamLine(mode: SseMode, call: string): string {
 function dataExpr(e: KtEvent): string {
   if (e.literal !== undefined) return str(e.literal);
   const data = e.data!;
-  if (e.json) return "serverJson.encodeToJsonElement(data).toString()";
+  if (e.json) {
+    const serializer = serializerExpr(data);
+    return serializer ? `serverJson.encodeToJsonElement(${serializer}, data).toString()` : "serverJson.encodeToJsonElement(data).toString()";
+  }
   return data.nullable ? `data?.let { ${encode("it", data)} } ?: ""` : encode("data", data);
 }
 
@@ -91,6 +101,7 @@ export function sseImports(plan: SsePlan, ir: KotlinIR, headers: boolean): strin
     "kotlinx.coroutines.flow.transformWhile",
     ...(headers ? ["io.ktor.server.response.header"] : []),
     ...plan.events.map((d) => d.fqn),
+    ...plan.events.flatMap((d) => d.events.flatMap((e) => (e.json && e.data ? serializerImports(e.data) : []))),
     ...(plan.sseMessage && ir.sseMessage ? [ir.sseMessage] : []),
     ...(plan.textWriter ? ["io.ktor.http.ContentType", "io.ktor.server.response.respondBytesWriter", "io.ktor.utils.io.writeStringUtf8"] : []),
     ...(plan.plugin

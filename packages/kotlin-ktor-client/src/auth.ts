@@ -2,6 +2,8 @@ import {
   authDocs,
   authHeader,
   authHeaderConflicts,
+  authQueryConflicts,
+  operationTarget,
   authKind,
   authSchemeTarget,
   reportDiagnostic,
@@ -9,7 +11,7 @@ import {
   type AuthKind,
 } from "@abhigyakrishna/tspgen-core";
 import { camel, identifier, kotlinString as str, type KtOperation, type KtService } from "@abhigyakrishna/tspgen-kotlin";
-import { NoTarget, type Program } from "@typespec/compiler";
+import type { Program } from "@typespec/compiler";
 
 const TARGET = "the Ktor client";
 
@@ -41,14 +43,14 @@ function placement(auth: AuthIR, kind: AuthKind): string {
   return auth.in === "query" ? "QUERY" : auth.in === "cookie" ? "COOKIE" : "HEADER";
 }
 
-/** Warns about credentials colliding on one header: within an alternative, or with a header parameter. */
+/** Warns about credentials colliding on one header (within an alternative, or with a header parameter) or query parameter. */
 function checkConflicts(program: Program, op: KtOperation, supported: Supported): void {
   for (const { header, ids } of authHeaderConflicts(op.auth?.options ?? [], supported)) {
     reportDiagnostic(program, {
       code: "auth-header-conflict",
       messageId: "default",
       format: { operation: op.id, schemes: ids.join(", "), header, target: TARGET },
-      target: NoTarget,
+      target: operationTarget(program, op.id),
     });
   }
   const params = new Set(op.params.filter((p) => p.location === "header").map((p) => p.wireName.toLowerCase()));
@@ -63,10 +65,19 @@ function checkConflicts(program: Program, op: KtOperation, supported: Supported)
       reportDiagnostic(program, {
         code: "auth-header-conflict",
         messageId: "parameter",
-        format: { operation: op.id, header, scheme: id, target: TARGET },
-        target: NoTarget,
+        format: { operation: op.id, header, location: "header", scheme: id, target: TARGET },
+        target: operationTarget(program, op.id),
       });
     }
+  }
+  const query = op.params.filter((p) => p.location === "query").map((p) => p.wireName);
+  for (const { name, id } of authQueryConflicts(op.auth?.options ?? [], supported, query)) {
+    reportDiagnostic(program, {
+      code: "auth-header-conflict",
+      messageId: "parameter",
+      format: { operation: op.id, header: name, location: "query", scheme: id, target: TARGET },
+      target: operationTarget(program, op.id),
+    });
   }
 }
 

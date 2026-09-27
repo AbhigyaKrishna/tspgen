@@ -25,6 +25,7 @@ describe("scalar-style", () => {
     expect(outputs[`${M}/Seen.kt`]).toContain("import java.time.Instant\n\ntypealias Seen = Instant");
     const pet = outputs[`${M}/Pet.kt`];
     expect(pet).toContain(`data class Pet(
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val id: PetId = "abc",
     val alias: PetId? = null,
     val seen: Seen,

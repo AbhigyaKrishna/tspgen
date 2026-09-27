@@ -7,7 +7,7 @@ export const ktorClientFeatures = defineFeatures({
   },
   "encode-defaults": {
     default: false,
-    description: "Write properties equal to their default in request bodies (kotlinx's encodeDefaults).",
+    description: "Write optional properties equal to their default in request bodies (kotlinx's encodeDefaults); required ones are always written.",
   },
   auth: {
     default: true,

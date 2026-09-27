@@ -21,7 +21,7 @@ export const ktorServerFeatures = defineFeatures({
   },
   "encode-defaults": {
     default: false,
-    description: "Write properties equal to their default (unset optionals as null) in responses and events.",
+    description: "Write optional properties equal to their default (unset ones as null) in responses and events; required ones are always written.",
   },
 });
 

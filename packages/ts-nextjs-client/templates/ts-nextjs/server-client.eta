@@ -13,7 +13,7 @@ export function <%= n.names.configureActions(s) %>(config: Partial<<%~ config %>
 /** Server-side client; base URL from process.env.<%= it.env %> unless configured. */
 export function <%= n.names.serverClient(s) %>(): <%= client %> {
   const overrides = <%= n.names.serverClient(s) %>Overrides;
-  const baseUrl = overrides.baseUrl ?? process.env.<%= it.env %>;
+  const baseUrl = overrides.baseUrl ?? process.env[<%~ it.h.str(it.env) %>];
   if (!baseUrl) throw new Error("<%= it.env %> is not set");
   return new <%= client %>({ ...overrides, baseUrl });
 }

@@ -47,6 +47,11 @@ model Page<T> {
 
 model Collar {
   size: int32;
+
+  /** Required with a default: always on the wire, though the server omits defaults. */
+  material: "leather" | "nylon" = "leather";
+
+  rings: int32 = 1;
 }
 
 model NameTag {

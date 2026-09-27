@@ -47,3 +47,28 @@ describe("date-type: date clients", () => {
     expect(JSON.parse(String(fetch.mock.calls[1][1]?.body))).toEqual(SENT);
   });
 });
+
+/** Whole-body @encode(string) int64s exactly as the Kotlin server writes them (TopLevelEncodingE2ETest). */
+describe("@encode(string) top-level bodies", () => {
+  const KOTLIN_WIRE = '["9007199254740993","1"]';
+  const ids = () =>
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Response(init?.method === "POST" ? String(init.body) : KOTLIN_WIRE, { headers: { "content-type": "application/json" } }),
+    );
+
+  it("grouped: reads and sends string ids", async () => {
+    const fetch = ids();
+    const api = createLedgerClient({ baseUrl: "http://x", fetch });
+    expect(await api.entries.ids()).toEqual(["9007199254740993", "1"]);
+    expect(await api.entries.take({ ids: ["9007199254740993"] })).toEqual(["9007199254740993"]);
+    expect(String(fetch.mock.calls[1][1]?.body)).toBe('["9007199254740993"]');
+  });
+
+  it("flat: reads and sends string ids", async () => {
+    const fetch = ids();
+    const api = new LedgerClient({ baseUrl: "http://x", fetch });
+    expect(await api.ids()).toEqual(["9007199254740993", "1"]);
+    expect(await api.take(["9007199254740993"])).toEqual(["9007199254740993"]);
+    expect(String(fetch.mock.calls[1][1]?.body)).toBe('["9007199254740993"]');
+  });
+});

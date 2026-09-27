@@ -78,7 +78,7 @@ describe("next.js react-query and server actions", () => {
     expect(outputs["client/core.ts"]).toContain("export function withoutUndefined(value: unknown): unknown {");
     expect(actions).not.toContain("petsGetAction");
     expect(outputs["client/actions/petStore.ts"]).toBeUndefined();
-    expect(outputs["client/actions/server-client.ts"]).toContain("const baseUrl = overrides.baseUrl ?? process.env.API_BASE_URL;");
+    expect(outputs["client/actions/server-client.ts"]).toContain("const baseUrl = overrides.baseUrl ?? process.env[\"API_BASE_URL\"];");
   });
 
   it("respects feature toggles and base-url-env", async () => {

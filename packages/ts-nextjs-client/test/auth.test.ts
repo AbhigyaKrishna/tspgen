@@ -156,6 +156,7 @@ createShopClient({ baseUrl: "/api", auth: { Nope: () => "x" } });
           @get @route("/b") @useAuth([BearerAuth, Auth2] | BasicAuth) b(): void;
           @get @route("/c") @useAuth([K1, K2]) c(): void;
           @get @route("/d") @useAuth(BearerAuth | BasicAuth | [K1, Q]) d(): void;
+          @get @route("/e") @useAuth(Q) e(@query("X-Key") key?: string): void;
         }
       `);
       const target = flat ? "the flat client" : "the Next.js client";
@@ -164,10 +165,14 @@ createShopClient({ baseUrl: "/api", auth: { Nope: () => "x" } });
         ["S.A.b", "authorization", "BearerAuth, Auth2"],
         ["S.A.c", "x-key", "K1, K2"],
       ].map(([op, header, schemes]) => ({
-        code: "@abhigyakrishna/tspgen-typescript/auth-header-conflict",
+        code: "@abhigyakrishna/tspgen-core/auth-header-conflict",
         severity: "warning" as const,
         message: `Operation '${op}' sends several credentials (${schemes}) as the '${header}' header in one auth alternative; ${target} sends only the last one.`,
-      })));
+      })).concat([{
+        code: "@abhigyakrishna/tspgen-core/auth-header-conflict",
+        severity: "warning" as const,
+        message: `Operation 'S.A.e' has a 'X-Key' query parameter, which auth scheme 'Q' also sends; ${target} sends the credential instead.`,
+      }]));
     }
   });
 

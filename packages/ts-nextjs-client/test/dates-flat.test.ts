@@ -44,7 +44,7 @@ describe("flat client with date-type: date", () => {
     expect(client).toContain("    z.encode(z.lazy(() => MeetingSchema), withoutUndefined(meeting) as Meeting);");
     expect(client).toContain("`/meetings/${encodeURIComponent(day.toISOString())}`");
     expect(client).toContain(
-      "  return new ApiError(response.status, isErrorBody(body) ? (() => { const r = ProblemSchema.safeParse(body); return r.success ? r.data : body; })() : undefined);",
+      "  return new ShopError(response.status, isErrorBody(body) ? (() => { const r = ProblemSchema.safeParse(body); return r.success ? r.data : body; })() : undefined);",
     );
     expect(client).toContain(`/** A query or form value as sent: dates as ISO-8601 strings. */
 function toText(value: unknown): string {
@@ -65,7 +65,7 @@ function toText(value: unknown): string {
 
   it("round-trips Dates at runtime", async () => {
     const { outputs } = await nextjs(flat, dates).compile(spec);
-    const { ShopClient, ApiError } = await import(pathToFileURL(join(write("flat", outputs), "client.ts")).href);
+    const { ShopClient, ShopError } = await import(pathToFileURL(join(write("flat", outputs), "client.ts")).href);
     const fetch = vi.fn(async (url: string, init: RequestInit) => {
       if (url.endsWith("/conflict")) return json({ at: AT, message: "taken" }, 409);
       return init.method === "POST" ? json(JSON.parse(String(init.body))) : json([{ title: "a", at: AT }]);
@@ -90,16 +90,16 @@ function toText(value: unknown): string {
 
     const conflict = vi.fn(async () => json({ at: AT, message: "taken" }, 409));
     const error = await new ShopClient({ baseUrl: "http://x", fetch: conflict }).remove(at).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toBeInstanceOf(ShopError);
     expect((error as { body: { at: Date } }).body.at).toEqual(at);
   });
 
   it("keeps the raw error body when it fails to decode, instead of throwing or becoming undefined", async () => {
     const { outputs } = await nextjs(flat, dates).compile(spec);
-    const { ShopClient, ApiError } = await import(pathToFileURL(join(write("flat-bad-error", outputs), "client.ts")).href);
+    const { ShopClient, ShopError } = await import(pathToFileURL(join(write("flat-bad-error", outputs), "client.ts")).href);
     const bad = vi.fn(async () => json({ at: "not-a-date", message: "taken" }, 409));
     const error = await new ShopClient({ baseUrl: "http://x", fetch: bad }).remove(new Date(AT)).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toBeInstanceOf(ShopError);
     expect((error as { body: unknown }).body).toEqual({ at: "not-a-date", message: "taken" });
   });
 

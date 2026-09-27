@@ -67,6 +67,7 @@ class FeedClient(
             trace?.let { header("x-trace", it) }
         }.execute { response ->
             if (!response.status.isSuccess()) {
+                if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
                 throw when (response.status.value) {
                     else -> OopsException(response.body(), response.status.value)
                 }

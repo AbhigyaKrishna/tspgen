@@ -1,10 +1,16 @@
 import "@typespec/http";
+import "@typespec/streams";
+import "@typespec/events";
+import "@typespec/sse";
 import "@abhigyakrishna/tspgen-kotlin";
 
 using Http;
 using TspGen;
 
-/** Type mapping end to end: BigDecimal, @encode(string) numbers, value-class scalars and the enum-unknown fallback. */
+/**
+ * Type mapping end to end: BigDecimal, @encode(string) numbers (also as top-level bodies, events and parts), value-class
+ * scalars and the enum-unknown fallback.
+ */
 @service
 namespace Ledger;
 
@@ -51,4 +57,34 @@ interface Accounts {
   /** value-class scalar as path and query param, and a java.time-based value class as a response header. */
   @get @route("/{id}/since")
   since(@path id: AccountId, @query seenAfter?: SeenAt): { @header seenAt: SeenAt; @body body: Account };
+}
+
+/** Entry ids: an inline Long travelling as a JSON string, also as a whole body, event payload and part. */
+@encode(string)
+@meta("kotlin", #{ scalarStyle: "inline" })
+scalar EntryId extends int64;
+
+/** The same as a typealias. */
+@encode(string)
+@meta("kotlin", #{ scalarStyle: "typealias" })
+scalar BatchId extends int64;
+
+@TypeSpec.Events.events
+union EntryEvents {
+  ids: EntryId[],
+}
+
+model EntryForm {
+  ids: HttpPart<EntryId[]>;
+  note: HttpPart<string>;
+}
+
+@route("/entries")
+interface Entries {
+  @get list(): EntryId[];
+  @get @route("/one") one(): EntryId;
+  @post take(@body ids: EntryId[]): EntryId[];
+  @post @route("/batch") batch(@body ids: BatchId[]): BatchId;
+  @get @route("/feed") feed(): TypeSpec.SSE.SSEStream<EntryEvents>;
+  @post @route("/form") form(@header contentType: "multipart/form-data", @multipartBody body: EntryForm): EntryId[];
 }

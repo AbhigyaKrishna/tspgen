@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authDocs, authHeader, authHeaderConflicts, authKind, type AuthIR, type AuthKind } from "../src/index.js";
+import { authDocs, authHeader, authHeaderConflicts, authKind, authQueryConflicts, type AuthIR, type AuthKind } from "../src/index.js";
 
 const bearer: AuthIR = { id: "BearerAuth", type: "http", scheme: "Bearer" };
 const basic: AuthIR = { id: "BasicAuth", type: "http", scheme: "Basic" };
@@ -54,5 +54,15 @@ describe("client auth helpers", () => {
     expect(authHeaderConflicts([["Partner", "Key"], ["BearerAuth"]], schemes)).toEqual([]);
     // Alternatives needing an unsupported scheme are skipped.
     expect(authHeaderConflicts([["BearerAuth", "BasicAuth", "Digest"]], schemes)).toEqual([]);
+  });
+
+  it("finds query parameters an API key in the query replaces, once per name", () => {
+    const schemes = supported(bearer, header, query);
+    const name = query.name!;
+    expect(authQueryConflicts([["BearerAuth"], [query.id], [query.id, "BearerAuth"]], schemes, [name, "other"])).toEqual([
+      { name, id: query.id },
+    ]);
+    expect(authQueryConflicts([[query.id]], schemes, ["other"])).toEqual([]);
+    expect(authQueryConflicts([[query.id, "Digest"]], schemes, [name])).toEqual([]);
   });
 });

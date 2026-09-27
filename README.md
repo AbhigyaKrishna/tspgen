@@ -17,6 +17,10 @@ The core is language-neutral; languages and server/client libraries plug in as s
 ```bash
 npm install -D @typespec/compiler @typespec/http @abhigyakrishna/tspgen-kotlin \
   @abhigyakrishna/tspgen-kotlin-ktor-server @abhigyakrishna/tspgen-kotlin-ktor-client
+# TypeScript: the emitters, plus the generated code's runtime dependencies (zod with features.zod; TanStack Query
+# and React for the query hooks)
+npm install -D @abhigyakrishna/tspgen-typescript @abhigyakrishna/tspgen-ts-nextjs-client
+npm install zod @tanstack/react-query react
 ```
 
 `tspconfig.yaml`:
@@ -108,18 +112,30 @@ Or compose it yourself: `routing { petStoreApiRoutes(pets) }` and `install(Statu
 Throw a generated `…Exception` (e.g. `NotFoundException(NotFound("…"))`) to send a typed error response.
 
 **JSON.** Requests, responses, multipart JSON parts and event payloads share `serverJson` (`ServerSupport.kt`,
-`internal`): Ktor's `DefaultJson` with `encodeDefaults = false` — unset optional properties (and properties equal
-to their default) are omitted instead of written as `null`, matching the TypeScript models and zod schemas — plus
-the models' serializers. `features.encode-defaults: true` writes them again; `features.ignore-unknown-keys: true`
-accepts request fields the models don't declare (default: 400). With `features.module: false`, install
-`json(serverJson)` yourself to keep the same wire format.
+public, `internal` with `visibility: internal`): Ktor's `DefaultJson` with `encodeDefaults = false` — unset optional properties (and optional properties
+equal to their default) are omitted instead of written as `null`, matching the TypeScript models and zod schemas —
+plus the models' serializers. Required properties with a default are always written
+(`@EncodeDefault(EncodeDefault.Mode.ALWAYS)` on the model), since the other languages' models require them. `features.encode-defaults: true` writes them again; `features.ignore-unknown-keys: true`
+accepts request fields the models don't declare (default: 400). `serverJson` is generated with or without the
+module; with `features.module: false`, install `json(serverJson)` in your own `ContentNegotiation` to keep the same
+wire format. A body whose JSON form its Kotlin type does not carry — an `@encode(string)` `int64`/`uint64` scalar
+(inline or typealias) as the whole body, or inside a `List`/`Map` (`List<Long>`), which `call.receive<T>()` and
+`call.respond` would write as numbers — is read and written through `serverJson` with an explicit serializer
+(`receiveJson`/`respondJson` in `ServerSupport.kt`, e.g. `ListSerializer(LongAsStringSerializer)`), whatever Json
+your content negotiation installs; typed error bodies, JSON event payloads and multipart JSON parts get the same
+serializer. Such a request body with a non-JSON content type answers 415.
 
 **Errors.** `<Service>Errors.kt` declares `StatusPagesConfig.<svc>Errors()` (emitted with or without the module):
 typed `…Exception`s answer their status and error body; any other `ApiException`, `BadRequestException` (missing or
 unparsable parameters, request bodies that fail to decode or fail a model check) and `PayloadTooLargeException`
-answer an RFC 9457 `application/problem+json` body — `{"type":"about:blank","title":"Bad Request","status":400,"detail":"name must not be blank"}`
-(the detail is the exception's message; for a failed body or model check, its innermost cause's). `error-body: none`
-keeps 0.1.x's responses (the `ApiException` status without a body; Ktor's default for 400 and 413). The module
+answer an RFC 9457 `application/problem+json` body — `{"type":"about:blank","title":"Bad Request","status":400,"detail":"name must not be blank"}`.
+The 400 detail is the message of a missing or unparsable parameter, a multipart check or a failed model check
+(`require`); a body that does not decode reads `Malformed request body`, plus the fields missing and the JSON path
+when known (`Malformed request body: missing 'name'`, `Malformed request body at path $.species`) — kotlinx's own
+messages name model classes and echo the request body, so they are never sent. A body Ktor cannot read at all
+(`ContentTransformationException`: an unsupported content type) answers a 415 problem naming the content type.
+`error-body: none` keeps 0.1.x's responses (the `ApiException` status without a body; Ktor's defaults for 400, 413
+and 415). The module
 installs StatusPages with it; `features.status-pages: false` leaves StatusPages to you (call `<svc>Errors()` in your
 own `install(StatusPages) { … }`). Handlers registered after `<svc>Errors()` replace the generated one for the same
 exception class. A buffered multipart model whose `init { require(…) }` fails answers 400, not 500.
@@ -136,10 +152,14 @@ val pet = api.pets.get(petId = 1)                             // typed errors ar
 `<Service>Json` (`PetStoreJson`) ignores response fields the models don't declare (`features.ignore-unknown-keys`,
 default true), so a server adding a field doesn't break deployed clients. Derive your own with
 `Json(PetStoreJson) { prettyPrint = true }` and pass it to `petStoreDefaults(format)`; bodies, multipart JSON parts
-and event payloads all use it. Generated calls set `expectSuccess = false` on their request, so typed error mapping
+and event payloads all use it. Bodies whose JSON form their Kotlin type does not carry (an `@encode(string)` `int64`
+as the whole body or in a `List`/`Map`, see the server) are written as text and read from the body text with an
+explicit serializer and that Json, not through content negotiation; so are such typed error bodies, event payloads
+and multipart JSON parts. Generated calls set `expectSuccess = false` on their request, so typed error mapping
 also works on a client built with `expectSuccess = true`. An error response without a declared body throws
 `ApiException(status, message)`; the message is a problem body's `detail` (what the generated server sends), else
-the body text. `sse-max-size` (bytes, default 1 MiB) limits event lines and data.
+the body text. An `application/problem+json` response throws that `ApiException` too, even at a status with a
+declared error model: a problem is never decoded as the model. `sse-max-size` (bytes, default 1 MiB) limits event lines and data.
 
 ## Options reference
 
@@ -201,7 +221,7 @@ generated by `pnpm docs:options`.
 | `features.nest-routes` | feature | `false` | — | Nest each route function under its operations' common path prefix (dsl style). |
 | `features.status-pages` | feature | `true` | — | The module installs StatusPages with <svc>Errors(); false: call <svc>Errors() inside your own install(StatusPages). |
 | `features.ignore-unknown-keys` | feature | `false` | — | Accept request JSON with keys the models don't declare (false: 400). |
-| `features.encode-defaults` | feature | `false` | — | Write properties equal to their default (unset optionals as null) in responses and events. |
+| `features.encode-defaults` | feature | `false` | — | Write optional properties equal to their default (unset ones as null) in responses and events; required ones are always written. |
 
 ### `@abhigyakrishna/tspgen-kotlin-ktor-client` (target)
 
@@ -210,7 +230,7 @@ generated by `pnpm docs:options`.
 | `package` | string | — | — | Client package (default "<package>.client"). |
 | `sse-max-size` | integer | `1048576` | — | Longest server-sent event line and event data the client accepts, in bytes (MAX_SSE_SIZE); longer ones fail the stream. |
 | `features.ignore-unknown-keys` | feature | `true` | — | Ignore response fields the models don't declare (false: they fail decoding with SerializationException). |
-| `features.encode-defaults` | feature | `false` | — | Write properties equal to their default in request bodies (kotlinx's encodeDefaults). |
+| `features.encode-defaults` | feature | `false` | — | Write optional properties equal to their default in request bodies (kotlinx's encodeDefaults); required ones are always written. |
 | `features.auth` | feature | `true` | — | Generate a <Service>Auth credential-provider parameter from @useAuth. |
 
 ### `@abhigyakrishna/tspgen-typescript`
@@ -242,7 +262,7 @@ generated by `pnpm docs:options`.
 |---|---|---|---|---|
 | `base-url-env` | string | `API_BASE_URL` | — | Environment variable holding the API base URL for Server Actions. |
 | `client-style` | `grouped` \| `flat` | `grouped` | — | grouped: client/ with per-group classes, hooks, actions; flat: client.ts with one class. |
-| `error-class` | string | `ApiError` | — | Error class of the flat client. |
+| `error-class` | string | — | — | Error class of the flat client (default "<Service>Error", after the first service when there are several). |
 | `error-model` | string | — | — | Model (TypeScript name or TypeSpec id) whose fields the flat client's error class exposes. |
 | `query-key-prefix` | string | — | — | React Query: prepended as the first element of every generated query key (e.g. "api" → ["api", "PetStore", …]). |
 | `features.server-actions` | feature | `true` | — | Server Actions for non-GET operations (grouped style only). |
@@ -270,7 +290,7 @@ options:
       - "@abhigyakrishna/tspgen-ts-nextjs-client":
           client-style: grouped       # grouped (client/…, hooks, actions) | flat (client.ts: one <Service>Client class)
           base-url-env: API_BASE_URL  # env var read by the actions' server-side client
-          error-class: ApiError       # flat: error class name
+          error-class: PetStoreError  # flat: error class name (default <Service>Error)
           error-model: ErrorResponse  # flat: model whose fields the error class exposes (optional)
           query-key-prefix: api       # React Query: first element of every generated query key (default: none)
           features:
@@ -375,11 +395,13 @@ first element of every generated key (`["api", "PetStore", "pets", "get", params
 `invalidateQueries({ queryKey: ["api"] })` covers every generated query and two generated clients sharing a
 `QueryClient` don't collide.
 
-The fetch client throws `HttpError` subclasses (`NotFoundError` has a typed `.error`); with zod on,
+The fetch client throws `HttpError` subclasses (`NotFoundError` has a typed `.error`). An
+`application/problem+json` response (the Ktor server's own 4xx/5xx) is never decoded as a declared error model: it
+throws a plain `HttpError` whose `body` is the problem and whose message is its `detail` (else `title`). With zod on,
 responses are validated (`validate: false` in `ClientConfig` turns it off) and Server Action input is
 checked first (`{ ok: false, status: 400, error: { issues } }`; not affected by `validate: false`). Direct
 `<Group>Client` calls don't check their params. Property names match the JSON wire names; dates are ISO
-strings.
+strings (`Date`s decoded by zod codecs with `date-type: date`).
 
 **Constraints in zod.** With `features.zod`, TypeSpec constraint decorators on model properties and operation
 parameters become refinements on the generated schemas: `@minLength`/`@maxLength` → `.min(n)`/`.max(n)` on
@@ -401,7 +423,7 @@ wrapper instead of the grouped client/hooks/actions tree:
 
 ```
 types.ts / models/…   models (per layout)
-client.ts             ClientOptions, <error-class>, <Service>Client (one method per operation)
+client.ts             ClientOptions, <error-class> (default <Service>Error), <Service>Client (one method per operation)
 index.ts              export * from ./types (or ./models/index), ./client (and ./queries unless features.react-query is false)
 queries.ts            features.react-query only — <Op>Vars, <service>Keys, <service>Queries (server-safe)
 hooks.ts              features.react-query only — "use client": <Service>ClientProvider, use<Service>Client,
@@ -411,7 +433,7 @@ hooks.ts              features.react-query only — "use client": <Service>Clien
 ```ts
 const api = new ShopClient({ baseUrl: "/api", headers: async () => ({ authorization: await token() }) });   // or a plain object
 const page = await api.listNodes({ kind: "DATABASE", limit: 10 });   // path params, then body, then a query object
-try { await api.readNode(id); } catch (e) { if (e instanceof ApiError && e.isNotFound) … }
+try { await api.readNode(id); } catch (e) { if (e instanceof ShopError && e.isNotFound) … }
 await api.readNode(id, { signal: controller.signal, cache: "no-store" });   // optional trailing RequestOptions
 ```
 
@@ -424,7 +446,9 @@ which case the key repeats. A path parameter or body named like a reserved word 
 renamed inside the method (`classValue`); parameters are positional, so callers are unaffected. Void operations don't read the response body; others decode an empty body as
 `undefined`. `<error-class>` exposes `status`, `body` (the `error-model`, decoded only when the JSON error body
 has all of that model's required fields, else `undefined`; without `error-model` it's the raw decoded body),
-the model's other identifier-named fields (nullable types kept as-is), and
+the model's other identifier-named fields (nullable types kept as-is), `problem` (an `application/problem+json`
+body, which is never the `error-model`: `body` stays `undefined` and the message is the problem's `detail`, else
+`title`), and
 `isUnauthorized`/`isForbidden`/`isNotFound`/`isConflict` (`features.error-getters: false` leaves the getters out; the grouped style has typed error classes instead).
 
 The flat client does not validate responses. With `features.validate` (on by default; effective only with `features.zod` on the
@@ -671,13 +695,16 @@ Each operation carries its alternatives (`auth: [[{ id: "BearerAuth", kind: "bea
 spec); per request the client sends the first alternative whose providers all return a value (each provider is
 called at most once per request). When none does, or the operation is `NoAuth` only, no credentials are added
 and the server decides (an optional operation, `A | NoAuth`, still sends `A` when available). Credentials override
-the configured `headers` (so they win over a configured `Authorization`); in the grouped client, per-call
-`RequestOptions.headers` (and header parameters) override credentials in turn (the flat client has no per-call
-headers). Uploads, React Query hooks and
+the configured `headers` (so they win over a configured `Authorization`); per-call `RequestOptions.headers` (both
+clients) and header parameters (grouped client) override credentials in turn — unlike the Ktor client, where a
+credential wins over a header parameter of the same name. Uploads, React Query hooks and
 Server Actions go through the same client. Other http schemes (e.g. `Digest`) warn `unsupported-auth-scheme`;
 alternatives needing them are dropped. An alternative sending two credentials as the same header (compared
 case-insensitively: `[BearerAuth, BasicAuth]`, or a bearer token with an API key header named `Authorization`)
-warns `auth-header-conflict`, naming the operation and header; only the last credential is sent.
+warns `auth-header-conflict`, naming the operation and header; only the last credential is sent. An API key sent
+in the query under the name of one of the operation's query parameters replaces that parameter's value and warns
+`auth-header-conflict` too. The warning is core's (`@abhigyakrishna/tspgen-core/auth-header-conflict`, the same for
+both clients) and targets the operation, so `#suppress` on it silences it.
 
 `ClientConfig` and `ClientOptions` default to an untyped `auth` (`object`): a service without schemes the client
 can send, and group classes constructed directly (`new PetsClient(config)`), accept any `auth`, which then has no
@@ -701,9 +728,12 @@ Per request (per collection for event streams) the client sends the first altern
 value (`null` and `""` are none; each provider is called at most once); `NoAuth`, or no satisfied alternative, sends
 nothing and the server decides. Bearer/OAuth2/OpenID Connect tokens go in `Authorization: Bearer`, Basic in
 `Authorization: Basic` (UTF-8, base64), API keys in their header, query parameter (replacing a same-named one) or
-cookie. A credential replaces a header parameter of the same name (warning `auth-header-conflict`). Other http
-schemes warn `unsupported-auth-scheme`. Ktor's `Auth` plugin or `defaultRequest` still work: pass no `auth`; passing
-both sends both headers.
+cookie. A credential replaces a header or query parameter of the same name (warning `auth-header-conflict`): in
+the Ktor client credentials take precedence over an explicit header parameter, whereas the TypeScript clients let
+per-call headers override credentials. Other http schemes warn `unsupported-auth-scheme`. Ktor's `Auth` plugin or
+`defaultRequest` still work: pass no `auth`. Combined with generated credentials, the `Auth` plugin's bearer or
+basic provider sets `Authorization` itself, replacing the generated one, while a `defaultRequest` header is added
+next to it, so both `Authorization` values are sent.
 
 ## Versioning
 
@@ -885,7 +915,11 @@ with `@encode(string)`, which both languages honour.
 | `enum` / closed string-literal union | per `enum-style` | `z.enum(…)` | `enum class` (+ `UNKNOWN` with `features.enum-unknown`) |
 
 **`@encode(string)`** on `int64`, `uint64`, `integer`, `safeint`, `decimal`, `decimal128` (property or scalar) sends
-the number as a JSON string — the only exact `int64`/`uint64` for JavaScript clients. Any other encoding
+the number as a JSON string — the only exact `int64`/`uint64` for JavaScript clients. Kotlin honours it everywhere
+JSON goes: model properties, and top-level request/response bodies, typed error bodies, event payloads and
+multipart JSON parts (`BigId[]` → `["1"]`), with an explicit serializer where the type alone would lose it (see
+the Ktor server's **JSON** paragraph). A scalar body with no JSON content type (`text/plain`, TypeSpec's default
+for a scalar `@body`) is not JSON and is left as it is. Any other encoding
 (`unixTimestamp`, `rfc7231`, `base64url`, `@encode(string)` on other scalars or on a non-scalar shape such as a
 union) warns `unsupported-encoding` and keeps the default JSON form; a scalar's own default (`rfc3339` on dates,
 `ISO8601` on `duration`, `base64` on `bytes`) is accepted silently. The warning is deduplicated per declaring
@@ -1064,7 +1098,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `typescript` | `values: string` | enums, string-literal unions | an identifier different from the type's own name → `export const <values> = [...] as const; export type X = (typeof <values>)[number]`; otherwise ignored with an `invalid-meta` warning |
 | `typescript:ts-nextjs-client` | `next: { revalidate?, tags? }` | operations, groups | default Next.js fetch options |
 | `typescript:ts-nextjs-client` | `staleTime: number` | GET operations, groups | default `staleTime` in `queryOptions` |
-| `kotlin` / `typescript` (or `*`) | `features: { <key>: boolean }` | namespaces, interfaces, operations, models, enums, unions, scalars | per-declaration value of a feature with an `@meta` override (`docs`, `generics`; see Options reference); other keys, wrong types or disallowed places warn `invalid-meta` |
+| `kotlin` / `typescript` (or `*`) | `features: { <key>: boolean }` | namespaces, interfaces, operations, models, enums, unions, scalars | per-declaration value of a feature with an `@meta` override (`docs`, `generics`, Kotlin `enum-unknown`, TypeScript `readonly`; see Options reference); other keys, wrong types or disallowed places warn `invalid-meta` |
 
 Templates read any metadata with `it.h.meta(item)` / `it.h.meta(item, "ktor-server")`; plugins use
 `resolveMeta(item.meta, language, target)` from `@abhigyakrishna/tspgen-core`.
@@ -1079,16 +1113,22 @@ language templates, so you can override one partial without forking:
 |---|---|
 | `kotlin/file` | file skeleton (header, package, imports, body) |
 | `kotlin/common/header` | the "generated" header comment |
-| `kotlin/model/{data-class,sealed-interface,enum,typealias}` | model declarations |
+| `kotlin/model/{data-class,sealed-interface,enum,typealias,value-class}` | model declarations (`value-class`: `scalar-style: value-class` scalars) |
+| `kotlin/model/{events,sse-message,http-file,api-version}` | event unions, `SseMessage`, `HttpFile`, the `API_VERSION` constant |
+| `kotlin/model/model-serializers` | `ModelSerializers.kt`: generated serializers (java.time, `BigDecimal`, …) and `modelSerializersModule` (0.1.x: `kotlin/model/java-time-serializers`) |
 | `kotlin/api/{result,exception,api-exception}` | shared result/error types |
-| `ktor-server/{service,module,support}` | server interface, module, parameter helpers |
-| `ktor-server/routes/{dsl,resources,respond}` | routing styles and the response partial |
+| `ktor-server/{service,module,support,part-class}` | server interface, module, runtime helpers (`serverJson`, parameters, uploads, events), streaming multipart part classes |
+| `ktor-server/errors` | `<Service>Errors.kt`: `StatusPagesConfig.<svc>Errors()` (0.1.x rendered it in `ktor-server/module`) |
+| `ktor-server/routes/{dsl,dsl-nodes,dsl-route,resources,resources-route,respond}` | routing styles and the response partial |
 | `ktor-client/{client,response,api-client,support}` | client classes |
-| `ts/file`, `ts/common/header`, `ts/barrel` | TypeScript file skeleton, header, barrels |
-| `ts/model/{interface,alias,enum}`, `ts/api/{errors,results}` | TypeScript models and shared api types |
-| `ts-nextjs/{core,group,index}` | fetch runtime and clients |
-| `ts-nextjs/{queries,hooks}` | TanStack Query |
+| `ts/file`, `ts/common/header`, `ts/barrel`, `ts/types` | TypeScript file skeleton, header, barrels, single-file layout |
+| `ts/model/{interface,alias,enum}`, `ts/api/{errors,results}`, `ts/api-version` | TypeScript models and shared api types |
+| `ts/codecs` | `dateTimeCodec` and friends (`date-type: date`) |
+| `ts-nextjs/{core,group,index}` | fetch runtime and clients (grouped style) |
+| `ts-nextjs/{auth,sse-runtime,without-undefined}` | partials shared by both styles: `@useAuth` credentials, event-stream decoding, `undefined`-key stripping |
+| `ts-nextjs/{queries,hooks}` | TanStack Query (grouped style) |
 | `ts-nextjs/{actions,action-result,server-client}` | Server Actions |
+| `ts-nextjs/flat-client`, `ts-nextjs/{flat-queries,flat-hooks}` | flat style: `client.ts`, and its TanStack Query `queries.ts` / `hooks.ts` |
 
 Templates receive the file data as `it`, emitter options as `it.ctx.options`, resolved feature values as
 `it.features` (`{ [key]: boolean }` — the producing target's features layered over the language's, from
@@ -1226,23 +1266,28 @@ New defaults change generated output:
 | Kotlin `JavaTimeSerializers.kt` / `javaTimeSerializersModule` are now `ModelSerializers.kt` / `modelSerializersModule`; hand-written `Json { serializersModule = javaTimeSerializersModule }` must be renamed | none (rename the reference) |
 | Kotlin `uint64` is `ULong` (was `Long`, which overflowed above 2^63−1); parameters use `toULong()` | none (`@Kotlin.type("kotlin.Long")` on the property) |
 | TypeScript model-level `@meta("typescript", #{ readonly: true })` is ignored with `invalid-meta` | `@meta("typescript", #{ features: #{ readonly: true } })` |
-| `@encode(string)` on `int64`/`uint64`/`integer`/`safeint` now makes the value a JSON string in both languages (TypeScript `string`, Kotlin `LongAsStringSerializer`/`ULongAsStringSerializer`); 0.1.x ignored it and sent a number | remove `@encode(string)` |
+| `@encode(string)` on `int64`/`uint64`/`integer`/`safeint` now makes the value a JSON string in both languages (TypeScript `string`, Kotlin `LongAsStringSerializer`/`ULongAsStringSerializer`) wherever it travels — properties, parameters, whole bodies, `List`/`Map` bodies, typed error bodies, event payloads, multipart JSON parts; 0.1.x ignored it and sent a number. Kotlin bodies whose JSON form their type does not carry bypass content negotiation's Json (server: `serverJson`; client: the `<svc>Defaults(format)` Json) | remove `@encode(string)` |
 | Other `@encode` encodings (`unixTimestamp`, `rfc7231`, `base64url`, …) warn `unsupported-encoding` (0.1.x ignored them silently); the output is unchanged | none |
 | TypeScript `decimal` schemas check the number format (`z.string().regex(…)`): the grouped client rejects non-numeric decimal strings in responses | `validate: false` in `ClientConfig` — does not help a `date-type: date` response that also carries a date: its codec schema always runs, decimal check included |
 | Grouped `client/actions/server-client.ts` starts with `import "server-only";`. Next.js resolves it; test runners that run Server Actions outside Next.js (vitest, jest) must alias `server-only` to an empty module, and a `tsc` without Next's types (`"types": ["next"]`) needs `declare module "server-only";` | `features: { server-only: false }` on the ts-nextjs-client target |
 | Flat methods' trailing parameter is `init?: RequestOptions` (every `RequestInit` field but method/body/window, plus `headers` and `next`) instead of `init?: { signal?: AbortSignal }`; `{ signal }` calls are unchanged, but code relying on the exact type (`Parameters<typeof api.readNode>`) sees the wider one | none (wider type) |
 | Flat `ClientOptions.headers` is `HeadersInput` (static `HeadersInit` or a sync/async function called per request) instead of `Record<string, string>`; plain objects still type-check | none |
+| The flat client's error class defaults to `<Service>Error` (e.g. `PetStoreError`; the first service's name when a spec has several) instead of `ApiError`, which clashed with the common spec model `ApiError` | `error-class: ApiError` on the target |
 | Flat `client.ts` exports `RequestOptions`, `RequestDefaults`, `NextFetchOptions` and `HeadersInput`, and uses `Omit`: a generated type with one of these names now fails with `flat-client-name-clash` | rename it with `@TS.name` |
 | Flat operations with `@meta(…, "typescript:ts-nextjs-client", #{ next })` now send `next` to fetch (0.1.x ignored it in the flat style) | remove the meta |
 | Flat per-call `headers` override `@useAuth` credentials, and a per-call `accept` header wins over a stream's `text/event-stream` | none |
 | Grouped `RequestOptions` accepts every `RequestInit` field (0.1.x: `next`, `cache`, `signal`, `headers`) and both styles take `init` defaults | none |
-| Ktor server responses and events omit unset optional properties (and properties equal to their default) instead of writing `"field": null`; clients that required the explicit `null` are affected | `features: { encode-defaults: true }` on the Ktor server target |
-| Unmapped `ApiException`, 400 and 413 responses from the Ktor server carry an `application/problem+json` body (clients asserting an empty body are affected) | `error-body: none` on the Ktor server target |
+| Ktor server responses and events omit unset optional properties (and optional properties equal to their default) instead of writing `"field": null`; clients that required the explicit `null` are affected. Required properties with a default are still written (`@EncodeDefault(EncodeDefault.Mode.ALWAYS)`) | `features: { encode-defaults: true }` on the Ktor server target |
+| Unmapped `ApiException`, 400, 413 and 415 responses from the Ktor server carry an RFC 9457 `application/problem+json` body where 0.1.x sent Ktor's defaults without one (clients asserting an empty body are affected); a body that does not decode gets the detail `Malformed request body` (with the missing fields / JSON path, never model class names or the body), one Ktor cannot read (unsupported content type) a 415 naming only the content type | `error-body: none` on the Ktor server target |
 | Buffered multipart models failing their `require` checks answer 400 instead of 500 | none (bug fix) |
+| `serverJson` (public; `internal` with `visibility: internal`) is generated in `ServerSupport.kt` with `features.module: false` too; a hand-written `serverJson` in the server package now clashes | rename yours |
 | `<svc>Errors()` moves from `<Service>Module.kt` to `<Service>Errors.kt` (same package and name) and is emitted with `features.module: false` too; a hand-written `<svc>Errors` in the same package now clashes | rename yours |
+| Template override: `<svc>Errors()` is rendered by the new `ktor-server/errors` template, no longer by `ktor-server/module`; a 0.1.x `ktor-server/module.eta` override still declaring it now duplicates it (conflicting overloads) | drop it from your `module.eta` (override `ktor-server/errors` instead) |
+| Template override: `kotlin/model/java-time-serializers` is renamed `kotlin/model/model-serializers`; a 0.1.x override under the old name is silently ignored | rename your override file (and `javaTimeSerializersModule` → `modelSerializersModule` in it) |
 | With java.time types, the server module's Json keeps Ktor's `DefaultJson` settings (lenient decoding, …) instead of plain `Json` + serializers module | none |
 | The Ktor client ignores response fields the models don't declare (`<Service>Json`); code expecting `SerializationException` on extra fields is affected | `features: { ignore-unknown-keys: false }` on the Ktor client target |
 | Ktor client multipart JSON parts are encoded with the Json passed to `<svc>Defaults(format)` (was an internal default) | pass a `format` that suits parts too |
+| An `application/problem+json` error response is no longer decoded as the operation's declared error model: the Ktor client throws `ApiException(status, detail)`, the grouped Next.js client an `HttpError` (message: the problem's `detail`, else `title`), the flat client its error class with `body` `undefined` (with `error-model`) and the new `problem` field; a model field named `problem` no longer gets its own flat error-class field | none (read `problem` / `body`) |
 | Generated Ktor client requests set `expectSuccess = false`, so typed exceptions are thrown even on clients built with `expectSuccess = true` (instead of Ktor's `ClientRequestException`) | none |
 | `<Service>ApiClient` / `<Group>Client` gain an optional trailing `auth` parameter for APIs with `@useAuth` (only reflection or positional callers passing extra arguments notice) | `features: { auth: false }` on the Ktor client target |
 | The internal `partJson` / `sseJson` (server and client) and `defaultSseJson` (client) are replaced by `serverJson` / `apiJson`; hand-written code in the same module using them breaks | use `serverJson` or `<Service>Json` |

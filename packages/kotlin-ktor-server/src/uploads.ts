@@ -1,5 +1,5 @@
 import { reportDiagnostic } from "@abhigyakrishna/tspgen-core";
-import { kotlinString as str, typeName, type KtBody, type KtPart, type KtTypeUse } from "@abhigyakrishna/tspgen-kotlin";
+import { kotlinString as str, serializerExpr, serializerImports, typeName, type KtBody, type KtPart, type KtTypeUse } from "@abhigyakrishna/tspgen-kotlin";
 import { NoTarget, type Program } from "@typespec/compiler";
 import type { ServerOperation } from "./context.js";
 import { convert, converter, type HandlerField } from "./helpers.js";
@@ -172,7 +172,9 @@ function multipartUpload(
   flowClash: boolean,
 ): ServerUpload {
   const parts = body.parts ?? [];
-  const partImports = parts.filter((p) => p.kind !== "file").flatMap((p) => p.type.imports);
+  const partImports = parts
+    .filter((p) => p.kind !== "file")
+    .flatMap((p) => [...p.type.imports, ...(p.kind === "json" ? serializerImports(p.type) : [])]);
   const json = parts.some((p) => p.kind === "json") ? (["json"] as const) : [];
   const hasFiles = parts.some((p) => p.kind === "file");
   const model = body.type.text.replace(/\?$/, "");
@@ -239,7 +241,11 @@ function multipartUpload(
 /** Expression converting the text `expr` of a text/json part to its Kotlin value. */
 function decodeText(expr: string, p: KtPart, safe: boolean): string {
   const wire = str(p.wireName);
-  if (p.kind === "json") return `${expr}${safe ? "?" : ""}.convertParam(${wire}) { serverJson.decodeFromString<${p.type.text}>(it) }`;
+  if (p.kind === "json") {
+    const serializer = serializerExpr(p.type);
+    const decode = serializer ? `serverJson.decodeFromString(${serializer}, it)` : `serverJson.decodeFromString<${p.type.text}>(it)`;
+    return `${expr}${safe ? "?" : ""}.convertParam(${wire}) { ${decode} }`;
+  }
   return convert(expr, wire, p.type, safe);
 }
 
