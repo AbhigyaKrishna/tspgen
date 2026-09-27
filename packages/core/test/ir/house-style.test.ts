@@ -80,6 +80,22 @@ describe("IR facts for house-style features", () => {
     expect("constraints" in m.properties.find((p) => p.name === "plain")!).toBe(false);
   });
 
+  it("records scalar-level constraints through a nullable union", async () => {
+    const { program } = await MetaTester.compile(`
+      @service namespace S;
+      scalar Slug extends string;
+      @@pattern(Slug, "^[a-z]+$");
+      model M { a: Slug; b: Slug | null; @maxLength(4) c: Slug | null; d: Slug | string }
+    `);
+    const m = buildApiIR(program).types.find((t) => t.id === "S.M") as ModelIR;
+    expect(Object.fromEntries(m.properties.map((p) => [p.name, p.constraints]))).toEqual({
+      a: { pattern: "^[a-z]+$" },
+      b: { pattern: "^[a-z]+$" },
+      c: { maxLength: 4, pattern: "^[a-z]+$" },
+      d: undefined,
+    });
+  });
+
   it("skips intrinsic template arguments and reports no extra unsupported-type diagnostic", async () => {
     const [{ program }, diagnostics] = await MetaTester.compileAndDiagnose(`
       @service namespace S;

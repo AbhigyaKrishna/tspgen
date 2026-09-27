@@ -343,8 +343,13 @@ export class TypeCollector {
     return ir;
   }
 
-  private constraints(prop: ModelProperty): ConstraintsIR | undefined {
-    const sources: Type[] = prop.type.kind === "Scalar" ? [prop, prop.type] : [prop];
+  /**
+   * Constraint decorators of a property or parameter (then of its scalar type, also through `Scalar | null`);
+   * undefined when none. Scalar-level constraints of array items (`Slug[]`) are not collected.
+   */
+  constraints(prop: ModelProperty): ConstraintsIR | undefined {
+    const scalar = constrainedScalar(prop.type);
+    const sources: Type[] = scalar ? [prop, scalar] : [prop];
     const first = <T>(get: (program: Program, target: Type) => T | undefined): T | undefined => {
       for (const source of sources) {
         const value = get(this.program, source);
@@ -480,4 +485,15 @@ function isType(entity: unknown): entity is Type {
 /** Whether a decorator named `name` is applied to `type` (also on template declarations, where it does not run). */
 function applies(type: Model, name: string): boolean {
   return type.decorators.some((d) => d.definition?.name === `@${name}` || d.decorator.name === `$${name}`);
+}
+
+/** The scalar of `Scalar` or of an anonymous `Scalar | null`; undefined otherwise. */
+function constrainedScalar(type: Type): Type | undefined {
+  if (type.kind === "Scalar") return type;
+  if (type.kind !== "Union" || type.name) return undefined;
+  const variants = [...type.variants.values()];
+  const nonNull = variants.filter((v) => !isNullType(v.type));
+  return nonNull.length === 1 && nonNull.length < variants.length && nonNull[0].type.kind === "Scalar"
+    ? nonNull[0].type
+    : undefined;
 }

@@ -244,6 +244,18 @@ data class Req(
     expect(req).not.toContain(".matches(");
   });
 
+  it("checks scalar-level constraints of a nullable custom scalar", async () => {
+    const { outputs } = await emitter({ validation: true }).compile(`
+      @service namespace S;
+      scalar Slug extends string;
+      @@pattern(Slug, "^[a-z]+$");
+      model Req { b: Slug | null }
+    `);
+    expect(outputs["models/com/acme/models/Req.kt"]).toContain(
+      `require(b == null || Regex("^[a-z]+\\$").containsMatchIn(b)) { "b must match ^[a-z]+\\$" }`,
+    );
+  });
+
   it("renders no checks without validation", async () => {
     const { outputs } = await emitter().compile(`
       @service namespace S;

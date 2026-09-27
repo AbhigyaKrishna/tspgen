@@ -118,4 +118,34 @@ describe("service IR", () => {
     const [service] = buildApiIR(program).services;
     expect(service.groups.map((g) => [g.id, g.name])).toEqual([["S", "S"]]);
   });
+
+  it("collects constraint decorators on parameters", async () => {
+    const { program } = await Tester.compile(`
+      @service namespace S;
+      @maxLength(8) scalar Code extends string;
+      @route("/items") interface Items {
+        @get list(@query @minValue(1) @maxValue(100) limit?: int32, @query code?: Code, @query plain?: string): void;
+      }
+    `);
+    const [op] = buildApiIR(program).services[0].groups[0].operations;
+    expect(op.params.map((p) => [p.name, p.constraints])).toEqual([
+      ["limit", { minValue: 1, maxValue: 100 }],
+      ["code", { maxLength: 8 }],
+      ["plain", undefined],
+    ]);
+  });
+
+  it("collects constraint decorators on an explicit body parameter", async () => {
+    const { program } = await Tester.compile(`
+      @service namespace S;
+      model Item { name: string }
+      @route("/items") interface Items {
+        @post @route("/tag") tag(@body @maxItems(2) items: string[]): void;
+        @post create(@body item: Item): void;
+      }
+    `);
+    const [tag, create] = buildApiIR(program).services[0].groups[0].operations;
+    expect(tag.body?.constraints).toEqual({ maxItems: 2 });
+    expect(create.body && "constraints" in create.body).toBe(false);
+  });
 });

@@ -116,15 +116,19 @@ function buildOperation(
 ): OperationIR {
   const opName = op.operation.name;
   const base = pascal(opName);
-  const params: ParamIR[] = op.parameters.parameters.map((p) => ({
-    name: p.param.name,
-    wireName: p.name,
-    location: p.type,
-    type: collector.ref(p.param.type, `${base}${pascal(p.param.name)}`),
-    optional: p.param.optional,
-    explode: "explode" in p ? Boolean(p.explode) : false,
-    ...docInfo(program, p.param),
-  }));
+  const params: ParamIR[] = op.parameters.parameters.map((p) => {
+    const constraints = collector.constraints(p.param);
+    return {
+      name: p.param.name,
+      wireName: p.name,
+      location: p.type,
+      type: collector.ref(p.param.type, `${base}${pascal(p.param.name)}`),
+      optional: p.param.optional,
+      explode: "explode" in p ? Boolean(p.explode) : false,
+      ...(constraints ? { constraints } : {}),
+      ...docInfo(program, p.param),
+    };
+  });
   const ir: OperationIR = {
     id: `${groupId}.${opName}`,
     name: opName,
@@ -145,6 +149,8 @@ function buildOperation(
       optional: property?.optional ?? false,
       kind: body.bodyKind,
     };
+    const constraints = property ? collector.constraints(property) : undefined;
+    if (constraints) ir.body.constraints = constraints;
   }
   return ir;
 }

@@ -153,6 +153,7 @@ export interface ParamIR extends DocInfo {
   type: TypeRef;
   optional: boolean;
   explode: boolean;
+  constraints?: ConstraintsIR;
 }
 
 export interface BodyIR {
@@ -162,6 +163,8 @@ export interface BodyIR {
   contentTypes: string[];
   optional: boolean;
   kind: "single" | "multipart" | "file";
+  /** Constraint decorators of the explicit `@body` parameter. */
+  constraints?: ConstraintsIR;
 }
 
 export type StatusCodes = number | { start: number; end: number } | "default";
