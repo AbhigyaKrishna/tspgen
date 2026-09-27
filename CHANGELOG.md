@@ -3,7 +3,7 @@
 All packages (`@abhigyakrishna/tspgen-core`, `-kotlin`, `-kotlin-ktor-server`, `-kotlin-ktor-client`,
 `-typescript`, `-ts-nextjs-client`) are released together with the same version.
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-09-28
 
 Generated output changes for existing specs are listed in the README under
 [Upgrading from 0.1.x](README.md#upgrading-from-01x), each with how to restore the old behaviour.
