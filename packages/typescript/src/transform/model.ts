@@ -1,4 +1,12 @@
-import type { ApiIR, AuthIR, AuthRequirementIR, HttpVerb, MetaScopes, StatusCodes } from "@abhigyakrishna/tspgen-core";
+import type {
+  ApiIR,
+  ApiVersionConstant,
+  AuthIR,
+  AuthRequirementIR,
+  HttpVerb,
+  MetaScopes,
+  StatusCodes,
+} from "@abhigyakrishna/tspgen-core";
 import type { TsImport } from "../imports.js";
 
 /** A TypeScript type at a use site, with its zod schema expression and the imports each needs. */
@@ -191,5 +199,7 @@ export interface TsIR {
   importExtension: string;
   /** "per-type": models/<Name>.ts; "single-file": every model in types.ts. */
   layout: "per-type" | "single-file";
+  /** Version constants of the versioned services (models barrel, or types.ts in the single-file layout). */
+  apiVersions: ApiVersionConstant[];
   api: ApiIR;
 }

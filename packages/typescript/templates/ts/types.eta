@@ -13,3 +13,7 @@
 <%~ include(`ts/model/${d.kind}`, { decl: d, zod: it.zod, h: it.h }).trimEnd() %>
 <% }) -%>
 <% }) -%>
+<% if (it.constants?.length) { -%>
+
+<%~ include("ts/api-version", it) %>
+<% } -%>

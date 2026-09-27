@@ -49,6 +49,12 @@ const optionsSchema = {
 export const $lib = createTypeSpecLibrary({
   name: "@abhigyakrishna/tspgen-typescript",
   diagnostics: {
+    "api-version-name-clash": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Generated type '${"name"}' (${"id"}) has the name of the version constant '${"name"}'; rename it with @TS.name. The constant is not generated.`,
+      },
+    },
     "duplicate-operation-name": {
       severity: "error",
       messages: {

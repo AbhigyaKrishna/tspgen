@@ -1,4 +1,4 @@
-import type { FileSpec, Target } from "@abhigyakrishna/tspgen-core";
+import type { ApiVersionConstant, FileSpec, Target } from "@abhigyakrishna/tspgen-core";
 import { relativeSpecifier, renderImports, type TsImport } from "./imports.js";
 import type { TsDecl, TsIR } from "./transform/model.js";
 
@@ -15,7 +15,7 @@ function declImports(decl: TsDecl, zod: boolean): TsImport[] {
   ];
 }
 
-function barrel(file: string, members: string[], ext: string): FileSpec {
+function barrel(file: string, members: string[], ext: string, constants: ApiVersionConstant[] = []): FileSpec {
   return {
     path: `${file}.ts`,
     template: "ts/file",
@@ -23,6 +23,7 @@ function barrel(file: string, members: string[], ext: string): FileSpec {
       imports: [],
       body: "ts/barrel",
       exports: members.map((m) => relativeSpecifier(file, m, ext)).sort(),
+      constants,
     },
   };
 }
@@ -49,7 +50,7 @@ export const tsModelsTarget: Target<TsIR> = {
     const ext = ir.importExtension;
     const files: FileSpec[] = [];
     if (ir.layout === "single-file") {
-      if (ir.declarations.length > 0) {
+      if (ir.declarations.length > 0 || ir.apiVersions.length > 0) {
         files.push({
           path: "types.ts",
           template: "ts/file",
@@ -57,6 +58,7 @@ export const tsModelsTarget: Target<TsIR> = {
             imports: renderImports("types", ir.declarations.flatMap((d) => declImports(d, ir.zod)), ext),
             body: "ts/types",
             sections: sections(ir.declarations),
+            constants: ir.apiVersions,
             zod: ir.zod,
           },
         });
@@ -74,8 +76,8 @@ export const tsModelsTarget: Target<TsIR> = {
           },
         });
       }
-      if (ir.declarations.length > 0) {
-        files.push(barrel("models/index", ir.declarations.map((d) => d.file), ext));
+      if (ir.declarations.length > 0 || ir.apiVersions.length > 0) {
+        files.push(barrel("models/index", ir.declarations.map((d) => d.file), ext, ir.apiVersions));
       }
     }
     if (!ir.apiActive) return files;

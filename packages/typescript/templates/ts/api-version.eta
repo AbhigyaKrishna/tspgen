@@ -1,0 +1,7 @@
+<% it.constants.forEach((c, i) => { -%>
+<% if (i > 0) { -%>
+
+<% } -%>
+/** Version of the <%= c.serviceId %> API this code was generated for. */
+export const <%= c.name %> = <%~ it.h.str(c.value) %>;
+<% }) -%>
