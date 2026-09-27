@@ -106,10 +106,10 @@ describe("uploads (flat client)", () => {
     const { outputs } = await nextjs(flat, { layout: "single-file" }).compile(uploadSpec);
     const client = outputs["client.ts"];
     expect(client).toContain(
-      `    return this.send("POST", "/uploads", new RawBody(toFormData(body, [{ name: "name", kind: "text", multi: false }, { name: "count", kind: "text", multi: false }, { name: "meta", kind: "json", multi: false }, { name: "avatar", kind: "file", multi: false }, { name: "photos", kind: "file", multi: true, contentType: "image/png" }, { name: "label", key: "display_name", kind: "text", multi: false }])));`,
+      `    return this.send("POST", "/uploads", new RawBody(toFormData(body, [{ name: "name", kind: "text", multi: false }, { name: "count", kind: "text", multi: false }, { name: "meta", kind: "json", multi: false }, { name: "avatar", kind: "file", multi: false }, { name: "photos", kind: "file", multi: true, contentType: "image/png" }, { name: "label", key: "display_name", kind: "text", multi: false }])), init);`,
     );
-    expect(client).toContain(`    await this.request("PUT", "/uploads/file", new RawBody(file, file.type || "image/png"));`);
-    expect(client).toContain(`    await this.request("PUT", "/uploads/any", new RawBody(file, file.type || "application/octet-stream"));`);
+    expect(client).toContain(`    await this.request("PUT", "/uploads/file", new RawBody(file, file.type || "image/png"), init);`);
+    expect(client).toContain(`    await this.request("PUT", "/uploads/any", new RawBody(file, file.type || "application/octet-stream"), init);`);
     expect(client).toContain("class RawBody {");
     const plain = await nextjs(flat, { layout: "single-file" }).compile(`@service namespace S; model P { a: string } @post op make(@body p: P): P;`);
     expect(plain.outputs["client.ts"]).not.toContain("RawBody");

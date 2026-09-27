@@ -209,8 +209,8 @@ export class ShopClient {
   private readonly auth: ShopAuth | undefined;
 
   constructor(options: ClientOptions<ShopAuth>) {`);
-    expect(client).toContain(`    return this.send("GET", \`/items\${toQuery(query)}\`, undefined, [[{ id: "BearerAuth", kind: "bearer" }]]);`);
-    expect(client).toContain(`    await this.request("POST", "/items", item);`);
+    expect(client).toContain(`    return this.send("GET", \`/items\${toQuery(query)}\`, undefined, init, [[{ id: "BearerAuth", kind: "bearer" }]]);`);
+    expect(client).toContain(`    await this.request("POST", "/items", item, init);`);
   });
 
   it("type-checks under shipyard's compiler flags, per-type and single-file", async () => {

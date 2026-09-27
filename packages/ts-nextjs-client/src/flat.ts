@@ -13,7 +13,7 @@ import {
 } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
 import { clientAuth, memberType, type AuthMember, type ClientAuth } from "./auth.js";
-import { nextjsHelpers } from "./helpers.js";
+import { nextjsHelpers, queryObjectType } from "./helpers.js";
 import type { NextClientOptions } from "./options.js";
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -23,7 +23,7 @@ const RESERVED_FIELDS = new Set(["status", "message", "name", "stack", "cause", 
 const CLIENT_MEMBERS = new Set(["constructor", "send", "request", "baseUrl", "doFetch", "headers"]);
 /**
  * Globals referenced by templates/ts-nextjs/flat-client.eta (Response, Promise, Record, RequestInit,
- * URLSearchParams, Error, JSON, String, Array, Object, globalThis, encodeURIComponent, fetch). A generated
+ * URLSearchParams, Error, JSON, String, Array, Object, globalThis, encodeURIComponent, fetch, AbortSignal). A generated
  * declaration with one of these names shadows the global via `import type { X } from "./types"` in client.ts
  * even though only type-position uses of the global are actually affected; the list is kept simple rather
  * than narrowed to exactly which of these appear in type position. Headers, Blob, File and FormData are referenced
@@ -43,6 +43,7 @@ const TEMPLATE_GLOBALS = new Set([
   "globalThis",
   "encodeURIComponent",
   "fetch",
+  "AbortSignal",
 ]);
 /**
  * Globals (BodyInit; Blob, File and FormData are referenced through globalThis) and module-local helpers (RawBody, PartSpec, toFormData) client.ts
@@ -53,6 +54,8 @@ const UPLOAD_GLOBALS = ["BodyInit", "RawBody", "PartSpec", "toFormData"];
 const AUTH_LOCALS = ["AuthScheme", "AuthEntries", "resolveAuth", "base64"];
 /** Names tried, in order, for a method's query-object parameter. */
 const QUERY_NAMES = ["query", "queryParams", "params"];
+/** Names tried, in order, for a method's trailing request-init parameter (`{ signal }`). */
+const INIT_NAMES = ["init", "requestInit", "options"];
 const ARRAY_TYPE = /\[\]( \| null)?$|^(readonly )?Array</;
 const Z: TsImport = { name: "z", from: "zod", typeOnly: false, external: true };
 
@@ -121,12 +124,13 @@ function method(op: TsOperation, validate: boolean, auth: string | undefined): F
     );
   }
   const taken = new Set([...path.map((p) => p.name), ...(bodyName ? [bodyName] : [])]);
-  let queryName = QUERY_NAMES.find((n) => !taken.has(n));
-  for (let i = 2; !queryName; i++) if (!taken.has(`params${i}`)) queryName = `params${i}`;
+  const queryName = pickName(QUERY_NAMES, "params", taken);
   if (query.length > 0) {
-    const fields = query.map((p) => `${propertyKey(p.wireName)}${p.optional ? "?" : ""}: ${p.type.text}`).join("; ");
-    params.push(`${queryName}: { ${fields} }${queryRequired ? "" : " = {}"}`);
+    params.push(`${queryName}: ${queryObjectType(query)}${queryRequired ? "" : " = {}"}`);
+    taken.add(queryName);
   }
+  const initName = pickName(INIT_NAMES, "init", taken);
+  params.push(`${initName}?: { signal?: AbortSignal }`);
   const exploded = query.filter((p) => p.explode && isArray(p)).map((p) => JSON.stringify(p.wireName));
   const queryCall = exploded.length > 0 ? `toQuery(${queryName}, [${exploded.join(", ")}])` : `toQuery(${queryName})`;
   const url = op.path.replace(/\{([^}]+)\}/g, (match, wire: string) => {
@@ -156,13 +160,23 @@ function method(op: TsOperation, validate: boolean, auth: string | undefined): F
     args: [
       JSON.stringify(op.verb.toUpperCase()),
       urlExpr,
-      ...(bodyName ? [bodyArg(op, bodyName)] : auth ? ["undefined"] : []),
+      bodyName ? bodyArg(op, bodyName) : "undefined",
+      initName,
       ...(auth ? [auth] : []),
     ].join(", "),
     checks,
     ...(op.docs ? { docs: op.docs } : {}),
     ...(op.deprecated ? { deprecated: op.deprecated } : {}),
   };
+}
+
+/** The first of `candidates` not in `taken`, else `<fallback>2`, `<fallback>3`, … */
+function pickName(candidates: readonly string[], fallback: string, taken: ReadonlySet<string>): string {
+  const found = candidates.find((n) => !taken.has(n));
+  if (found) return found;
+  let i = 2;
+  while (taken.has(`${fallback}${i}`)) i++;
+  return `${fallback}${i}`;
 }
 
 /** The body argument of send()/request(): uploads are wrapped in RawBody so they are not JSON-encoded. */

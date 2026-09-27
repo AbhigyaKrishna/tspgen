@@ -107,36 +107,37 @@ export class ShopClient {
 
 ${banner("Nodes", "  ")}
 
-  listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}): Promise<Node[]> {
-    return this.send("GET", \`/graph/nodes\${toQuery(query)}\`);
+  listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}, init?: { signal?: AbortSignal }): Promise<Node[]> {
+    return this.send("GET", \`/graph/nodes\${toQuery(query)}\`, undefined, init);
   }
 
-  readNode(id: string): Promise<Node> {
-    return this.send("GET", \`/graph/nodes/\${encodeURIComponent(String(id))}\`);
+  readNode(id: string, init?: { signal?: AbortSignal }): Promise<Node> {
+    return this.send("GET", \`/graph/nodes/\${encodeURIComponent(String(id))}\`, undefined, init);
   }
 
-  createNode(request: CreateNodeRequest): Promise<Node> {
-    return this.send("POST", "/graph/nodes", request);
+  createNode(request: CreateNodeRequest, init?: { signal?: AbortSignal }): Promise<Node> {
+    return this.send("POST", "/graph/nodes", request, init);
   }
 
-  async deleteNode(id: string): Promise<void> {
-    await this.request("DELETE", \`/graph/nodes/\${encodeURIComponent(String(id))}\`);
+  async deleteNode(id: string, init?: { signal?: AbortSignal }): Promise<void> {
+    await this.request("DELETE", \`/graph/nodes/\${encodeURIComponent(String(id))}\`, undefined, init);
   }
 
-  private async send<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const response = await this.request(method, path, body);
+  private async send<T>(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<T> {
+    const response = await this.request(method, path, body, init);
     const text = await response.text();
     // An empty body (204 and the like) decodes to undefined.
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
-  private async request(method: string, path: string, body?: unknown): Promise<Response> {
+  private async request(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<Response> {
     const headers = new globalThis.Headers(this.headers);
     if (body !== undefined) headers.set("content-type", "application/json");
     const response = await this.doFetch(\`\${this.baseUrl}\${path}\`, {
       method,
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(init?.signal === undefined ? {} : { signal: init.signal }),
     });
     if (!response.ok) throw await toError(response);
     return response;
@@ -215,7 +216,7 @@ export * from "./types";
 
   it("reports flat-style limitations instead of generating partial clients", async () => {
     const cases: [Record<string, unknown>, string, string][] = [
-      [{ ...flat, "react-query": true }, shopSpec, "unsupported-in-flat-style"],
+      [{ ...flat, "server-actions": true }, shopSpec, "unsupported-in-flat-style"],
       [flat, `${shopSpec}\n@route("/other") interface Other { @get listNodes(): void; }`, "duplicate-operation-name"],
       [flat, shopSpec.replace("@get readNode(@path id: string): Node;", `@get readNode(@path id: string, @header trace: string): Node;`), "flat-client-unsupported"],
       [{ ...flat, "error-model": "Nope" }, shopSpec, "unknown-error-model"],
@@ -281,9 +282,9 @@ export * from "./types";
     const { outputs } = await nextjs(flat, house).compile(spec);
     const client = outputs["client.ts"];
     expect(client).toContain(
-      '  tagged(query: { tags?: string[]; labels?: string[]; limit?: number } = {}): Promise<Node[]> {\n    return this.send("GET", `/graph/nodes/tagged${toQuery(query, ["labels"])}`);',
+      '  tagged(query: { tags?: string[]; labels?: string[]; limit?: number } = {}, init?: { signal?: AbortSignal }): Promise<Node[]> {\n    return this.send("GET", `/graph/nodes/tagged${toQuery(query, ["labels"])}`, undefined, init);',
     );
-    expect(client).toContain('    return this.send("GET", `/graph/nodes${toQuery(query)}`);');
+    expect(client).toContain('    return this.send("GET", `/graph/nodes${toQuery(query)}`, undefined, init);');
     expect(client).toContain("function toQuery(params: Record<string, unknown>, explode: readonly string[] = []): string {");
     expect(client).toContain('    else search.append(key, value.map(String).join(","));');
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
@@ -305,8 +306,27 @@ export * from "./types";
       }`;
     const { outputs } = await nextjs(flat, house).compile(spec);
     expect(outputs["client.ts"]).toContain(
-      '  search(query: SearchRequest, queryParams: { limit?: number } = {}): Promise<Node[]> {\n    return this.send("POST", `/search${toQuery(queryParams)}`, query);',
+      '  search(query: SearchRequest, queryParams: { limit?: number } = {}, init?: { signal?: AbortSignal }): Promise<Node[]> {\n    return this.send("POST", `/search${toQuery(queryParams)}`, query, init);',
     );
+    expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
+  });
+
+  it("renames the init parameter when a path parameter, body or query object is named init", async () => {
+    const spec = `${shopSpec}
+      model Payload { v: string }
+      @route("/inits") interface Inits {
+        @get @route("/{init}") readInit(@path \`init\`: string): Graph.Node;
+        @post @route("/{init}/{requestInit}") postInit(@path \`init\`: string, @path requestInit: string, @body options: Payload, @query limit?: int32): void;
+      }`;
+    const { outputs } = await nextjs(flat, house).compile(spec);
+    const client = outputs["client.ts"];
+    expect(client).toContain(
+      '  readInit(init: string, requestInit?: { signal?: AbortSignal }): Promise<Node> {\n    return this.send("GET", `/inits/${encodeURIComponent(String(init))}`, undefined, requestInit);',
+    );
+    expect(client).toContain(
+      "  async postInit(init: string, requestInit: string, options: Payload, query: { limit?: number } = {}, init2?: { signal?: AbortSignal }): Promise<void> {\n",
+    );
+    expect(client).toContain("${toQuery(query)}`, options, init2);");
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
@@ -320,22 +340,22 @@ export * from "./types";
     expect(client).toContain(`import { z } from "zod";`);
     expect(client).toContain(`import { CreateNodeRequestSchema, KindSchema } from "./types";`);
     expect(client).toContain(
-      `  async listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}): Promise<Node[]> {\n` +
+      `  async listNodes(query: { kind?: Kind; offset?: number; limit?: number } = {}, init?: { signal?: AbortSignal }): Promise<Node[]> {\n` +
         `    z.object({ kind: z.lazy(() => KindSchema).optional(), offset: z.number().int().optional(), limit: z.number().int().optional() }).parse(query);\n`,
     );
     expect(client).toContain(
-      `  async createNode(request: CreateNodeRequest): Promise<Node> {\n    z.lazy(() => CreateNodeRequestSchema).parse(withoutUndefined(request));\n`,
+      `  async createNode(request: CreateNodeRequest, init?: { signal?: AbortSignal }): Promise<Node> {\n    z.lazy(() => CreateNodeRequestSchema).parse(withoutUndefined(request));\n`,
     );
     // path params without constraints are not re-checked
-    expect(client).toContain(`  readNode(id: string): Promise<Node> {\n    return this.send(`);
+    expect(client).toContain(`  readNode(id: string, init?: { signal?: AbortSignal }): Promise<Node> {\n    return this.send(`);
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
   it("makes checked methods async so validation errors reject", async () => {
     const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(validatedSpec);
-    expect(outputs["client.ts"]).toContain(`  async createNode(request: CreateNodeRequest): Promise<Node> {\n`);
+    expect(outputs["client.ts"]).toContain(`  async createNode(request: CreateNodeRequest, init?: { signal?: AbortSignal }): Promise<Node> {\n`);
     // no checks: stays a plain method returning the promise
-    expect(outputs["client.ts"]).toContain(`  readNode(id: string): Promise<Node> {\n`);
+    expect(outputs["client.ts"]).toContain(`  readNode(id: string, init?: { signal?: AbortSignal }): Promise<Node> {\n`);
   });
 
   it("checks constrained path parameters, constrained bodies and optional bodies", async () => {
@@ -347,10 +367,10 @@ export * from "./types";
       }`;
     const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(spec);
     const client = outputs["client.ts"];
-    expect(client).toContain(`  async readCode(id: string): Promise<Node> {\n    z.string().min(3).parse(id);\n    return this.send(`);
-    expect(client).toContain(`  async tag(items: string[]): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
+    expect(client).toContain(`  async readCode(id: string, init?: { signal?: AbortSignal }): Promise<Node> {\n    z.string().min(3).parse(id);\n    return this.send(`);
+    expect(client).toContain(`  async tag(items: string[], init?: { signal?: AbortSignal }): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
     expect(client).toContain(
-      `  async upsert(id: string, body?: CreateNodeRequest): Promise<Node> {\n` +
+      `  async upsert(id: string, body?: CreateNodeRequest, init?: { signal?: AbortSignal }): Promise<Node> {\n` +
         `    if (body !== undefined) z.lazy(() => CreateNodeRequestSchema).parse(withoutUndefined(body));\n    return this.send(`,
     );
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
@@ -360,7 +380,7 @@ export * from "./types";
     const spec = `${validatedSpec}
       @route("/labels") op label(@bodyRoot @maxItems(2) items: string[]): void;`;
     const { outputs } = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).compile(spec);
-    expect(outputs["client.ts"]).toContain(`  async label(items: string[]): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
+    expect(outputs["client.ts"]).toContain(`  async label(items: string[], init?: { signal?: AbortSignal }): Promise<void> {\n    z.array(z.string()).max(2).parse(withoutUndefined(items));\n`);
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
@@ -404,11 +424,11 @@ function withoutUndefined(value: unknown): unknown {
     const client = outputs["client.ts"];
     expect(client).not.toContain("z: number");
     expect(client).toContain(
-      "  async tile(zValue: number, x: number, y: number, query: { format?: string } = {}): Promise<Tile> {\n",
+      "  async tile(zValue: number, x: number, y: number, query: { format?: string } = {}, init?: { signal?: AbortSignal }): Promise<Tile> {\n",
     );
     expect(client).toContain("`/tiles/${encodeURIComponent(String(zValue))}/");
-    expect(client).toContain("  async put(zValue: string, zValue2: Z): Promise<void> {\n    z.lazy(() => ZSchema).parse(withoutUndefined(zValue2));\n");
-    expect(client).toContain(", zValue2);\n");
+    expect(client).toContain("  async put(zValue: string, zValue2: Z, init?: { signal?: AbortSignal }): Promise<void> {\n    z.lazy(() => ZSchema).parse(withoutUndefined(zValue2));\n");
+    expect(client).toContain(", zValue2, init);\n");
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
     // without validate there is no zod import to shadow
     const plain = (await nextjs(flat, { ...house, zod: true }).compile(spec)).outputs["client.ts"];

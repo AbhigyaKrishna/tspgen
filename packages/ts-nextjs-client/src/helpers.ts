@@ -1,5 +1,5 @@
 import type { StatusCodes } from "@abhigyakrishna/tspgen-core";
-import type { TsGroup, TsHeader, TsOperation, TsPart, TsResultVariant, TsTypeUse } from "@abhigyakrishna/tspgen-typescript";
+import { propertyKey, type TsGroup, type TsHeader, type TsOperation, type TsParam, type TsPart, type TsResultVariant, type TsTypeUse } from "@abhigyakrishna/tspgen-typescript";
 import { memberType } from "./auth.js";
 import { names } from "./names.js";
 
@@ -88,6 +88,11 @@ function variantExpr(v: TsResultVariant, zod: boolean): string {
 function errorKey(codes: StatusCodes): string {
   if (codes === "default") return "default";
   return typeof codes === "number" ? String(codes) : str(`${Math.floor(codes.start / 100)}XX`);
+}
+
+/** Flat style: `{ kind?: Kind; limit?: number }`, the type of a method's query object (and of `<Op>Vars.query`). */
+export function queryObjectType(query: readonly TsParam[]): string {
+  return `{ ${query.map((p) => `${propertyKey(p.wireName)}${p.optional ? "?" : ""}: ${p.type.text}`).join("; ")} }`;
 }
 
 /** Exposed to templates as `it.h.nextjs`. */
