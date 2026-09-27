@@ -47,6 +47,9 @@ options:
           nest-routes: false            # true: route("/common/prefix") { get { } get("/{id}") { } } (dsl style)
           multipart: buffered           # buffered | streaming | raw — how multipart/file bodies reach the service (see Uploads)
           max-upload-size: 52428800     # bytes per multipart part, per buffered request / file body; larger → 413 (see Uploads)
+          generate-auth: true           # wrap routes in authenticate(...) per @useAuth (see Authentication)
+          auth-providers:               # auth scheme id → Kotlin expression naming the Ktor provider (default: the id as a string)
+            BearerAuth: JWT_AUTH
       - "@abhigyakrishna/tspgen-kotlin-ktor-client": {}
     naming:
       enum-members: UPPER_SNAKE         # UPPER_SNAKE | PascalCase
@@ -121,7 +124,8 @@ val api = PetStoreApiClient(http, "https://api.example.com")
 val pet = api.pets.get(petId = 1)                             // typed errors are thrown as …Exception
 ```
 
-Authentication is configured on your `HttpClient` (Ktor `Auth` plugin or `defaultRequest`).
+Authentication is configured on your `HttpClient` (Ktor `Auth` plugin or `defaultRequest`); the generated
+client does not read `@useAuth`.
 
 ## TypeScript / Next.js
 
@@ -161,7 +165,7 @@ client/actions/server-client.ts  configure<Service>Actions(), server-side client
 
 ```ts
 // Server Component / Route Handler — Next.js caching options pass straight through to fetch
-const api = createPetStoreClient({ baseUrl: process.env.API_BASE_URL!, headers: async () => ({ authorization: await token() }) });
+const api = createPetStoreClient({ baseUrl: process.env.API_BASE_URL!, auth: { BearerAuth: () => token() } });   // with @useAuth (see Authentication); else headers: async () => ({ authorization: … })
 const pets = await api.pets.list({ limit: 10 }, { next: { revalidate: 60, tags: ["pets"] } });
 
 // Client Component
@@ -240,10 +244,12 @@ rejects, per operation, several success responses or response headers, header/co
 bodies other than multipart and file uploads, non-JSON responses, optional path parameters, and operation
 names that clash with client members (`flat-client-unsupported`); rejects duplicate operation names
 (`duplicate-operation-name`); rejects an `error-model` that isn't a generated model (`unknown-error-model`);
-and rejects a generated type named like the error class, `ClientOptions`, or `<Service>Client`
-(`flat-client-name-clash`, since `index.ts` re-exports both), or like a name `client.ts` uses internally — a
-global such as `Response`, `Promise` or `RequestInit`, with uploads `BodyInit`, `RawBody`, `PartSpec` or
-`toFormData`, with `validate` zod's `z` (same code, its own message) — rename it with `@TS.name`. `Headers`,
+and rejects a generated type named like the error class, `ClientOptions`, `<Service>Client` or, with `@useAuth`,
+`<Service>Auth` (`flat-client-name-clash`, since `index.ts` re-exports both), or like a name `client.ts` uses
+internally — a global such as `Response`, `Promise` or `RequestInit`, with uploads `BodyInit`, `RawBody`,
+`PartSpec` or `toFormData`, with `@useAuth` `AuthScheme`, `AuthEntries`, `resolveAuth` or `base64`, with
+`validate` zod's `z` (same code, its own message) — rename it with `@TS.name`. With `@useAuth`, an operation
+named `auth` clashes with a client member. `Headers`,
 `Blob`, `File` and `FormData` are read through `globalThis`, so models may use those names.
 
 ## Uploads (multipart and file bodies)
@@ -326,6 +332,104 @@ Pick the server mode with the `multipart` target option, or per operation / inte
   `multipart-model-in-json`. In Kotlin, a model of your own named `HttpFile` in the models package clashes with
   the file class (`http-file-conflict`; rename it with `@Kotlin.name`).
 
+## Authentication (`@useAuth`)
+
+```tsp
+@service @useAuth(BearerAuth) namespace PetStore;
+model PartnerKey is ApiKeyAuth<ApiKeyLocation.header, "X-Partner">;
+
+@route("/pets") interface Pets {
+  @get list(): Pet[];                                          // BearerAuth (service level)
+  @get @route("/public") @useAuth(NoAuth) featured(): Pet[];   // public
+  @get @route("/mine") @useAuth(BearerAuth | NoAuth) mine(): Pet[];   // optional
+  @delete @useAuth(BearerAuth | PartnerKey) remove(@path petId: int64): void;
+  @post @useAuth([BearerAuth, PartnerKey]) import(@body pets: Pet[]): void;   // both
+}
+```
+
+`@useAuth` on the service namespace, an enclosing namespace, an interface or an operation applies; the nearest
+one wins (`NoAuth` included). Scheme ids are the scheme models' names (`BearerAuth`, `PartnerKey`); a different
+scheme reusing an id (two inline `ApiKeyAuth<…>` instances) gets `_` appended, as in TypeSpec's OpenAPI output.
+APIs without `@useAuth` generate exactly what they did before.
+
+**Ktor server.** Each route is wrapped in `authenticate(...)` naming one provider per scheme — the scheme id as a
+string (`authenticate("BearerAuth")`), or the Kotlin expression mapped in `auth-providers`
+(`{ BearerAuth: JWT_AUTH }` → `authenticate(JWT_AUTH)`; the expression must resolve in the routes file: use a
+fully qualified name or add its import with the `imports` meta key; a blank one is an error, and a key naming no
+scheme id warns `unknown-auth-provider` — mind the `_` of renamed ids). Install Ktor `Authentication` with
+providers of those names. Routes with the same wrapper share one block.
+
+| `@useAuth` | Generated wrapper |
+|---|---|
+| `A` / `A \| B` | `authenticate(pA)` / `authenticate(pA, pB)` (the first valid credential wins; the others aren't checked) |
+| `[A, B]` (A & B) | `authenticate(pA, pB, strategy = AuthenticationStrategy.Required)` |
+| any of these `\| NoAuth` | `authenticate(…every scheme…, optional = true)`: anonymous calls pass; with credentials, the first valid one wins (the others aren't checked) and only all-invalid credentials get 401 |
+| `[A, B] \| NoAuth` (a combination and `NoAuth`) | the same `authenticate(pA, pB, optional = true)`, so one valid credential is enough: warning `auth-combination-approximated` |
+| `NoAuth` only, or none | none |
+| `[A, B] \| C` (several alternatives, one needing several schemes) | error `unsupported-auth-combination`; fails closed with `authenticate(pA, pB, pC, strategy = AuthenticationStrategy.Required)` (every scheme required) until you set the `authenticate` meta key |
+
+Nested `authenticate` blocks are not used for `A & B`: Ktor collects the providers of nested blocks into one
+set, each with its block's strategy, so two default (first-successful) blocks accept either credential. For the
+same reason, don't combine `@useAuth` with a `wrap` that calls `authenticate(...)` (the house-style pattern):
+the route would accept either provider — use the `authenticate` meta key or `generate-auth: false` instead. The `authenticate` meta key on an operation
+or group replaces the generated wrapper (and silences `unsupported-auth-combination` and
+`auth-combination-approximated`); `wrap` wrappers go inside it. An `authenticate` key inherited from a namespace or
+group replaces the wrapper of an operation with its own `@useAuth` too, so it can loosen (or tighten) that
+operation's auth. `generate-auth: false` turns generation off. The Ktor client is unaffected (configure its `Auth` plugin or
+`defaultRequest`).
+
+**Next.js clients.** A service using schemes the client can send gets a `<Service>Auth` type of credential
+providers, keyed by scheme id (quoted when not an identifier), passed as `auth` in the grouped client's
+`ClientConfig` (`createPetStoreClient({ baseUrl, auth })`, `configurePetStoreActions({ auth })`) or the flat
+client's `ClientOptions` (`new PetStoreClient({ baseUrl, auth })`):
+
+```ts
+const api = createPetStoreClient({
+  baseUrl: process.env.API_BASE_URL!,
+  auth: {
+    BearerAuth: async () => (await cookies()).get("token")?.value,   // string | undefined, sync or async
+    PartnerKey: () => process.env.PARTNER_KEY,
+    // BasicAuth: () => ({ username, password }),
+  },
+});
+```
+
+| Scheme | Provider returns | Sent as |
+|---|---|---|
+| http `Bearer`, `OAuth2Auth`, `OpenIdConnectAuth` (tokens only, no flows) | `string` | `Authorization: Bearer <token>` |
+| http `Basic` | `{ username, password }` | `Authorization: Basic <base64 of UTF-8 username:password>` |
+| `ApiKeyAuth` | `string` | the named header, query parameter (replacing a same-named one) or cookie (joined with the operation's cookie parameters and a configured `cookie` header; **server-side only**, see below) |
+
+A provider returning `undefined`, `null` or `""` supplies no credential.
+
+**Cookie API keys only work server-side.** `Cookie` is a forbidden request header: browsers silently drop it from
+`fetch`, so an `ApiKeyAuth` in a cookie is only sent from server code (Server Components, Route Handlers, Server
+Actions, plain Node). In the browser, rely on the browser's own cookies instead: same-origin requests carry them,
+cross-origin ones need a custom `fetch` with `credentials: "include"` (and a CORS setup allowing credentials):
+
+```ts
+const api = createPetStoreClient({ baseUrl: "/api", fetch: (input, init) => fetch(input, { ...init, credentials: "include" }) });
+```
+
+Each operation carries its alternatives (`auth: [[{ id: "BearerAuth", kind: "bearer" }], …]` in the request
+spec); per request the client sends the first alternative whose providers all return a value (each provider is
+called at most once per request). When none does, or the operation is `NoAuth` only, no credentials are added
+and the server decides (an optional operation, `A | NoAuth`, still sends `A` when available). Credentials override
+the configured `headers` (so they win over a configured `Authorization`); in the grouped client, per-call
+`RequestOptions.headers` (and header parameters) override credentials in turn (the flat client has no per-call
+headers). Uploads, React Query hooks and
+Server Actions go through the same client. Other http schemes (e.g. `Digest`) warn `unsupported-auth-scheme`;
+alternatives needing them are dropped. An alternative sending two credentials as the same header (compared
+case-insensitively: `[BearerAuth, BasicAuth]`, or a bearer token with an API key header named `Authorization`)
+warns `auth-header-conflict`, naming the operation and header; only the last credential is sent.
+
+`ClientConfig` and `ClientOptions` default to an untyped `auth` (`object`): a service without schemes the client
+can send, and group classes constructed directly (`new PetsClient(config)`), accept any `auth`, which then has no
+effect. React Query keys don't include the caller's identity, so clear the `QueryClient` (`queryClient.clear()`)
+on login and logout to avoid serving one user's cached data to the next. Path parameters are escaped with
+`encodeURIComponent`, which leaves `.` and `..` as they are; URL parsing then resolves such a segment as a dot
+segment (`/pets/..` → `/`), so validate path values that may be `.` or `..` (this applies with or without auth).
+
 ## Decorators
 
 ```tsp
@@ -394,7 +498,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `kotlin` | `implements: string[]` | models, sealed hierarchies | extra supertypes (FQN; qualified automatically on name clashes) |
 | `kotlin` | `checks: string[]` | models | statements appended to the data class `init { }` block (`init` is reserved in TypeSpec) |
 | `kotlin` / `typescript` (or `*`) | `notBlank: boolean` | string properties | `require(x.isNotBlank())`, emitted with or without `validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract; TypeScript: `.regex(/\S/)` on the zod schema |
-| `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`) |
+| `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`); replaces the wrapper generated from `@useAuth` |
 | `kotlin:ktor-server` / `kotlin:ktor-client` | `annotations: string[]` | operations, groups | annotations on service / client methods |
 | `kotlin:ktor-server` | `wrap: string[]` | namespaces, groups, operations | route-builder calls wrapped around routes, outermost first (dsl style); duplicates within one chain are dropped and shared prefixes share one block |
 | `kotlin:ktor-server` | `imports: string[]` | namespaces, groups, operations | imports added to the routes file (for names used in `wrap`/`context`; a `wrap` call to `authenticate(...)` needs `io.ktor.server.auth.authenticate` here — only the `authenticate` key adds it automatically) |
@@ -467,6 +571,11 @@ export default {
 ```
 
 Use it with `routing-style: company`.
+The routes template also receives `extras` (`ServerOpExtras` per operation id); render `extras[op.id].auth[0]`, when
+present, as the route's `authenticate(...)` wrapper. A style that renders only the provider names in
+`extras[op.id].authenticate` gets a warning `auth-wrapper-not-rendered` for routes whose wrapper needs more (a
+`strategy`, `optional = true` or an `auth-providers` expression), as does overriding a built-in routes template
+that renders wrappers.
 
 **TypeScript plugins.** Plugins (and custom targets) may be `.ts`, `.mts` or `.cts` files, loaded through Node's
 built-in type stripping (Node >= 22.18 or 23.6), so there is no build step. That limits them to erasable syntax: no
@@ -523,6 +632,9 @@ and vitest.
 | `notBlank` in scope `*` now also affects TypeScript | scope it to `kotlin` |
 | `Http.File` bodies and multipart operations previously generated broken output: `Http.File` was emitted as a plain model (`File`) and multipart/file bodies were JSON-encoded regardless of target; both now generate working uploads (see Uploads) | none (the previous output could not upload) |
 | The flat client no longer rejects an operation for having a multipart or file body (`flat-client-unsupported`), and the `non-json-body` warning no longer fires for one | none |
+| Specs using `@useAuth` get `authenticate(...)` route wrappers on the Ktor server (providers named after the scheme ids, see Authentication); a route whose `wrap` meta already calls `authenticate(...)` gets both, and then accepts either provider | `generate-auth: false` on the Ktor server target |
+| `ServerOpExtras` (routes template data `extras[op.id]`): `authenticate` still lists the provider names of the route's `authenticate(...)` wrapper, now also those generated from `@useAuth` (the scheme ids); the full wrapper call is in the new `auth` (and `authProviders`, `authStrategy`, `authOptional`). A plugin routing style or overridden routes template rendering `authenticate` alone keeps routes protected, but loses `strategy`/`optional`/`auth-providers` expressions: warning `auth-wrapper-not-rendered` | render `extras[op.id].auth[0]` as the wrapper, or `generate-auth: false` |
+| Specs using `@useAuth` get a `<Service>Auth` type and `auth` option in the Next.js clients (`ClientConfig<Auth>` / `ClientOptions<Auth>` become generic); in the flat client a model named `<Service>Auth`, `AuthScheme`, `AuthEntries`, `resolveAuth` or `base64`, or an operation named `auth`, is now a clash | none needed for the runtime (no `auth` → no credentials added); rename clashing names with `@TS.name` |
 | The flat client (JSON-only APIs too) passes fetch a `Headers` object (`new globalThis.Headers(options.headers)`) instead of a plain object, and its JSON `content-type` replaces a `Content-Type` from `ClientOptions.headers` in any letter case; a custom `fetch` reading `init.headers` as a plain object (`init.headers["authorization"]`) must read it through `new Headers(init.headers).get(…)` | none (adapt the custom fetch) |
 
 ## Upgrading from 0.1.2
