@@ -117,7 +117,21 @@ export class ApiBuilder {
         ),
         contentType: op.body.contentTypes[0] ?? "application/json",
         optional: op.body.optional,
+        kind: op.body.kind,
       };
+      const bodyType = op.body.type;
+      if (op.body.parts) {
+        result.body.parts = op.body.parts.map((p) => ({
+          name: p.name,
+          key: bodyType.kind === "named" ? this.types.propertyWireName(bodyType.id, p.property) : p.property,
+          kind: p.kind,
+          multi: p.multi,
+          optional: p.optional,
+          type: this.types.typeUse(p.type),
+          contentTypes: p.contentTypes,
+        }));
+      }
+      if (op.body.file) result.body.file = { isText: op.body.file.isText, contentTypes: op.body.file.contentTypes };
     }
     return result;
   }

@@ -84,6 +84,16 @@ export function createPetStoreClient(config: ClientConfig): PetStoreApiClient {
     expect(outputs["client/petStore.ts"]).toContain("async health(options?: RequestOptions): Promise<HealthResponse> {");
   });
 
+  it("keeps upload machinery out of core.ts when no operation uploads", async () => {
+    const { outputs } = await nextjs(fetchOnly).compile(petSpec);
+    const core = outputs["client/core.ts"];
+    for (const upload of ["PartSpec", "toFormData", "multipart", "file?: boolean", "BodyInit"]) expect(core).not.toContain(upload);
+    expect(core).toContain(`  let body: string | undefined;
+  if (spec.body !== undefined) {
+    const contentType = spec.contentType ?? "application/json";`);
+    expect(typecheck(outputs)).toBe("");
+  });
+
   it("imports the models from their own output dir when the client writes elsewhere", async () => {
     const { outputs } = await nextjs(
       { ...fetchOnly, "output-dir": "{emitter-output-dir}/web/src" },

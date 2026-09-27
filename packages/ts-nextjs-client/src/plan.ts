@@ -95,7 +95,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
   const extras = nextExtras(ctx, groups);
   for (const g of groups) {
     for (const op of g.operations) {
-      if (!h.isJson(op)) {
+      if (!h.isJson(op) && !h.isUpload(op)) {
         reportDiagnostic(ctx.program, {
           code: "non-json-body",
           format: { operation: op.id, contentType: op.body!.contentType },
@@ -107,7 +107,9 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
   const actions = options["server-actions"] ?? true;
   // Server Actions validate their input without undefined-valued keys.
   const withoutUndefined = ir.zod && actions && groups.some((g) => actionOps(g).some(h.hasParams));
-  const files: FileSpec[] = [file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", { withoutUndefined })];
+  // PartSpec, toFormData and the multipart/file request branches only when an operation uploads.
+  const uploads = groups.some((g) => g.operations.some(h.isUpload));
+  const files: FileSpec[] = [file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", { withoutUndefined, uploads })];
   for (const g of groups) {
     files.push(file(names.groupFile(g), ir, groupImports(ir, g), "ts-nextjs/group", { group: g, extras }));
   }

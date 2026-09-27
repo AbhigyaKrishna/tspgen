@@ -7,6 +7,7 @@ export {
   arrayOf,
   declUse,
   externalUse,
+  FILE,
   genericOf,
   literalUse,
   nullable,

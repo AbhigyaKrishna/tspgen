@@ -25,6 +25,7 @@ import {
   arrayOf,
   declUse,
   externalUse,
+  FILE,
   genericDeclUse,
   genericOf,
   literalUse,
@@ -134,6 +135,12 @@ export class DeclarationBuilder {
     return [...this.decls.values()];
   }
 
+  /** Wire name (the TS object key) of property `name` of model `modelId`; `name` when unknown. */
+  propertyWireName(modelId: string, name: string): string {
+    const model = this.types.get(modelId);
+    return (model?.kind === "model" ? model.properties.find((p) => p.name === name)?.wireName : undefined) ?? name;
+  }
+
   hasName(name: string): boolean {
     return [...this.decls.values()].some((d) => d.name === name);
   }
@@ -162,6 +169,8 @@ export class DeclarationBuilder {
         return literalUse(ref.value);
       case "nullable":
         return nullable(this.typeUse(ref.of));
+      case "file":
+        return FILE;
       case "unknown":
         return UNKNOWN;
     }

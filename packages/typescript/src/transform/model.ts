@@ -83,6 +83,26 @@ export interface TsBody {
   type: TsTypeUse;
   contentType: string;
   optional: boolean;
+  kind: "single" | "multipart" | "file";
+  /** Parts of a multipart body, in declaration order. */
+  parts?: TsPart[];
+  /** A file body: `type` is `globalThis.Blob`. */
+  file?: { isText: boolean; contentTypes: string[] };
+}
+
+/** One part of a multipart body. */
+export interface TsPart {
+  /** Wire part name. */
+  name: string;
+  /** Key of the part's property on the body object (its JSON wire name). */
+  key: string;
+  kind: "file" | "text" | "json";
+  multi: boolean;
+  optional: boolean;
+  /** Type of one value (`globalThis.Blob` for file parts). */
+  type: TsTypeUse;
+  /** Declared content types; [] when any. */
+  contentTypes: string[];
 }
 
 export interface TsHeader {

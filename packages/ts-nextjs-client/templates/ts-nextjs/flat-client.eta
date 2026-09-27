@@ -87,13 +87,20 @@ export class <%= c.name %> {
 <% } -%>
 
   private async request(method: string, path: string, body?: unknown): Promise<Response> {
+    const headers = new globalThis.Headers(this.headers);
+<% if (it.usesUploads) { -%>
+    const raw = body instanceof RawBody;
+    const contentType = raw ? body.contentType : "application/json";
+    // FormData has none: fetch writes multipart/form-data with its boundary.
+    if (contentType === undefined) headers.delete("content-type");
+    else if (body !== undefined) headers.set("content-type", contentType);
+<% } else { -%>
+    if (body !== undefined) headers.set("content-type", "application/json");
+<% } -%>
     const response = await this.doFetch(`${this.baseUrl}${path}`, {
       method,
-      headers: {
-        ...this.headers,
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      headers,
+      ...(body === undefined ? {} : { body: <%~ it.usesUploads ? "raw ? body.body : JSON.stringify(body)" : "JSON.stringify(body)" %> }),
     });
     if (!response.ok) throw await toError(response);
     return response;
@@ -101,6 +108,54 @@ export class <%= c.name %> {
 }
 <% } -%>
 
+<% if (it.usesUploads) { -%>
+/** A request body sent as-is (multipart FormData or a file) instead of JSON; FormData gets no Content-Type. */
+class RawBody {
+  readonly body: BodyInit;
+  readonly contentType: string | undefined;
+
+  constructor(body: BodyInit, contentType?: string) {
+    this.body = body;
+    this.contentType = contentType;
+  }
+}
+
+interface PartSpec {
+  name: string;
+  key?: string;
+  kind: "file" | "text" | "json";
+  multi: boolean;
+  /** Declared content type: given to untyped blobs of a file part; a JSON part's (application/json when absent). */
+  contentType?: string;
+}
+
+/**
+ * FormData of a multipart request object: text parts as strings, JSON parts as blobs of their JSON content type, files
+ * with their name (the part name for a plain Blob) and, when untyped, the part's declared content type; multi
+ * parts append every item; absent parts are skipped.
+ */
+function toFormData(value: object, parts: readonly PartSpec[]): globalThis.FormData {
+  const form = new globalThis.FormData();
+  const record = value as Record<string, unknown>;
+  for (const part of parts) {
+    const raw = record[part.key ?? part.name];
+    if (raw === undefined || raw === null) continue;
+    for (const item of part.multi && Array.isArray(raw) ? raw : [raw]) {
+      if (part.kind === "file") {
+        const blob = item as globalThis.Blob;
+        const name = typeof globalThis.File !== "undefined" && blob instanceof globalThis.File ? blob.name : part.name;
+        form.append(part.name, blob.type === "" && part.contentType ? new globalThis.Blob([blob], { type: part.contentType }) : blob, name);
+      } else if (part.kind === "json") {
+        form.append(part.name, new globalThis.Blob([JSON.stringify(item)], { type: part.contentType ?? "application/json" }));
+      } else {
+        form.append(part.name, String(item));
+      }
+    }
+  }
+  return form;
+}
+
+<% } -%>
 async function toError(response: Response): Promise<<%= e.name %>> {
   const body: unknown = await response.json().catch(() => undefined);
 <% if (e.model) { -%>

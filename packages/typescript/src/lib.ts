@@ -77,6 +77,7 @@ export const $lib = createTypeSpecLibrary({
       severity: "error",
       messages: {
         default: paramMessage`Generated type '${"name"}' clashes with the flat client's own export; rename it with @TS.name or set error-class.`,
+        local: paramMessage`Generated type '${"name"}' clashes with a name the flat client uses internally ('${"name"}'); rename it with @TS.name.`,
       },
     },
     "non-json-body": {

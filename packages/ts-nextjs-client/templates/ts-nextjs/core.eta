@@ -22,6 +22,18 @@ export interface RequestOptions {
 type Scalar = string | number | boolean | null | undefined;
 
 export type ParamValue = Scalar | readonly Scalar[];
+<% if (it.uploads) { -%>
+
+/** One part of a multipart body: wire name, body property (when it differs) and encoding. */
+export interface PartSpec {
+  name: string;
+  key?: string;
+  kind: "file" | "text" | "json";
+  multi: boolean;
+  /** Declared content type: given to untyped blobs of a file part; a JSON part's (application/json when absent). */
+  contentType?: string;
+}
+<% } -%>
 
 export interface RequestSpec {
   method: string;
@@ -32,6 +44,12 @@ export interface RequestSpec {
   cookies?: Record<string, ParamValue>;
   body?: unknown;
   contentType?: string;
+<% if (it.uploads) { -%>
+  /** Multipart body: `body` is sent as FormData built from these parts (fetch sets the boundary). */
+  multipart?: readonly PartSpec[];
+  /** File body: `body` is a Blob sent as-is. */
+  file?: boolean;
+<% } -%>
 }
 
 /** Minimal schema contract, satisfied by zod schemas. */
@@ -45,6 +63,34 @@ function encode(value: ParamValue): string | undefined {
   if (value === undefined || value === null) return undefined;
   return Array.isArray(value) ? value.map(String).join(",") : String(value);
 }
+<% if (it.uploads) { -%>
+
+/**
+ * FormData of a multipart request object: text parts as strings, JSON parts as blobs of their JSON content type, files
+ * with their name (the part name for a plain Blob) and, when untyped, the part's declared content type; multi
+ * parts append every item; absent parts are skipped.
+ */
+export function toFormData(value: object, parts: readonly PartSpec[]): FormData {
+  const form = new FormData();
+  const record = value as Record<string, unknown>;
+  for (const part of parts) {
+    const raw = record[part.key ?? part.name];
+    if (raw === undefined || raw === null) continue;
+    for (const item of part.multi && Array.isArray(raw) ? raw : [raw]) {
+      if (part.kind === "file") {
+        const blob = item as Blob;
+        const name = typeof File !== "undefined" && blob instanceof File ? blob.name : part.name;
+        form.append(part.name, blob.type === "" && part.contentType ? new Blob([blob], { type: part.contentType }) : blob, name);
+      } else if (part.kind === "json") {
+        form.append(part.name, new Blob([JSON.stringify(item)], { type: part.contentType ?? "application/json" }));
+      } else {
+        form.append(part.name, String(item));
+      }
+    }
+  }
+  return form;
+}
+<% } -%>
 
 function resolveUrl(baseUrl: string, path: string): URL {
   const origin = (globalThis as { location?: { origin: string } }).location?.origin;
@@ -72,8 +118,21 @@ export async function request(config: ClientConfig, spec: RequestSpec, options: 
     return encoded === undefined ? [] : [`${name}=${encodeURIComponent(encoded)}`];
   });
   if (cookies.length > 0) headers.append("cookie", cookies.join("; "));
+<% if (it.uploads) { -%>
+  let body: BodyInit | undefined;
+  if (spec.body !== undefined && spec.multipart) {
+    // fetch writes multipart/form-data with its boundary itself.
+    headers.delete("content-type");
+    body = toFormData(spec.body as object, spec.multipart);
+  } else if (spec.body !== undefined && spec.file) {
+    const blob = spec.body as Blob;
+    headers.set("content-type", blob.type || spec.contentType || "application/octet-stream");
+    body = blob;
+  } else if (spec.body !== undefined) {
+<% } else { -%>
   let body: string | undefined;
   if (spec.body !== undefined) {
+<% } -%>
     const contentType = spec.contentType ?? "application/json";
     headers.set("content-type", contentType);
     body = contentType.includes("json") || typeof spec.body !== "string" ? JSON.stringify(spec.body) : spec.body;

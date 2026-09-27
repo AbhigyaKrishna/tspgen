@@ -38,6 +38,8 @@ export function simple(text: string, schema: string): TsTypeUse {
 
 export const UNKNOWN = simple("unknown", "z.unknown()");
 export const VOID = simple("void", "z.void()");
+/** `Http.File`: a DOM Blob (a `File` is one), checked with `instanceof`; via globalThis so a generated type named Blob cannot shadow it. */
+export const FILE = simple("globalThis.Blob", "z.instanceof(globalThis.Blob)");
 
 export function scalarUse(name: string): TsTypeUse {
   const [text, schema] = SCALARS[name] ?? SCALARS.string;

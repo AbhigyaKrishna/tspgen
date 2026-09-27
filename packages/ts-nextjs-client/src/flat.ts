@@ -12,6 +12,7 @@ import {
   type TsParam,
 } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
+import { nextjsHelpers } from "./helpers.js";
 import type { NextClientOptions } from "./options.js";
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -24,7 +25,8 @@ const CLIENT_MEMBERS = new Set(["constructor", "send", "request", "baseUrl", "do
  * URLSearchParams, Error, JSON, String, Array, Object, globalThis, encodeURIComponent, fetch). A generated
  * declaration with one of these names shadows the global via `import type { X } from "./types"` in client.ts
  * even though only type-position uses of the global are actually affected; the list is kept simple rather
- * than narrowed to exactly which of these appear in type position.
+ * than narrowed to exactly which of these appear in type position. Headers, Blob, File and FormData are referenced
+ * through globalThis, so same-named generated types are fine. Clients with uploads also use UPLOAD_GLOBALS.
  */
 const TEMPLATE_GLOBALS = new Set([
   "Response",
@@ -41,6 +43,11 @@ const TEMPLATE_GLOBALS = new Set([
   "encodeURIComponent",
   "fetch",
 ]);
+/**
+ * Globals (BodyInit; Blob, File and FormData are referenced through globalThis) and module-local helpers (RawBody, PartSpec, toFormData) client.ts
+ * uses when an operation uploads (multipart or file body); a generated type with one of these names clashes too.
+ */
+const UPLOAD_GLOBALS = ["BodyInit", "RawBody", "PartSpec", "toFormData"];
 /** Names tried, in order, for a method's query-object parameter. */
 const QUERY_NAMES = ["query", "queryParams", "params"];
 const ARRAY_TYPE = /\[\]( \| null)?$|^(readonly )?Array</;
@@ -76,7 +83,7 @@ function unsupported(op: TsOperation): string | undefined {
   if (CLIENT_MEMBERS.has(op.name)) return "its name clashes with a client member";
   if (op.params.some((p) => p.location === "path" && p.optional)) return "optional path parameters";
   if (op.params.some((p) => p.location === "header" || p.location === "cookie")) return "header or cookie parameters";
-  if (op.body && !op.body.contentType.includes("json")) return "a non-JSON body";
+  if (op.body?.kind === "single" && !op.body.contentType.includes("json")) return "a non-JSON body";
   return undefined;
 }
 
@@ -143,11 +150,25 @@ function method(op: TsOperation, validate: boolean): FlatMethod {
     params: params.join(", "),
     returnType: op.result.type.text,
     void: op.result.type.text === "void",
-    args: [JSON.stringify(op.verb.toUpperCase()), urlExpr, ...(bodyName ? [bodyName] : [])].join(", "),
+    args: [JSON.stringify(op.verb.toUpperCase()), urlExpr, ...(bodyName ? [bodyArg(op, bodyName)] : [])].join(", "),
     checks,
     ...(op.docs ? { docs: op.docs } : {}),
     ...(op.deprecated ? { deprecated: op.deprecated } : {}),
   };
+}
+
+/** The body argument of send()/request(): uploads are wrapped in RawBody so they are not JSON-encoded. */
+function bodyArg(op: TsOperation, name: string): string {
+  const body = op.body!;
+  let raw: string;
+  if (body.kind === "multipart") raw = `new RawBody(toFormData(${name}, ${nextjsHelpers.partsExpr(body.parts ?? [])}))`;
+  else if (body.kind === "file") raw = `new RawBody(${name}, ${name}.type || ${JSON.stringify(body.file?.contentTypes[0] ?? "application/octet-stream")})`;
+  else return name;
+  return body.optional ? `${name} === undefined ? undefined : ${raw}` : raw;
+}
+
+function isUpload(op: TsOperation): boolean {
+  return op.body?.kind === "multipart" || op.body?.kind === "file";
 }
 
 function isArray(p: TsParam): boolean {
@@ -170,8 +191,8 @@ function errorClass(name: string, model: TsInterface | undefined): FlatErrorClas
 
 /** client.ts (one class per service + error class) and index.ts; nothing when a limitation is hit. */
 export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: NextClientOptions, ctx: TargetContext): FileSpec[] {
-  const fail = (code: Parameters<typeof reportDiagnostic>[1]["code"], format: Record<string, string>): FileSpec[] => {
-    reportDiagnostic(ctx.program, { code, format, target: NoTarget } as Parameters<typeof reportDiagnostic>[1]);
+  const fail = (code: Parameters<typeof reportDiagnostic>[1]["code"], format: Record<string, string>, messageId?: string): FileSpec[] => {
+    reportDiagnostic(ctx.program, { code, format, target: NoTarget, ...(messageId ? { messageId } : {}) } as Parameters<typeof reportDiagnostic>[1]);
     return [];
   };
   for (const option of ["react-query", "server-actions"] as const) {
@@ -190,11 +211,13 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   }
 
   const clientNames = services.map((s) => `${s.name}Client`);
+  const usesUploads = services.some((s) => s.groups.some((g) => g.operations.some(isUpload)));
+  const exported = new Set([options["error-class"], "ClientOptions", ...clientNames]);
   // With validate, client.ts imports zod's `z`, which a generated type named z would clash with.
-  const exported = new Set([options["error-class"], "ClientOptions", ...clientNames, ...TEMPLATE_GLOBALS, ...(validate ? ["z"] : [])]);
+  const internal = new Set([...TEMPLATE_GLOBALS, ...(usesUploads ? UPLOAD_GLOBALS : []), ...(validate ? ["z"] : [])]);
   // index.ts re-exports both the types and client.ts, so any shared name is ambiguous there.
-  const clash = ir.declarations.find((d) => exported.has(d.name));
-  if (clash) return fail("flat-client-name-clash", { name: clash.name });
+  const clash = ir.declarations.find((d) => exported.has(d.name) || internal.has(d.name));
+  if (clash) return fail("flat-client-name-clash", { name: clash.name }, exported.has(clash.name) ? undefined : "local");
 
   const imports: TsImport[] = [];
   const clients = [];
@@ -247,6 +270,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         clients,
         error: errorClass(options["error-class"], model),
         usesQuery: queryParams.length > 0,
+        usesUploads,
         /** toQuery comma-joins arrays and takes the list of exploded keys. */
         usesArrays: queryParams.some(isArray),
         /** Body checks validate a copy without undefined-valued keys. */

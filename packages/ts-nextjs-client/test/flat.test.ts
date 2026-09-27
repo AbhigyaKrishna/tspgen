@@ -131,12 +131,11 @@ ${banner("Nodes", "  ")}
   }
 
   private async request(method: string, path: string, body?: unknown): Promise<Response> {
+    const headers = new globalThis.Headers(this.headers);
+    if (body !== undefined) headers.set("content-type", "application/json");
     const response = await this.doFetch(\`\${this.baseUrl}\${path}\`, {
       method,
-      headers: {
-        ...this.headers,
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      },
+      headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!response.ok) throw await toError(response);
@@ -250,9 +249,17 @@ export * from "./types";
     const [result, diagnostics] = await nextjs(flat, house).compileAndDiagnose(spec);
     expectDiagnostics(diagnostics, {
       code: "@abhigyakrishna/tspgen-typescript/flat-client-name-clash",
-      message: "Generated type 'Response' clashes with the flat client's own export; rename it with @TS.name or set error-class.",
+      message: "Generated type 'Response' clashes with a name the flat client uses internally ('Response'); rename it with @TS.name.",
     });
     expect(result.outputs["client.ts"]).toBeUndefined();
+  });
+
+  it("generates a JSON-only client alongside a model named Headers (request() uses globalThis.Headers)", async () => {
+    const spec = `${shopSpec}\nmodel Headers { a: string }\n@route("/headers") op readHeaders(): Headers;`;
+    const [result, diagnostics] = await nextjs(flat, house).compileAndDiagnose(spec);
+    expect(diagnostics).toEqual([]);
+    expect(result.outputs["client.ts"]).toContain("    const headers = new globalThis.Headers(this.headers);");
+    expect(typecheck(result.outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
   it("keeps nullable error-model fields nullable", async () => {
@@ -413,7 +420,10 @@ function withoutUndefined(value: unknown): unknown {
       @TS.name("z") model Zed { v: string }
       @route("/zed") op zed(): Zed;`;
     const diagnostics = await nextjs({ ...flat, validate: true }, { ...house, zod: true }).diagnose(spec);
-    expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-typescript/flat-client-name-clash" });
+    expectDiagnostics(diagnostics, {
+      code: "@abhigyakrishna/tspgen-typescript/flat-client-name-clash",
+      message: "Generated type 'z' clashes with a name the flat client uses internally ('z'); rename it with @TS.name.",
+    });
   });
 
   it("emits no validation without the validate option", async () => {

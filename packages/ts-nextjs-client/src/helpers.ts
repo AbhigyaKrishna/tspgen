@@ -1,5 +1,5 @@
 import type { StatusCodes } from "@abhigyakrishna/tspgen-core";
-import type { TsGroup, TsHeader, TsOperation, TsResultVariant, TsTypeUse } from "@abhigyakrishna/tspgen-typescript";
+import type { TsGroup, TsHeader, TsOperation, TsPart, TsResultVariant, TsTypeUse } from "@abhigyakrishna/tspgen-typescript";
 import { names } from "./names.js";
 
 export interface Field {
@@ -26,8 +26,35 @@ function isQuery(op: TsOperation): boolean {
   return op.verb === "get" || op.verb === "head";
 }
 
+/** No body or a JSON one; uploads (even a file body declared `application/json`) are not. */
 function isJson(op: TsOperation): boolean {
-  return !op.body || op.body.contentType.includes("json");
+  return !op.body || (!isUpload(op) && op.body.contentType.includes("json"));
+}
+
+/** Multipart and file bodies: sent by the request runtime as FormData / a Blob. */
+function isUpload(op: TsOperation): boolean {
+  return op.body?.kind === "multipart" || op.body?.kind === "file";
+}
+
+/**
+ * Static multipart descriptor: `[{ name, key?, kind, multi, contentType? }, …]`; key only when it differs from the
+ * part name; contentType for file parts that declare one (the first, bar `*\/*`) and for JSON parts declaring a JSON
+ * media type other than application/json (the first).
+ */
+function partsExpr(parts: readonly TsPart[]): string {
+  const items = parts.map((p) => {
+    const contentType = partContentType(p);
+    const key = p.key !== p.name ? `key: ${str(p.key)}, ` : "";
+    return `{ name: ${str(p.name)}, ${key}kind: ${str(p.kind)}, multi: ${p.multi}${contentType ? `, contentType: ${str(contentType)}` : ""} }`;
+  });
+  return `[${items.join(", ")}]`;
+}
+
+function partContentType(part: TsPart): string | undefined {
+  if (part.kind === "file") return part.contentTypes.find((t) => t !== "*/*");
+  if (part.kind !== "json") return undefined;
+  const json = part.contentTypes.find((t) => /[/+]json(;|$)/.test(t));
+  return json === "application/json" ? undefined : json;
 }
 
 function parseExpr(type: TsTypeUse, zod: boolean): string {
@@ -68,6 +95,8 @@ export const nextjsHelpers = {
   fields,
   isQuery,
   isJson,
+  isUpload,
+  partsExpr,
   key,
 
   hasParams(op: TsOperation): boolean {
@@ -108,7 +137,15 @@ export const nextjsHelpers = {
       const list = op.params.filter((p) => p.location === location);
       if (list.length > 0) lines.push(`${prop}: { ${list.map((p) => `${key(p.wireName)}: params.${p.name}`).join(", ")} },`);
     }
-    if (op.body) lines.push(`body: params.${op.body.name},`, `contentType: ${str(op.body.contentType)},`);
+    const body = op.body;
+    if (body?.kind === "multipart") {
+      lines.push(`body: params.${body.name},`, `multipart: ${partsExpr(body.parts ?? [])},`);
+    } else if (body?.kind === "file") {
+      const [declared] = body.file?.contentTypes ?? [];
+      lines.push(`body: params.${body.name},`, "file: true,", ...(declared ? [`contentType: ${str(declared)},`] : []));
+    } else if (body) {
+      lines.push(`body: params.${body.name},`, `contentType: ${str(body.contentType)},`);
+    }
     return lines;
   },
 
