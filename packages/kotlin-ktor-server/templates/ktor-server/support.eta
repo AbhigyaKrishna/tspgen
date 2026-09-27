@@ -28,7 +28,43 @@ internal inline fun <reified T> encodeParam(value: T): String =
     when (val element = paramJson.encodeToJsonElement(value)) {
         is JsonPrimitive -> element.content
         else -> element.toString()
-    }<% if (it.uploads?.limit) { -%>
+    }
+<% if (it.serverJson) { -%>
+
+/**
+ * JSON of request and response bodies, multipart JSON parts and event payloads: Ktor's DefaultJson with this
+ * target's `features.encode-defaults` / `features.ignore-unknown-keys` and the models' serializers.
+ */
+<%~ it.serverJson %>
+<% } -%>
+<% if (it.problem) { -%>
+
+/**
+ * Responds with an RFC 9457 problem: `application/problem+json` carrying `type` (about:blank), the status's `title`,
+ * `status` and [detail] when given.
+ */
+internal suspend fun ApplicationCall.respondProblem(status: HttpStatusCode, detail: String?) {
+    val problem = buildJsonObject {
+        put("type", "about:blank")
+        put("title", status.description)
+        put("status", status.value)
+        if (detail != null) put("detail", detail)
+    }
+    respondText(problem.toString(), ContentType.Application.ProblemJson, status)
+}
+
+/**
+ * The detail of a 400 problem: for a request body that failed to decode or a model check that failed, the innermost
+ * cause's message (e.g. "name must not be blank"); else the exception's own message.
+ */
+internal fun BadRequestException.problemDetail(): String? =
+    if (this is MissingRequestParameterException || this is ParameterConversionException) {
+        message
+    } else {
+        generateSequence(cause) { it.cause }.lastOrNull()?.message ?: message
+    }
+<% } -%>
+<% if (it.uploads?.limit) { -%>
 
 
 /**
@@ -71,11 +107,6 @@ internal suspend fun PartData.partText(): String =
         is PartData.BinaryChannelItem -> provider().toByteArray().decodeToString()
         else -> throw BadRequestException("Unsupported multipart part '$name'")
     }
-<% } -%>
-<% if (it.uploads?.json) { -%>
-
-/** JSON of multipart JSON parts: the models' serializers, as the module's content negotiation uses. */
-internal val partJson: Json = <%~ it.partJson %>
 <% } -%>
 <% if (it.uploads?.buffered) { -%>
 
@@ -166,6 +197,17 @@ internal suspend fun ApplicationCall.receiveParts(
     }
     return parts
 }
+
+/**
+ * Runs [build], turning a model check that fails (`init { require(…) }`, an IllegalArgumentException) into a
+ * [BadRequestException] carrying its message, so invalid input answers 400 instead of 500.
+ */
+internal inline fun <T> validRequest(build: () -> T): T =
+    try {
+        build()
+    } catch (e: IllegalArgumentException) {
+        throw BadRequestException(e.message ?: "Invalid request", e)
+    }
 <% } -%>
 <% if (it.uploads?.files) { -%>
 
@@ -252,14 +294,6 @@ internal fun <T> kotlinx.coroutines.flow.Flow<T>.sseFrames(frame: (T) -> TspgenS
         emit(it)
         !it.terminal
     }
-<% if (it.sse.json) { -%>
-
-/**
- * JSON of event payloads: the configuration the generated module's content negotiation installs (it uses this value),
- * so an event carries the same JSON as a REST response.
- */
-internal val sseJson: Json = <%~ it.sse.jsonExpr %>
-<% } -%>
 <% if (it.sse.textWriter) { -%>
 
 /**
@@ -268,8 +302,9 @@ internal val sseJson: Json = <%~ it.sse.jsonExpr %>
  * has started: throw before returning it to answer with an error status instead.
  */
 internal suspend fun <T> ApplicationCall.respondEventStream(events: kotlinx.coroutines.flow.Flow<T>, frame: (T) -> TspgenSseFrame) {
-    response.header(HttpHeaders.CacheControl, "no-store")
-    response.header("X-Accel-Buffering", "no")
+<% for (const [name, value] of it.sse.headers) { -%>
+    response.header(<%~ name %>, <%~ value %>)
+<% } -%>
     respondBytesWriter(ContentType.Text.EventStream) {
         events.sseFrames(frame).collect { f ->
             val text = StringBuilder()
@@ -291,8 +326,9 @@ internal suspend fun <T> ApplicationCall.respondEventStream(events: kotlinx.coro
  */
 internal suspend fun <T> ApplicationCall.respondSse(events: kotlinx.coroutines.flow.Flow<T>, frame: (T) -> TspgenSseFrame) {
     application.plugin(SSE)
-    response.header(HttpHeaders.CacheControl, "no-store")
-    response.header("X-Accel-Buffering", "no")
+<% for (const [name, value] of it.sse.headers) { -%>
+    response.header(<%~ name %>, <%~ value %>)
+<% } -%>
     respond(
         SSEServerContent(this, {
             events.sseFrames(frame).collect { send(ServerSentEvent(data = it.data, event = it.event, id = it.id)) }

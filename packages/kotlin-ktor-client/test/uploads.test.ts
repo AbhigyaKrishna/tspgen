@@ -28,6 +28,7 @@ describe("ktor client uploads", () => {
     const uploads = outputs[`${DIR}/UploadsClient.kt`];
     expect(uploads).toContain(`    suspend fun upload(body: Upload) {
         val response = http.request {
+            expectSuccess = false
             method = HttpMethod.Post
             url {
                 takeFrom(baseUrl)
@@ -39,7 +40,7 @@ describe("ktor client uploads", () => {
                         append("name", body.name)
                         body.count?.let { append("count", it.toString()) }
                         body.kind?.let { append("kind", encodeParam(it)) }
-                        append("meta", encodeJson(body.meta), jsonPartHeaders())
+                        append("meta", http.encodeJson(body.meta), jsonPartHeaders())
                         body.tags?.forEach { append("tags", it.toString()) }
                         append("avatar", body.avatar.bytes, fileHeaders(body.avatar, "avatar", "application/octet-stream"))
                         body.photos.forEach { append("photos", it.bytes, fileHeaders(it, "photos", "image/png")) }
@@ -55,6 +56,7 @@ describe("ktor client uploads", () => {
     const { outputs } = await client().compile(uploadSpec);
     expect(outputs[`${DIR}/UploadsClient.kt`]).toContain(`    suspend fun file(file: HttpFile) {
         val response = http.request {
+            expectSuccess = false
             method = HttpMethod.Put
             url {
                 takeFrom(baseUrl)
@@ -76,8 +78,8 @@ describe("ktor client uploads", () => {
         HttpHeaders.ContentDisposition to listOf("\${ContentDisposition.Parameters.FileName}=\${(file.filename ?: part).quote()}"),
     )`);
     expect(support).toContain("import io.ktor.http.quote\n");
-    expect(support).toContain("internal inline fun <reified T> encodeJson(value: T): String = partJson.encodeToJsonElement(value).toString()");
-    expect(support).toContain("internal val partJson: Json = Json\n");
+    expect(support).toContain("internal inline fun <reified T> HttpClient.encodeJson(value: T): String = apiJson.encodeToJsonElement(value).toString()");
+    expect(support).toContain("get() = attributes.getOrNull(apiJsonKey) ?: SJson");
     const plain = await client().compile(`@service namespace S; model P { a: string } @post op make(@body p: P): void;`);
     expect(plain.outputs[`${DIR}/ClientSupport.kt`]).not.toContain("fileHeaders");
   });
@@ -96,16 +98,15 @@ describe("ktor client uploads", () => {
     expect(outputs[`${DIR}/SClient.kt`]).not.toContain("HttpFile");
   });
 
-  it("encodes JSON parts with the java.time serializers", async () => {
+  it("encodes JSON parts with the java.time serializers of <Service>Json", async () => {
     const { outputs } = await client().compile(`
       @service namespace S;
       model Form { times: HttpPart<utcDateTime[]>; }
       @post op send(@header contentType: "multipart/form-data", @multipartBody body: Form): void;
     `);
-    const support = outputs[`${DIR}/ClientSupport.kt`];
-    expect(support).toContain("import com.acme.models.modelSerializersModule\n");
-    expect(support).toContain("internal val partJson: Json = Json { serializersModule = modelSerializersModule }\n");
-    expect(outputs[`${DIR}/SClient.kt`]).toContain('append("times", encodeJson(body.times), jsonPartHeaders())');
+    expect(outputs[`${DIR}/SApiClient.kt`]).toContain("    serializersModule = modelSerializersModule\n");
+    expect(outputs[`${DIR}/ClientSupport.kt`]).toContain("get() = attributes.getOrNull(apiJsonKey) ?: SJson");
+    expect(outputs[`${DIR}/SClient.kt`]).toContain('append("times", http.encodeJson(body.times), jsonPartHeaders())');
   });
 
   it("sends JSON parts with their declared JSON content type", async () => {
@@ -120,9 +121,9 @@ describe("ktor client uploads", () => {
       @post op send(@header contentType: "multipart/form-data", @multipartBody body: Form): void;
     `);
     const send = outputs[`${DIR}/SClient.kt`];
-    expect(send).toContain('append("patch", encodeJson(body.patch), jsonPartHeaders("application/merge-patch+json"))');
-    expect(send).toContain('append("multi", encodeJson(body.multi), jsonPartHeaders("application/vnd.acme+json"))');
-    expect(send).toContain('append("meta", encodeJson(body.meta), jsonPartHeaders())');
+    expect(send).toContain('append("patch", http.encodeJson(body.patch), jsonPartHeaders("application/merge-patch+json"))');
+    expect(send).toContain('append("multi", http.encodeJson(body.multi), jsonPartHeaders("application/vnd.acme+json"))');
+    expect(send).toContain('append("meta", http.encodeJson(body.meta), jsonPartHeaders())');
     // An envelope part carries its body's type, not a wrapper model.
     const form = outputs["models/com/acme/models/Form.kt"];
     expect(form).toContain("val patch: Meta,");

@@ -27,11 +27,11 @@ export function streamLine(mode: SseMode, call: string): string {
   return `call.${mode === "plugin" ? "respondSse" : "respondEventStream"}(${call}) { it.sseFrame() }`;
 }
 
-/** Kotlin expression of an event's `data:` text: JSON through `sseJson`, strings as-is, other text payloads encoded. */
+/** Kotlin expression of an event's `data:` text: JSON through `serverJson`, strings as-is, other text payloads encoded. */
 function dataExpr(e: KtEvent): string {
   if (e.literal !== undefined) return str(e.literal);
   const data = e.data!;
-  if (e.json) return "sseJson.encodeToJsonElement(data).toString()";
+  if (e.json) return "serverJson.encodeToJsonElement(data).toString()";
   return data.nullable ? `data?.let { ${encode("it", data)} } ?: ""` : encode("data", data);
 }
 
@@ -61,7 +61,7 @@ export interface SsePlan {
   sseMessage: boolean;
   textWriter: boolean;
   plugin: boolean;
-  /** Some event has a JSON payload: `sseJson` is emitted. */
+  /** Some event has a JSON payload: it needs `serverJson`. */
   json: boolean;
 }
 
@@ -85,20 +85,13 @@ export function ssePlan(ops: ServerOperation[]): SsePlan | undefined {
   };
 }
 
-/** The Json both the module's content negotiation and event payloads use (Ktor's DefaultJson unless java.time needs a module). */
-export function sseJsonExpr(ir: KotlinIR): string {
-  return ir.serializersModule ? `Json { serializersModule = ${ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1)} }` : "DefaultJson";
-}
-
-export function sseImports(plan: SsePlan, ir: KotlinIR): string[] {
+export function sseImports(plan: SsePlan, ir: KotlinIR, headers: boolean): string[] {
   return [
     "kotlinx.coroutines.flow.map",
     "kotlinx.coroutines.flow.transformWhile",
-    "io.ktor.http.HttpHeaders",
-    "io.ktor.server.response.header",
+    ...(headers ? ["io.ktor.server.response.header"] : []),
     ...plan.events.map((d) => d.fqn),
     ...(plan.sseMessage && ir.sseMessage ? [ir.sseMessage] : []),
-    ...(plan.json ? (ir.serializersModule ? [ir.serializersModule] : ["io.ktor.serialization.kotlinx.json.DefaultJson"]) : []),
     ...(plan.textWriter ? ["io.ktor.http.ContentType", "io.ktor.server.response.respondBytesWriter", "io.ktor.utils.io.writeStringUtf8"] : []),
     ...(plan.plugin
       ? [

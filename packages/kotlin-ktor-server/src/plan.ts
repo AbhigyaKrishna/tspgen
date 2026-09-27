@@ -17,7 +17,8 @@ import type { KtorServerOptions } from "./options.js";
 import { commonPrefix, routeTree, type RouteFunction } from "./routes.js";
 import { builtinStyles, resolveStyle, type RoutingStyle } from "./styles.js";
 import { buildUnits, type ServerUnit } from "./units.js";
-import { frameFunction, sseFunctions, sseImports, sseJsonExpr, sseMode, ssePlan } from "./sse.js";
+import { frameFunction, sseFunctions, sseImports, sseMode, ssePlan } from "./sse.js";
+import { serverJsonLines, type ServerRuntime } from "./runtime.js";
 import { multipartMode, PartClasses, planUpload, uploadLimit, type SupportNeed } from "./uploads.js";
 
 const TARGET_NAME = "@abhigyakrishna/tspgen-kotlin-ktor-server";
@@ -49,16 +50,22 @@ const SUPPORT_FUNCTIONS = [
 ];
 
 const MODULE_IMPORTS = [
-  "io.ktor.http.HttpStatusCode",
   "io.ktor.serialization.kotlinx.json.json",
   "io.ktor.server.application.Application",
   "io.ktor.server.application.install",
   "io.ktor.server.plugins.contentnegotiation.ContentNegotiation",
-  "io.ktor.server.plugins.statuspages.StatusPages",
-  "io.ktor.server.plugins.statuspages.StatusPagesConfig",
-  "io.ktor.server.response.respond",
   "io.ktor.server.routing.Route",
   "io.ktor.server.routing.routing",
+];
+
+/** ServerSupport.kt imports of the problem helpers (`error-body: problem`). */
+const PROBLEM_IMPORTS = [
+  "io.ktor.http.ContentType",
+  "io.ktor.http.HttpStatusCode",
+  "io.ktor.server.plugins.BadRequestException",
+  "io.ktor.server.response.respondText",
+  "kotlinx.serialization.json.buildJsonObject",
+  "kotlinx.serialization.json.put",
 ];
 
 /** ServerSupport.kt helpers per upload need, their imports, and the functions routes elsewhere import. */
@@ -87,10 +94,10 @@ const UPLOAD_SUPPORT: Record<SupportNeed, { imports: (ir: KotlinIR) => string[];
     functions: ["partText"],
   },
   json: {
-    imports: (ir) => (ir.serializersModule ? [ir.serializersModule] : []),
-    functions: ["partJson"],
+    imports: () => [],
+    functions: ["serverJson"],
   },
-  buffered: { imports: () => [], functions: ["receiveParts"] },
+  buffered: { imports: () => [], functions: ["receiveParts", "validRequest"] },
   files: { imports: (ir) => [`${ir.modelsPackage}.HttpFile`], functions: [] },
   streaming: {
     imports: () => [
@@ -420,6 +427,8 @@ export function planServerFiles(
   program: Program,
   /** Whether a logical template is rendered by a file other than this target's own (template-dir, plugin). */
   overridden: (template: string) => boolean = () => false,
+  /** Resolved runtime features and options (see runtime.ts). */
+  runtime: ServerRuntime,
 ): FileSpec[] {
   if (ir.services.length === 0) return [];
   if (!checkAuthProviders(program, ir, options)) return [];
@@ -445,6 +454,8 @@ export function planServerFiles(
   const used = new Set(serviceUnits.flat().flatMap((u) => u.operations.flatMap((op) => op.upload?.support ?? [])));
   const needs = SUPPORT_NEEDS.filter((n) => used.has(n));
   const sse = ssePlan(serviceUnits.flat().flatMap((u) => u.operations));
+  // One Json for bodies (the module's content negotiation), JSON parts and JSON events.
+  const serverJson = runtime.module || used.has("json") || (sse?.json ?? false);
   const supportFunctions = [
     ...SUPPORT_FUNCTIONS,
     ...needs.flatMap((n) => UPLOAD_SUPPORT[n].functions),
@@ -459,19 +470,22 @@ export function planServerFiles(
         [
           ...SUPPORT_IMPORTS,
           ...needs.flatMap((n) => UPLOAD_SUPPORT[n].imports(ir)).filter((i) => !flowClash || i !== "kotlinx.coroutines.flow.Flow"),
-          ...(sse ? sseImports(sse, ir) : []),
+          ...(sse ? sseImports(sse, ir, runtime.sseHeaders.length > 0) : []),
+          ...(serverJson ? ["io.ktor.serialization.kotlinx.json.DefaultJson", ...(ir.serializersModule ? [ir.serializersModule] : [])] : []),
+          ...(runtime.errorBody === "problem" ? PROBLEM_IMPORTS : []),
         ],
         supportPkg,
       ),
       body: "ktor-server/support",
       uploads: Object.fromEntries(needs.map((n) => [n, true])),
       flowType: flowClash ? "kotlinx.coroutines.flow.Flow" : "Flow",
-      partJson: ir.serializersModule ? `Json { serializersModule = ${ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1)} }` : "Json",
+      problem: runtime.errorBody === "problem",
+      ...(serverJson ? { serverJson: serverJsonLines(ir, runtime).join("\n") } : {}),
       ...(sse
         ? {
             sse: {
               ...sse,
-              jsonExpr: sseJsonExpr(ir),
+              headers: runtime.sseHeaders,
               frames: [
                 ...sse.events.map((d) => frameFunction(d).join("\n")),
                 ...(sse.sseMessage ? ["internal fun SseMessage.sseFrame(): TspgenSseFrame = TspgenSseFrame(event, data, id)"] : []),
@@ -509,7 +523,8 @@ export function planServerFiles(
         routesFile(ir, unit, pkg, dirOf(pkg), options, style, extras, support, functions.get(unit)!),
       );
     }
-    if (options.features.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style, sse?.json ?? false));
+    if (runtime.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style, runtime));
+    files.push(errorsFile(ir, service, units, supportPkg, dirOf(supportPkg), runtime));
   }
   return files;
 }
@@ -597,25 +612,20 @@ function moduleFile(
   pkg: string,
   dir: string,
   style: RoutingStyle,
-  sharedJson: boolean,
+  runtime: ServerRuntime,
 ): FileSpec {
-  const exceptions = new Map<string, string>();
-  for (const unit of units) {
-    for (const op of unit.operations) {
-      for (const error of op.errors) {
-        if (error.exception.text !== "ApiException") exceptions.set(error.exception.imports[0], error.exception.text);
-      }
-    }
-  }
   // The SSE plugin when an operation streams through it.
   const sse = units.some((u) => u.operations.some((op) => op.sse === "plugin")) ? ["io.ktor.server.sse.SSE"] : [];
   const installs = [...(style.plugins ?? []), ...sse];
   const unitImports = units
     .filter((u) => u.package && u.package !== pkg)
     .flatMap((u) => [`${u.package}.${u.serviceName}`, ...functions.get(u)!.map((f) => `${u.package}.${f.name}`)]);
-  // With JSON event payloads, content negotiation installs ServerSupport's sseJson: REST and events share one Json.
-  const serializers = ir.serializersModule && !sharedJson ? [ir.serializersModule, "kotlinx.serialization.json.Json"] : [];
-  const imports = [...MODULE_IMPORTS, ...installs, ...exceptions.keys(), `${ir.apiPackage}.ApiException`, ...unitImports, ...serializers];
+  const imports = [
+    ...MODULE_IMPORTS,
+    ...(runtime.statusPages ? ["io.ktor.server.plugins.statuspages.StatusPages"] : []),
+    ...installs,
+    ...unitImports,
+  ];
   const base = camel(service.name);
   return {
     path: `${dir}/${service.name}Module.kt`,
@@ -629,11 +639,44 @@ function moduleFile(
       /** Route function names per unit, in unit order. */
       mounts: units.map((u) => functions.get(u)!.map((f) => f.name)),
       installs,
-      json: sharedJson ? "sseJson" : ir.serializersModule ? `Json { serializersModule = ${ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1)} }` : "",
-      exceptions: [...exceptions.values()],
+      statusPages: runtime.statusPages,
       moduleFn: `${base}Module`,
       apiRoutesFn: `${base}ApiRoutes`,
       errorsFn: `${base}Errors`,
+    },
+  };
+}
+
+/** `<Service>Errors.kt`: `StatusPagesConfig.<svc>Errors()`, emitted with or without the module. */
+function errorsFile(ir: KotlinIR, service: KtService, units: ServerUnit[], pkg: string, dir: string, runtime: ServerRuntime): FileSpec {
+  const exceptions = new Map<string, string>();
+  for (const unit of units) {
+    for (const op of unit.operations) {
+      for (const error of op.errors) {
+        if (error.exception.text !== "ApiException") exceptions.set(error.exception.imports[0], error.exception.text);
+      }
+    }
+  }
+  const problem = runtime.errorBody === "problem";
+  const imports = [
+    `${ir.apiPackage}.ApiException`,
+    "io.ktor.http.HttpStatusCode",
+    "io.ktor.server.plugins.statuspages.StatusPagesConfig",
+    ...exceptions.keys(),
+    ...(exceptions.size > 0 || !problem ? ["io.ktor.server.response.respond"] : []),
+    ...(problem ? ["io.ktor.server.plugins.BadRequestException", "io.ktor.server.plugins.PayloadTooLargeException"] : []),
+  ];
+  return {
+    path: `${dir}/${service.name}Errors.kt`,
+    template: "kotlin/file",
+    data: {
+      package: pkg,
+      imports: organizeImports(imports, pkg),
+      body: "ktor-server/errors",
+      service,
+      exceptions: [...exceptions.values()],
+      problem,
+      errorsFn: `${camel(service.name)}Errors`,
     },
   };
 }

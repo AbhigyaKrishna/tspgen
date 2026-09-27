@@ -26,15 +26,21 @@ import com.example.petstore.server.PetsService
 import com.example.petstore.server.ToysService
 import com.example.petstore.server.petStoreModule
 import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.MultiPartData
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
+import io.ktor.http.contentType
+import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.UserIdPrincipal
@@ -42,7 +48,11 @@ import io.ktor.server.auth.bearer
 import io.ktor.server.testing.testApplication
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.toByteArray
+import io.ktor.client.statement.HttpResponse
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.Serializable
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -87,6 +97,7 @@ class InMemoryToys : ToysService {
     override suspend fun list(): List<Toy> = toys
 
     override suspend fun add(toy: Toy) {
+        if (toy.name == "taken") throw ApiException(409, "toy taken already exists")
         toys += toy
     }
 }
@@ -158,7 +169,63 @@ class RecordingUploads : UploadsService {
         FileReceipt(null, contentType, channel.toByteArray().decodeToString())
 }
 
+/** The PetStore module with in-memory services; the "api" bearer provider accepts the token "secret". */
+fun Application.installPetStore() {
+    install(Authentication) {
+        bearer("api") {
+            authenticate { credential -> if (credential.token == "secret") UserIdPrincipal("tester") else null }
+        }
+    }
+    petStoreModule(
+        extrasService = RecordingExtras(),
+        petsService = InMemoryPets(),
+        toysService = InMemoryToys(),
+        accessoriesService = InMemoryAccessories(),
+        uploadsService = RecordingUploads(),
+        feedService = DemoFeed(),
+    )
+}
+
 class PetStoreE2ETest {
+    @Test
+    fun responsesOmitUnsetOptionalProperties() = testApplication {
+        application { installPetStore() }
+        val created = client.post("/pets") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"id":7,"name":"Tom","species":"cat"}""")
+        }
+        assertEquals(HttpStatusCode.Created, created.status)
+        // No "tags":null / "born_at":null, and weight (default 1.0) is omitted.
+        assertEquals("""{"id":7,"name":"Tom","species":"cat"}""", client.get("/pets/7").bodyAsText())
+    }
+
+    @Test
+    fun errorsWithoutADeclaredBodyAnswerProblemJson() = testApplication {
+        application { installPetStore() }
+        suspend fun problem(response: HttpResponse, status: HttpStatusCode): JsonObject {
+            assertEquals(status, response.status)
+            assertEquals(ContentType.Application.ProblemJson, response.contentType()?.withoutParameters())
+            return Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        }
+        val taken = client.post("/toys") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"kind":"ball","name":"taken","diameter":1.0}""")
+        }
+        assertEquals(
+            """{"type":"about:blank","title":"Conflict","status":409,"detail":"toy taken already exists"}""",
+            problem(taken, HttpStatusCode.Conflict).toString(),
+        )
+        val malformed = client.post("/toys") {
+            contentType(ContentType.Application.Json)
+            setBody("{")
+        }
+        assertEquals("Bad Request", problem(malformed, HttpStatusCode.BadRequest)["title"]?.jsonPrimitive?.content)
+        val missing = problem(client.get("/feed/raw"), HttpStatusCode.BadRequest)
+        assertTrue(missing["detail"]?.jsonPrimitive?.content.orEmpty().contains("count"), missing.toString())
+        val unparsable = problem(client.get("/pets/abc"), HttpStatusCode.BadRequest)
+        assertTrue(unparsable["detail"]?.jsonPrimitive?.content.orEmpty().contains("petId"), unparsable.toString())
+    }
+
     @Test
     fun generatedClientTalksToGeneratedServer() = testApplication {
         application {
@@ -223,6 +290,14 @@ class PetStoreE2ETest {
         api.toys.add(Rope(name = "long", length = 2))
         assertEquals(listOf(Ball("red", 3.5f), Rope("long", 2)), api.toys.list())
         assertTrue(Ball("x", 1f) is Serializable)
+
+        val taken = assertFailsWith<ApiException> { api.toys.add(Ball(name = "taken", diameter = 1f)) }
+        assertEquals(409, taken.status)
+        assertEquals("toy taken already exists", taken.message)
+
+        // Generated calls map errors themselves, also on clients built with expectSuccess = true.
+        val strict = PetStoreApiClient(createClient { petStoreDefaults(); expectSuccess = true }, "http://localhost")
+        assertEquals(404, assertFailsWith<NotFoundException> { strict.pets.get(99) }.status)
 
         api.accessories.add(Accessory.Collar(size = 3))
         api.accessories.add(Accessory.Tag(text = "Rex"))

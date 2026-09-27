@@ -70,16 +70,16 @@ fun Route.feedRoutes(service: FeedService) {
     const support = outputs[`${DIR}/ServerSupport.kt`];
     expect(support).toContain(`internal fun ChannelEvents.sseFrame(): TspgenSseFrame =
     when (this) {
-        is ChannelEvents.UserConnectEvent -> TspgenSseFrame("userConnect", sseJson.encodeToJsonElement(data).toString())
+        is ChannelEvents.UserConnectEvent -> TspgenSseFrame("userConnect", serverJson.encodeToJsonElement(data).toString())
         is ChannelEvents.Note -> TspgenSseFrame("note", data)
         is ChannelEvents.Count -> TspgenSseFrame("count", data.toString())
         is ChannelEvents.At -> TspgenSseFrame("at", data.toString())
-        is ChannelEvents.Seen -> TspgenSseFrame("seen", sseJson.encodeToJsonElement(data).toString())
+        is ChannelEvents.Seen -> TspgenSseFrame("seen", serverJson.encodeToJsonElement(data).toString())
         ChannelEvents.Done -> TspgenSseFrame(null, "[done]", terminal = true)
     }
 `);
     expect(support).toContain("internal fun SseMessage.sseFrame(): TspgenSseFrame = TspgenSseFrame(event, data, id)\n");
-    expect(support).toContain("internal val sseJson: Json = Json { serializersModule = modelSerializersModule }\n");
+    expect(support).toContain("internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n    serializersModule = modelSerializersModule\n}\n");
     expect(support).toContain(`    map(frame).transformWhile {
         emit(it)
         !it.terminal
@@ -96,7 +96,7 @@ fun Route.feedRoutes(service: FeedService) {
         }
     }`);
     expect(support).toContain(`    application.plugin(SSE)
-    response.header(HttpHeaders.CacheControl, "no-store")
+    response.header("Cache-Control", "no-store")
     response.header("X-Accel-Buffering", "no")
     respond(
         SSEServerContent(this, {
@@ -123,8 +123,8 @@ fun Route.feedRoutes(service: FeedService) {
     val id: String? = id?.takeUnless { '\\u0000' in it }?.filterNot { it == '\\r' || it == '\\n' }
 }`);
     expect(outputs[`${DIR}/SModule.kt`]).toContain("    install(SSE)\n    install(StatusPages) {");
-    // REST and events share one Json: the module installs ServerSupport's sseJson.
-    expect(outputs[`${DIR}/SModule.kt`]).toContain("        json(sseJson)\n");
+    // REST and events share one Json: the module installs ServerSupport's serverJson.
+    expect(outputs[`${DIR}/SModule.kt`]).toContain("        json(serverJson)\n");
     expect(outputs[`${DIR}/SModule.kt`]).not.toContain("import kotlinx.serialization.json.Json\n");
     expect(outputs[`${DIR}/SModule.kt`]).toContain("import io.ktor.server.sse.SSE\n");
   });
@@ -185,10 +185,10 @@ fun Route.feedRoutes(service: FeedService) {
     expect(routes).toContain("import com.acme.server.respondEventStream\n");
     expect(routes).toContain("import com.acme.server.sseFrame\n");
     expect(routes).not.toContain("import kotlinx.coroutines.flow.Flow\n");
-    // No java.time: Ktor's DefaultJson, which the module's json() installs too.
-    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("internal val sseJson: Json = DefaultJson\n");
+    // No java.time: Ktor's DefaultJson without encoding defaults, which the module's content negotiation installs too.
+    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n}\n");
     expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("import io.ktor.serialization.kotlinx.json.DefaultJson\n");
-    expect(outputs[`${DIR}/SModule.kt`]).toContain("        json(sseJson)\n");
+    expect(outputs[`${DIR}/SModule.kt`]).toContain("        json(serverJson)\n");
   });
 
   it("adds nothing to ServerSupport.kt without streams", async () => {
@@ -199,13 +199,13 @@ fun Route.feedRoutes(service: FeedService) {
     expect(outputs[`${DIR}/ServerSupport.kt`]).not.toContain("SseFrame");
   });
 
-  it("keeps the module's Json when no event carries JSON", async () => {
+  it("installs serverJson even when no event carries JSON", async () => {
     const { outputs } = await sseServer().compile(`
       @service namespace S;
       @route("/raw") op raw(): { @header contentType: "text/event-stream"; @body body: string };
     `);
-    expect(outputs[`${DIR}/SModule.kt`]).toContain("        json()\n");
-    expect(outputs[`${DIR}/ServerSupport.kt`]).not.toContain("sseJson");
+    expect(outputs[`${DIR}/SModule.kt`]).toContain("        json(serverJson)\n");
+    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain("internal val serverJson: Json = Json(DefaultJson) {");
   });
 
   it("writes Flow qualified where a model is named Flow", async () => {
@@ -276,5 +276,25 @@ fun Route.feedRoutes(service: FeedService) {
     const routes = outputs[`${DIR}/FeedRoutes.kt`];
     expect(routes).toContain("import io.ktor.server.auth.authenticate\n");
     expect(routes.slice(routes.indexOf("fun Route.feedRoutes"))).toBe(expected);
+  });
+
+  it("sets the sse-headers on both writers, in order", async () => {
+    const support = (await sseServer({ "sse-headers": { "Cache-Control": "no-cache", "X-Stream": "a\"$b" } }).compile(spec))
+      .outputs[`${DIR}/ServerSupport.kt`];
+    expect(support).toContain(`internal suspend fun <T> ApplicationCall.respondEventStream(events: kotlinx.coroutines.flow.Flow<T>, frame: (T) -> TspgenSseFrame) {
+    response.header("Cache-Control", "no-cache")
+    response.header("X-Stream", "a\\"\\$b")
+    respondBytesWriter(`);
+    expect(support).toContain(`    application.plugin(SSE)
+    response.header("Cache-Control", "no-cache")
+    response.header("X-Stream", "a\\"\\$b")
+    respond(`);
+    expect(support).not.toContain("X-Accel-Buffering");
+  });
+
+  it("sets no headers with an empty sse-headers map", async () => {
+    const support = (await sseServer({ "sse-headers": {} }).compile(spec)).outputs[`${DIR}/ServerSupport.kt`];
+    expect(support).not.toContain("response.header(");
+    expect(support).not.toContain("import io.ktor.server.response.header\n");
   });
 });

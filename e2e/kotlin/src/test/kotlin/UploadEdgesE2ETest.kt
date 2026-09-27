@@ -23,12 +23,14 @@ import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.MultiPartData
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
+import io.ktor.http.contentType
 import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.bearer
@@ -41,6 +43,7 @@ import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }
 
@@ -255,6 +258,22 @@ class UploadEdgesE2ETest {
         assertEquals(HttpStatusCode.PayloadTooLarge, client.put("/extras/small-file") { setBody(ByteArray(65)) }.status)
         val error = assertFailsWith<ApiException> { api.extras.smallFile(HttpFile(null, null, ByteArray(100))) }
         assertEquals(413, error.status)
+        val tooBig = client.post("/extras/small") { setBody(form(ByteArray(100))) }
+        assertEquals(ContentType.Application.ProblemJson, tooBig.contentType()?.withoutParameters())
+        assertTrue("\"status\":413" in tooBig.bodyAsText(), tooBig.bodyAsText())
+    }
+
+    @Test
+    fun bufferedModelChecksAnswer400() = edges { _ ->
+        val response = client.post("/extras/notes") {
+            setBody(MultiPartFormDataContent(formData { append("title", " ") }))
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ContentType.Application.ProblemJson, response.contentType()?.withoutParameters())
+        assertEquals(
+            """{"type":"about:blank","title":"Bad Request","status":400,"detail":"title must not be blank"}""",
+            response.bodyAsText(),
+        )
     }
 
     @Test

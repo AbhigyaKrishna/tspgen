@@ -1,3 +1,4 @@
+import { expectDiagnostics } from "@typespec/compiler/testing";
 import { describe, expect, it } from "vitest";
 import { client, HEADER, sseClient } from "./tester.js";
 
@@ -35,11 +36,11 @@ import com.acme.models.ChannelEvents
 import com.acme.models.SseMessage
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.request
 import io.ktor.client.statement.bodyAsChannel
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.appendPathSegments
@@ -53,8 +54,9 @@ class FeedClient(
     private val baseUrl: String,
 ) {
     fun watch(room: String, trace: String? = null): Flow<ChannelEvents> = flow {
-        val json = http.sseJson
+        val json = http.apiJson
         http.prepareRequest {
+            expectSuccess = false
             method = HttpMethod.Get
             url {
                 takeFrom(baseUrl)
@@ -79,6 +81,7 @@ class FeedClient(
 
     fun raw(): Flow<SseMessage> = flow {
         http.prepareRequest {
+            expectSuccess = false
             method = HttpMethod.Get
             url {
                 takeFrom(baseUrl)
@@ -88,7 +91,7 @@ class FeedClient(
         }.execute { response ->
             if (!response.status.isSuccess()) {
                 throw when (response.status.value) {
-                    else -> ApiException(response.status.value, response.bodyAsText())
+                    else -> ApiException(response.status.value, response.errorMessage())
                 }
             }
             response.bodyAsChannel().readSse { event ->
@@ -123,15 +126,15 @@ class FeedClient(
     expect(support).toContain(
       "internal fun ChannelEvents.sseTerminal(): Boolean = this is ChannelEvents.Done || this is ChannelEvents.Bye\n",
     );
-    expect(support).toContain("private val defaultSseJson: Json = Json { serializersModule = modelSerializersModule }\n");
-    expect(support).toContain(`internal fun sseJsonPlugin(format: Json): ClientPlugin<Unit> =
-    createClientPlugin("TspgenSseJson") { client.attributes.put(sseJsonKey, format) }`);
+    expect(support).toContain("get() = attributes.getOrNull(apiJsonKey) ?: SJson\n");
+    expect(support).toContain(`internal fun apiJsonPlugin(format: Json): ClientPlugin<Unit> =
+    createClientPlugin("TspgenJson") { client.attributes.put(apiJsonKey, format) }`);
     expect(support).toContain("internal suspend fun ByteReadChannel.readSse(onEvent: suspend (TspgenSseEvent) -> Boolean) {");
     // Event payloads decode with the Json given to the defaults function.
     expect(outputs[`${DIR}/SApiClient.kt`]).toContain(`    install(ContentNegotiation) {
         json(format)
     }
-    install(sseJsonPlugin(format))
+    install(apiJsonPlugin(format))
 }`);
     for (const i of ["com.acme.models.ChannelEvents", "com.acme.models.UserConnect", "java.time.Instant", "io.ktor.utils.io.readAvailable"]) {
       expect(support).toContain(`import ${i}\n`);
@@ -149,11 +152,21 @@ class FeedClient(
             afterCr = byte == CR`);
     expect(support).toContain(`                if (hasData && !onEvent(TspgenSseEvent(event, data.toString(), id))) return`);
     expect(support).toContain(`                text = text.removePrefix("\\uFEFF")`);
-    expect(support).toContain("internal const val MAX_SSE_SIZE: Int = 1 shl 20\n");
+    expect(support).toContain("internal const val MAX_SSE_SIZE: Int = 1048576\n");
     expect(support).toContain(`check(lineSize + size <= MAX_SSE_SIZE) { "Server-sent event line longer than $MAX_SSE_SIZE bytes" }`);
     expect(support).not.toContain("ByteArrayOutputStream");
     expect(support).toContain(`            if (text.startsWith(":")) continue`);
     expect(support).toContain(`"id" -> if ('\\u0000' !in value) id = value`);
+  });
+
+  it("renders sse-max-size as MAX_SSE_SIZE", async () => {
+    const support = (await sseClient({ "sse-max-size": 4096 }).compile(spec)).outputs[`${DIR}/ClientSupport.kt`];
+    expect(support).toContain("internal const val MAX_SSE_SIZE: Int = 4096\n");
+  });
+
+  it("rejects an sse-max-size below 1024", async () => {
+    const [, diagnostics] = await sseClient({ "sse-max-size": 100 }).compileAndDiagnose(spec);
+    expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-core/invalid-target-options" });
   });
 
   it("adds no stream support without streaming operations", async () => {
@@ -163,7 +176,7 @@ class FeedClient(
     `);
     expect(outputs[`${DIR}/ClientSupport.kt`]).not.toContain("readSse");
     expect(outputs[`${DIR}/SClient.kt`]).not.toContain("prepareRequest");
-    expect(outputs[`${DIR}/SApiClient.kt`]).not.toContain("sseJsonPlugin");
+    expect(outputs[`${DIR}/SApiClient.kt`]).not.toContain("apiJsonPlugin");
   });
 
   it("writes Flow qualified where a model is named Flow, and keeps SseEvent / SseFrame models apart", async () => {

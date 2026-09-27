@@ -7,13 +7,36 @@ internal inline fun <reified T> encodeParam(value: T): String =
         else -> element.toString()
     }
 
-internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))<% if (it.multipart) { -%>
+internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))
 
+/**
+ * The message of an error response without a declared body: the `detail` of an `application/problem+json` body (what
+ * the generated Ktor server sends), else the body text.
+ */
+internal suspend fun HttpResponse.errorMessage(): String {
+    val text = bodyAsText()
+    if (contentType()?.match(ContentType.Application.ProblemJson) != true) return text
+    return runCatching { Json.parseToJsonElement(text).jsonObject["detail"]?.jsonPrimitive?.contentOrNull }.getOrNull() ?: text
+}
+<% if (it.apiJson) { -%>
 
-/** JSON of multipart JSON parts: the models' serializers, as the API client's JSON uses. */
-internal val partJson: Json = <%~ it.partJson %>
+private val apiJsonKey = AttributeKey<Json>("tspgen.json")
 
-internal inline fun <reified T> encodeJson(value: T): String = partJson.encodeToJsonElement(value).toString()
+/**
+ * Installed by the API client's defaults function: remembers its Json, so multipart JSON parts and event payloads use
+ * the configuration bodies use.
+ */
+internal fun apiJsonPlugin(format: Json): ClientPlugin<Unit> =
+    createClientPlugin("TspgenJson") { client.attributes.put(apiJsonKey, format) }
+
+/** The Json given to the API client's defaults function, else the generated default. */
+internal val HttpClient.apiJson: Json
+    get() = attributes.getOrNull(apiJsonKey) ?: <%= it.defaultJson %>
+<% } -%>
+<% if (it.multipart) { -%>
+
+/** JSON text of a multipart JSON part, encoded with the API client's Json ([apiJson]). */
+internal inline fun <reified T> HttpClient.encodeJson(value: T): String = apiJson.encodeToJsonElement(value).toString()
 
 /** Headers of a JSON multipart part: the part's declared JSON content type, else `application/json`. */
 internal fun jsonPartHeaders(contentType: String = "application/json"): Headers = headersOf(HttpHeaders.ContentType, contentType)
@@ -37,8 +60,8 @@ internal fun fileHeaders(file: HttpFile, part: String, defaultType: String): Hea
 /** One server-sent event: its `event:` (null when absent: the default "message" type), `data:` lines joined with "\n" and the last `id:`. */
 internal class TspgenSseEvent(val event: String?, val data: String, val id: String?)
 
-/** Longest line and longest event data a stream may send (1 MiB); longer ones fail the stream. */
-internal const val MAX_SSE_SIZE: Int = 1 shl 20
+/** Longest line and longest event data a stream may send (`sse-max-size`); longer ones fail the stream. */
+internal const val MAX_SSE_SIZE: Int = <%= it.sse.maxSize %>
 
 /**
  * Reads a `text/event-stream` body, calling [onEvent] for each event until it returns false or the body ends. Lines end
@@ -116,22 +139,60 @@ internal suspend fun ByteReadChannel.readSse(onEvent: suspend (TspgenSseEvent) -
 
 private const val CR = '\r'.code
 private const val LF = '\n'.code
-<% if (it.sse.json) { -%>
-
-private val sseJsonKey = AttributeKey<Json>("tspgen.sseJson")
-
-/** Installed by the API client's defaults function: remembers its Json, so events decode like REST responses. */
-internal fun sseJsonPlugin(format: Json): ClientPlugin<Unit> =
-    createClientPlugin("TspgenSseJson") { client.attributes.put(sseJsonKey, format) }
-
-/** JSON of event payloads: the format given to the API client's defaults function, else its default. */
-internal val HttpClient.sseJson: Json
-    get() = attributes.getOrNull(sseJsonKey) ?: defaultSseJson
-
-private val defaultSseJson: Json = <%~ it.partJson %>
-<% } -%>
 <% for (const f of it.sse.functions) { -%>
 
 <%~ f %>
 <% } -%>
+<% } -%>
+<% if (it.auth) { -%>
+
+<% if (it.auth.basic) { -%>
+/** Username and password of an HTTP Basic auth scheme, sent as `Authorization: Basic …` (UTF-8, base64). */
+<%= it.h.visibility(it) %>data class BasicCredentials(val username: String, val password: String)
+
+<% } -%>
+/** Where an auth scheme's credential is sent. */
+internal enum class AuthPlacement { BEARER, <% if (it.auth.basic) { %>BASIC, <% } %>HEADER, QUERY, COOKIE }
+
+/**
+ * One scheme of an operation's auth requirement: its id, where and under which name its credential is sent, and
+ * the provider of the credential.
+ */
+internal class AuthScheme(val id: String, val placement: AuthPlacement, val name: String, val provider: (suspend () -> Any?)?)
+
+/**
+ * The credentials of the first alternative whose providers all return one; empty when none does (the server
+ * decides). Each provider is called at most once; null and "" count as no credential.
+ */
+internal suspend fun resolveAuth(alternatives: List<List<AuthScheme>>): List<Pair<AuthScheme, Any>> {
+    val values = HashMap<String, Any?>()
+    for (alternative in alternatives) {
+        val found = ArrayList<Pair<AuthScheme, Any>>()
+        for (scheme in alternative) {
+            val value = if (scheme.id in values) values[scheme.id] else scheme.provider?.invoke().also { values[scheme.id] = it }
+            if (value == null || value == "") break
+            found += scheme to value
+        }
+        if (found.size == alternative.size) return found
+    }
+    return emptyList()
+}
+
+/** Sends resolved credentials: they replace a header or query parameter of the same name; cookies are added. */
+internal fun HttpRequestBuilder.applyAuth(credentials: List<Pair<AuthScheme, Any>>) {
+    for ((scheme, value) in credentials) {
+        when (scheme.placement) {
+            AuthPlacement.BEARER -> headers[HttpHeaders.Authorization] = "Bearer $value"
+<% if (it.auth.basic) { -%>
+            AuthPlacement.BASIC -> {
+                val basic = value as BasicCredentials
+                headers[HttpHeaders.Authorization] = "Basic " + "${basic.username}:${basic.password}".encodeBase64()
+            }
+<% } -%>
+            AuthPlacement.HEADER -> headers[scheme.name] = value.toString()
+            AuthPlacement.QUERY -> url.parameters[scheme.name] = value.toString()
+            AuthPlacement.COOKIE -> cookie(scheme.name, value.toString())
+        }
+    }
+}
 <% } -%>

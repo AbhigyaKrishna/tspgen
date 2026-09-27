@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { ktorServerHelpers } from "./helpers.js";
 import { ktorServerFeatures, ktorServerMovedOptions, ktorServerOptionsSchema, type KtorServerOptions } from "./options.js";
 import { planServerFiles } from "./plan.js";
+import { checkRuntime, serverRuntime } from "./runtime.js";
 
 const TEMPLATES = resolve(import.meta.dirname, "../templates");
 
@@ -16,11 +17,21 @@ export const ktorServerTarget: Target<KotlinIR> = {
   optionsSchema: ktorServerOptionsSchema,
   features: ktorServerFeatures,
   movedOptions: ktorServerMovedOptions,
-  files: (ir, ctx) =>
-    planServerFiles(ir, ctx.options as unknown as KtorServerOptions, ctx.registry, ctx.program, (template) => {
-      const path = ctx.resolveTemplate?.(template);
-      return path !== undefined && resolve(path) !== resolve(TEMPLATES, `${template}.eta`);
-    }),
+  files: (ir, ctx) => {
+    const options = ctx.options as unknown as KtorServerOptions;
+    if (!checkRuntime(ctx.program, options, ctx.features)) return [];
+    return planServerFiles(
+      ir,
+      options,
+      ctx.registry,
+      ctx.program,
+      (template) => {
+        const path = ctx.resolveTemplate?.(template);
+        return path !== undefined && resolve(path) !== resolve(TEMPLATES, `${template}.eta`);
+      },
+      serverRuntime(options),
+    );
+  },
 };
 
 export default ktorServerTarget;
@@ -38,3 +49,4 @@ export { commonPrefix, routeTree, type RouteFunction, type RouteItem, type Route
 export { buildUnits, type ServerUnit } from "./units.js";
 export type { KtorServerMeta, ServerOpExtras } from "./plan.js";
 export { withContext, type ContextParam, type ServerOperation } from "./context.js";
+export { checkRuntime, serverJsonLines, serverRuntime, type ServerRuntime } from "./runtime.js";

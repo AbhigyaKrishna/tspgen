@@ -1,11 +1,4 @@
-import {
-  kotlinString as str,
-  type KotlinIR,
-  type KtEvent,
-  type KtEvents,
-  type KtOperation,
-  type KtStream,
-} from "@abhigyakrishna/tspgen-kotlin";
+import { kotlinString as str, type KtEvent, type KtEvents, type KtOperation, type KtStream } from "@abhigyakrishna/tspgen-kotlin";
 import { decode } from "./helpers.js";
 
 /** The stream of a server-sent event operation, if it is one. */
@@ -83,28 +76,18 @@ export function streamsOf(ops: KtOperation[]): { events: KtEvents[]; untyped: bo
   return { events: [...events.values()], untyped, any };
 }
 
-export function supportImports(ir: KotlinIR, streams: ReturnType<typeof streamsOf>): string[] {
+export function supportImports(streams: ReturnType<typeof streamsOf>): string[] {
   if (!streams.any) return [];
-  const json = streams.events.some(usesJson);
   return [
     "io.ktor.utils.io.ByteReadChannel",
     "io.ktor.utils.io.readAvailable",
     ...streams.events.flatMap((d) => [d.fqn, ...d.events.flatMap((e) => (e.data ? e.data.imports : []))]),
-    ...(json
-      ? [
-          "io.ktor.client.HttpClient",
-          "io.ktor.client.plugins.api.ClientPlugin",
-          "io.ktor.client.plugins.api.createClientPlugin",
-          "io.ktor.util.AttributeKey",
-          ...(ir.serializersModule ? [ir.serializersModule] : []),
-        ]
-      : []),
   ];
 }
 
 /** Statements of a streaming client method before the request: the Json of JSON payloads. */
 export function preludeLines(stream: KtStream): string[] {
-  return stream.events && usesJson(stream.events) ? ["val json = http.sseJson"] : [];
+  return stream.events && usesJson(stream.events) ? ["val json = http.apiJson"] : [];
 }
 
 /** Statements of a streaming client method after the response arrived: decode and emit each event. */

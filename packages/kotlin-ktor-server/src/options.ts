@@ -11,6 +11,18 @@ export const ktorServerFeatures = defineFeatures({
     default: false,
     description: "Nest each route function under its operations' common path prefix (dsl style).",
   },
+  "status-pages": {
+    default: true,
+    description: "The module installs StatusPages with <svc>Errors(); false: call <svc>Errors() inside your own install(StatusPages).",
+  },
+  "ignore-unknown-keys": {
+    default: false,
+    description: "Accept request JSON with keys the models don't declare (false: 400).",
+  },
+  "encode-defaults": {
+    default: false,
+    description: "Write properties equal to their default (unset optionals as null) in responses and events.",
+  },
 });
 
 export type KtorServerFeatures = Record<keyof typeof ktorServerFeatures.defs, boolean>;
@@ -33,6 +45,8 @@ export interface KtorServerOptions {
   "auth-providers": Record<string, string>;
   sse: "text-writer" | "plugin";
   package?: string;
+  "error-body": "problem" | "none";
+  "sse-headers": Record<string, string>;
   /** On/off gates; every key is filled from its default. */
   features: KtorServerFeatures;
 }
@@ -90,5 +104,19 @@ export const ktorServerOptionsSchema = {
         'How server-sent event streams are written: text-writer (respondBytesWriter, no extra dependency) or plugin (the ktor-server-sse plugin, installed by the module); per operation via @meta("kotlin:ktor-server", #{ sse }).',
     },
     package: { type: "string", description: 'Server package (default "<package>.server").' },
+    "error-body": {
+      type: "string",
+      enum: ["problem", "none"],
+      default: "problem",
+      description:
+        "Body of generated error responses without a declared body (unmapped ApiException, validation failures, 413): problem (RFC 9457 application/problem+json) or none.",
+    },
+    "sse-headers": {
+      type: "object",
+      propertyNames: { pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$" },
+      additionalProperties: { type: "string", pattern: "^[^\\r\\n]*$" },
+      default: { "Cache-Control": "no-store", "X-Accel-Buffering": "no" },
+      description: "Headers set on every event-stream response (both sse modes); a configured map replaces the default, {} sets none.",
+    },
   },
 };

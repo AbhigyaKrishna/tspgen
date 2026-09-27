@@ -48,13 +48,15 @@ import io.ktor.server.routing.put
 fun Route.uploadsRoutes(service: UploadsService) {
     post("/uploads") {
         val body = call.receiveParts(52428800L, setOf("name", "count", "meta"), setOf("avatar", "photos"), multiParts = setOf("photos")).let { parts ->
-            Upload(
-                name = parts.text("name").required("name"),
-                count = parts.text("count")?.convertParam("count") { it.toInt() },
-                meta = parts.text("meta").required("meta").convertParam("meta") { partJson.decodeFromString<Meta>(it) },
-                avatar = parts.file("avatar").required("avatar"),
-                photos = parts.files("photos").takeIf { it.isNotEmpty() },
-            )
+            validRequest {
+                Upload(
+                    name = parts.text("name").required("name"),
+                    count = parts.text("count")?.convertParam("count") { it.toInt() },
+                    meta = parts.text("meta").required("meta").convertParam("meta") { serverJson.decodeFromString<Meta>(it) },
+                    avatar = parts.file("avatar").required("avatar"),
+                    photos = parts.files("photos").takeIf { it.isNotEmpty() },
+                )
+            }
         }
         service.upload(body)
         call.respond(HttpStatusCode.NoContent)
@@ -75,7 +77,7 @@ fun Route.uploadsRoutes(service: UploadsService) {
     expect(support).toContain("if (size > limit) throw PayloadTooLargeException(limit)");
     expect(support).toContain("internal suspend fun ApplicationCall.receiveFile(limit: Long): HttpFile {");
     expect(support).toContain("is PartData.FormItem -> throw BadRequestException(\"File part '$name' must be sent with a filename\")");
-    expect(support).toContain("internal val partJson: Json = Json\n");
+    expect(support).toContain("internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n}\n");
     expect(support).not.toContain("partChannel");
   });
 
@@ -128,7 +130,7 @@ fun Route.uploadsRoutes(service: UploadsService) {
             when (part.name) {
                 "name" -> emit(UploadPart.Name(part.partText()))
                 "count" -> emit(UploadPart.Count(part.partText().convertParam("count") { it.toInt() }))
-                "meta" -> emit(UploadPart.Meta(part.partText().convertParam("meta") { partJson.decodeFromString<Meta>(it) }))
+                "meta" -> emit(UploadPart.Meta(part.partText().convertParam("meta") { serverJson.decodeFromString<Meta>(it) }))
                 "avatar" -> emit(UploadPart.Avatar(part.partFileName(), part.contentType?.toString(), part.partChannel()))
                 "photos" -> emit(UploadPart.Photos(part.partFileName(), part.contentType?.toString(), part.partChannel()))
             }
@@ -325,7 +327,7 @@ interface UploadsService {
     `);
     expect(outputs["models/com/acme/models/Form.kt"]).toContain("val meta: Meta,");
     expect(outputs[`${DIR}/SRoutes.kt`]).toContain(
-      'meta = parts.text("meta").required("meta").convertParam("meta") { partJson.decodeFromString<Meta>(it) },',
+      'meta = parts.text("meta").required("meta").convertParam("meta") { serverJson.decodeFromString<Meta>(it) },',
     );
   });
 
@@ -337,9 +339,11 @@ interface UploadsService {
     `);
     const support = outputs[`${DIR}/ServerSupport.kt`];
     expect(support).toContain("import com.acme.models.modelSerializersModule\n");
-    expect(support).toContain("internal val partJson: Json = Json { serializersModule = modelSerializersModule }\n");
+    expect(support).toContain(
+      "internal val serverJson: Json = Json(DefaultJson) {\n    encodeDefaults = false\n    serializersModule = modelSerializersModule\n}\n",
+    );
     expect(outputs[`${DIR}/SRoutes.kt`]).toContain(
-      'times = parts.text("times").required("times").convertParam("times") { partJson.decodeFromString<List<Instant>>(it) },',
+      'times = parts.text("times").required("times").convertParam("times") { serverJson.decodeFromString<List<Instant>>(it) },',
     );
   });
 
@@ -362,5 +366,28 @@ interface UploadsService {
     expect(support).toContain("-> Unit): kotlinx.coroutines.flow.Flow<T> {");
     expect(support).not.toContain("import kotlinx.coroutines.flow.Flow\n");
     expect(support).toContain("import kotlinx.coroutines.flow.FlowCollector\n");
+  });
+
+  it("turns a buffered multipart model's failed checks into 400 with validRequest", async () => {
+    const { outputs } = await server().compile(`using TspGen;
+      @service namespace S;
+      model Form { title: HttpPart<string>; }
+      @post op send(@header contentType: "multipart/form-data", @multipartBody body: Form): void;
+      @@meta(S.Form.title, "kotlin", #{ notBlank: true });
+    `);
+    expect(outputs["models/com/acme/models/Form.kt"]).toContain(`require(title.isNotBlank()) { "title must not be blank" }`);
+    expect(outputs[`${DIR}/SRoutes.kt`]).toContain(`        val body = call.receiveParts(52428800L, setOf("title")).let { parts ->
+            validRequest {
+                Form(
+                    title = parts.text("title").required("title"),
+                )
+            }
+        }`);
+    expect(outputs[`${DIR}/ServerSupport.kt`]).toContain(`internal inline fun <T> validRequest(build: () -> T): T =
+    try {
+        build()
+    } catch (e: IllegalArgumentException) {
+        throw BadRequestException(e.message ?: "Invalid request", e)
+    }`);
   });
 });

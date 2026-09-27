@@ -1,14 +1,23 @@
 import { metaStrings, type FileSpec } from "@abhigyakrishna/tspgen-core";
 import type { Program } from "@typespec/compiler";
 import { camel, codecImports, organizeImports, type KotlinIR, type KtGroup } from "@abhigyakrishna/tspgen-kotlin";
+import { serviceAuth, type ServiceAuth } from "./auth.js";
 import type { KtorClientOptions } from "./options.js";
+import { clientJsonExpr, DEFAULT_CLIENT_RUNTIME, type ClientRuntime } from "./runtime.js";
 import { eventFunctions, streamOf, streamsOf, supportImports, usesJson } from "./sse.js";
 
 const SUPPORT_IMPORTS = [
+  "io.ktor.client.statement.HttpResponse",
+  "io.ktor.client.statement.bodyAsText",
+  "io.ktor.http.ContentType",
+  "io.ktor.http.contentType",
   "kotlinx.serialization.json.Json",
   "kotlinx.serialization.json.JsonPrimitive",
+  "kotlinx.serialization.json.contentOrNull",
   "kotlinx.serialization.json.decodeFromJsonElement",
   "kotlinx.serialization.json.encodeToJsonElement",
+  "kotlinx.serialization.json.jsonObject",
+  "kotlinx.serialization.json.jsonPrimitive",
 ];
 
 const API_CLIENT_IMPORTS = [
@@ -24,8 +33,8 @@ function groupImports(ir: KotlinIR, group: KtGroup): string[] {
   return [
     "io.ktor.client.HttpClient",
     "io.ktor.client.call.body",
+    "io.ktor.client.plugins.expectSuccess",
     "io.ktor.client.request.request",
-    "io.ktor.client.statement.bodyAsText",
     "io.ktor.http.HttpMethod",
     "io.ktor.http.appendPathSegments",
     "io.ktor.http.takeFrom",
@@ -61,7 +70,12 @@ function groupImports(ir: KotlinIR, group: KtGroup): string[] {
   ];
 }
 
-export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, program: Program): FileSpec[] {
+export function planClientFiles(
+  ir: KotlinIR,
+  options: KtorClientOptions,
+  program: Program,
+  runtime: ClientRuntime = DEFAULT_CLIENT_RUNTIME,
+): FileSpec[] {
   const services = ir.services.filter((s) => s.groups.length > 0);
   if (services.length === 0) return [];
   const pkg = options.package ?? `${ir.basePackage}.client`;
@@ -72,8 +86,12 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, progra
   const multipart = multipartBodies.length > 0;
   // File helpers (and HttpFile) only when some multipart body has a file part: HttpFile exists only then.
   const fileParts = multipartBodies.some((b) => (b.parts ?? []).some((p) => p.kind === "file"));
-  const serializersModule = ir.serializersModule ? ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1) : undefined;
   const streams = streamsOf(services.flatMap((s) => s.groups.flatMap((g) => g.operations)));
+  // Multipart JSON parts and JSON events read the defaults' Json from the client (apiJson).
+  const apiJson = multipart || streams.events.some(usesJson);
+  const auths = new Map<string, ServiceAuth | undefined>(services.map((s) => [s.id, runtime.auth ? serviceAuth(program, s) : undefined]));
+  const used = [...auths.values()].filter((a): a is ServiceAuth => a !== undefined);
+  const basic = used.some((a) => a.basic);
   const files: FileSpec[] = [
     {
       path: `${dir}/ClientSupport.kt`,
@@ -84,39 +102,62 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, progra
           [
             ...SUPPORT_IMPORTS,
             ...(multipart ? ["io.ktor.http.Headers", "io.ktor.http.HttpHeaders", "io.ktor.http.headersOf"] : []),
-            ...(multipart && serializersModule ? [ir.serializersModule!] : []),
             ...(fileParts ? [`${ir.modelsPackage}.HttpFile`, "io.ktor.http.ContentDisposition", "io.ktor.http.quote"] : []),
-            ...supportImports(ir, streams),
+            ...supportImports(streams),
+            ...(apiJson
+              ? [
+                  "io.ktor.client.HttpClient",
+                  "io.ktor.client.plugins.api.ClientPlugin",
+                  "io.ktor.client.plugins.api.createClientPlugin",
+                  "io.ktor.util.AttributeKey",
+                ]
+              : []),
+            ...(used.length > 0 ? ["io.ktor.client.request.HttpRequestBuilder", "io.ktor.client.request.cookie", "io.ktor.http.HttpHeaders"] : []),
+            ...(basic ? ["io.ktor.util.encodeBase64"] : []),
           ],
           pkg,
         ),
         body: "ktor-client/support",
         multipart,
         fileParts,
-        partJson: serializersModule ? `Json { serializersModule = ${serializersModule} }` : "Json",
+        apiJson,
+        defaultJson: `${services[0].name}Json`,
         ...(streams.any
           ? {
               sse: {
                 json: streams.events.some(usesJson),
                 functions: streams.events.flatMap(eventFunctions),
+                maxSize: runtime.sseMaxSize,
               },
             }
           : {}),
+        ...(used.length > 0 ? { auth: { basic } } : {}),
       },
     },
   ];
   for (const service of services) {
+    const auth = auths.get(service.id);
     for (const group of service.groups) {
       const extras = Object.fromEntries(
         group.operations.map((op) => [
           op.id,
-          { annotations: metaStrings(program, op.meta["kotlin:ktor-client"] ?? {}, "annotations", op.id) },
+          {
+            annotations: metaStrings(program, op.meta["kotlin:ktor-client"] ?? {}, "annotations", op.id),
+            ...(auth ? { auth: auth.op(op, `${group.name}Client`) } : {}),
+          },
         ]),
       );
       files.push({
         path: `${dir}/${group.name}Client.kt`,
         template: "kotlin/file",
-        data: { package: pkg, imports: organizeImports(groupImports(ir, group), pkg), body: "ktor-client/client", group, extras },
+        data: {
+          package: pkg,
+          imports: organizeImports(groupImports(ir, group), pkg),
+          body: "ktor-client/client",
+          group,
+          extras,
+          auth: auth?.className,
+        },
       });
     }
     files.push({
@@ -126,9 +167,10 @@ export function planClientFiles(ir: KotlinIR, options: KtorClientOptions, progra
         package: pkg,
         imports: organizeImports([...API_CLIENT_IMPORTS, ...(ir.serializersModule ? [ir.serializersModule] : [])], pkg),
         body: "ktor-client/api-client",
-        json: ir.serializersModule ? `Json { serializersModule = ${ir.serializersModule.slice(ir.serializersModule.lastIndexOf(".") + 1)} }` : "Json",
-        /** Event payloads decode with the defaults' format (see sseJsonPlugin in ClientSupport.kt). */
-        sseJson: streams.events.some(usesJson),
+        json: clientJsonExpr(ir, runtime),
+        jsonName: `${service.name}Json`,
+        apiJson,
+        auth,
         service,
         clientName: `${service.name}ApiClient`,
         defaultsFn: `${camel(service.name)}Defaults`,

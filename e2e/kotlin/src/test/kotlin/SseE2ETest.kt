@@ -3,6 +3,7 @@ package com.example.petstore
 import com.example.petstore.api.ApiErrorException
 import com.example.petstore.api.NotFoundException
 import com.example.petstore.client.PetStoreApiClient
+import com.example.petstore.client.PetStoreJson
 import com.example.petstore.client.petStoreDefaults
 import com.example.petstore.models.ApiError
 import com.example.petstore.models.FeedFilter
@@ -11,7 +12,6 @@ import com.example.petstore.models.Pet
 import com.example.petstore.models.PetEvents
 import com.example.petstore.models.SseMessage
 import com.example.petstore.models.Species
-import com.example.petstore.models.modelSerializersModule
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import com.example.petstore.server.FeedService
@@ -148,6 +148,19 @@ class SseE2ETest {
     @Test
     fun typedEventsThroughTheSsePlugin() = feedApp { api ->
         assertEquals(received, api.feed.watchPlugin(FeedFilter()).toList())
+    }
+
+    @Test
+    fun streamsSendTheDefaultHeaders() = feedApp { _ ->
+        val writer = client.get("/feed")
+        val plugin = client.post("/feed/plugin") {
+            contentType(ContentType.Application.Json)
+            setBody("{}")
+        }
+        for (response in listOf(writer, plugin)) {
+            assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
+            assertEquals("no", response.headers["X-Accel-Buffering"])
+        }
     }
 
     @Test
@@ -304,13 +317,16 @@ class SseE2ETest {
                 }
             }
         }
-        val lenient = Json { ignoreUnknownKeys = true; serializersModule = modelSerializersModule }
-        val api = PetStoreApiClient(createClient { petStoreDefaults(lenient) }, "http://localhost")
+        // The default client ignores the undeclared field.
+        val api = PetStoreApiClient(createClient { petStoreDefaults() }, "http://localhost")
         assertEquals(
             listOf(PetEvents.Added(Pet(id = 1, name = "Rex", species = Species.DOG)), PetEvents.Done),
             api.feed.watch(fail = 1).toList(),
         )
-        val strict = PetStoreApiClient(createClient { petStoreDefaults() }, "http://localhost")
+        val strict = PetStoreApiClient(
+            createClient { petStoreDefaults(Json(PetStoreJson) { ignoreUnknownKeys = false }) },
+            "http://localhost",
+        )
         assertFailsWith<SerializationException> { strict.feed.watch(fail = 1).toList() }
     }
 

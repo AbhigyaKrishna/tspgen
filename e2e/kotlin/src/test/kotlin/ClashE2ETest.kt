@@ -42,9 +42,9 @@ class ClashE2ETest {
         assertEquals(expected, api.meter.pluginReadings().toList())
         assertEquals(reading, api.meter.last())
 
-        // Ktor's DefaultJson (encodeDefaults, explicit nulls) for REST and events alike.
+        // serverJson (encodeDefaults = false) for REST and events alike: unset optionals (unit's default, null note) are omitted.
         val rest = client.get("/meter/last").bodyAsText()
-        assertEquals("""{"rate":60,"unit":"bpm","note":null}""", rest)
+        assertEquals("""{"rate":60}""", rest)
         for (path in listOf("/meter/stream", "/meter/plugin")) {
             val text = client.get(path).bodyAsText().replace("\r\n", "\n")
             assertTrue(text.startsWith("event: flow\ndata: $rest\n"), text)

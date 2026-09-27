@@ -200,7 +200,7 @@ fun Route.petsRoutes(service: PetsService) {
     const module = outputs[`${DIR}/PetStoreModule.kt`];
     expect(module).toContain("\ninternal fun Application.petStoreModule(");
     expect(module).toContain("\ninternal fun Route.petStoreApiRoutes(");
-    expect(module).toMatch(/\ninternal fun StatusPagesConfig\.\w+\(\) \{/);
+    expect(outputs[`${DIR}/PetStoreErrors.kt`]).toMatch(/\ninternal fun StatusPagesConfig\.\w+\(\) \{/);
     const resources = await server({ "routing-style": "resources" }, { visibility: "internal" }).compile(petSpec);
     expect(resources.outputs[`${DIR}/PetsRoutes.kt`]).toMatch(/\ninternal object \w+ \{/);
     expect(resources.outputs[`${DIR}/PetsRoutes.kt`]).toContain("\ninternal fun Route.petsRoutes(service: PetsService) {");
@@ -210,5 +210,43 @@ fun Route.petsRoutes(service: PetsService) {
       @route("/u") @post op upload(@header contentType: "multipart/form-data", @multipartBody body: Upload): void;
     `);
     expect(Object.values(streaming.outputs).some((c) => /\ninternal sealed class \w+Part \{/.test(c))).toBe(true);
+  });
+
+  it("validates error-body and sse-headers", async () => {
+    for (const options of [
+      { "error-body": "html" },
+      { "sse-headers": { "X-A": 1 } },
+      { "sse-headers": { "Bad Name": "x" } },
+      { "sse-headers": { "X-A": "a\nb" } },
+    ]) {
+      const [, diagnostics] = await server(options).compileAndDiagnose(petSpec);
+      expectDiagnostics(diagnostics, { code: "@abhigyakrishna/tspgen-core/invalid-target-options" });
+    }
+  });
+
+  it("rejects sse-headers the event-stream writer owns and emits no server code", async () => {
+    const [{ outputs }, diagnostics] = await server({ "sse-headers": { "content-type": "text/plain" } }).compileAndDiagnose(petSpec);
+    expectDiagnostics(diagnostics, {
+      code: "@abhigyakrishna/tspgen-core/invalid-target-options",
+      message: /sse-headers\.content-type is set by the event-stream writer/,
+    });
+    expect(Object.keys(outputs).filter((p) => p.startsWith("server/"))).toEqual([]);
+  });
+
+  it("warns that status-pages needs the module only when it is set explicitly", async () => {
+    const [, explicit] = await server({ features: { module: false, "status-pages": true } }).compileAndDiagnose(petSpec);
+    expectDiagnostics(explicit, {
+      code: "@abhigyakrishna/tspgen-core/unsupported-feature",
+      message: /`features\.status-pages` has no effect with features\.module: false/,
+    });
+    const [, defaulted] = await server({ features: { module: false } }).compileAndDiagnose(petSpec);
+    expect(defaulted.filter((d) => d.code.endsWith("unsupported-feature"))).toEqual([]);
+  });
+
+  it("accepts the runtime features", async () => {
+    const [, diagnostics] = await server({
+      features: { "status-pages": false, "ignore-unknown-keys": true, "encode-defaults": true },
+    }).compileAndDiagnose(petSpec);
+    expect(diagnostics).toEqual([]);
   });
 });

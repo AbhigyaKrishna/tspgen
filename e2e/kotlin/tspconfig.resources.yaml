@@ -9,3 +9,6 @@ options:
           routing-style: resources
           auth-providers:
             PartnerKey: com.example.petstore.PARTNER_PROVIDER
+          sse-headers:
+            Cache-Control: no-cache
+            X-Stream: secure

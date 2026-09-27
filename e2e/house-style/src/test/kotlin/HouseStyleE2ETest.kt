@@ -8,6 +8,7 @@ import com.example.graph.GraphService
 import com.example.graph.Node
 import com.example.graph.NodeKind
 import com.example.models.ProbeResponse
+import com.example.server.shopErrors
 import io.ktor.client.call.body
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.bearerAuth
@@ -16,6 +17,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -24,7 +26,6 @@ import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.UserIdPrincipal
 import io.ktor.server.auth.bearer
-import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
@@ -43,10 +44,9 @@ class HouseStyleE2ETest {
                 bearer(JWT_AUTH) { authenticate { credential -> UserIdPrincipal(credential.token) } }
             }
             install(StatusPages) {
+                shopErrors()
                 exception<NotFoundException> { call, cause -> call.respond(HttpStatusCode.NotFound, cause.message ?: "") }
                 exception<ForbiddenException> { call, _ -> call.respond(HttpStatusCode.Forbidden) }
-                exception<BadRequestException> { call, _ -> call.respond(HttpStatusCode.BadRequest) }
-                exception<IllegalArgumentException> { call, _ -> call.respond(HttpStatusCode.BadRequest) }
             }
             routing {
                 with(GraphModule) {
@@ -121,6 +121,10 @@ class HouseStyleE2ETest {
             setBody("""{"name":" ","kind":"DATABASE"}""")
         }
         assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(
+            """{"type":"about:blank","title":"Bad Request","status":400,"detail":"name must not be blank"}""",
+            response.bodyAsText(),
+        )
     }
 
     @Test

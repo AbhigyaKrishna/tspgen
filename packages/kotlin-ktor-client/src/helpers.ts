@@ -70,7 +70,7 @@ function partLine(body: string, p: KtPart): string {
       case "file":
         return `append(${wire}, ${value}.bytes, fileHeaders(${value}, ${wire}, ${str(p.contentTypes[0] ?? OCTET_STREAM)}))`;
       case "json":
-        return `append(${wire}, encodeJson(${value}), jsonPartHeaders(${jsonContentType(p)}))`;
+        return `append(${wire}, http.encodeJson(${value}), jsonPartHeaders(${jsonContentType(p)}))`;
       case "text":
         return `append(${wire}, ${encode(value, p.type)})`;
     }
@@ -180,7 +180,7 @@ export const ktorClientHelpers = {
   },
 
   errorBranches(op: KtOperation): { match: string; expr: string }[] {
-    const fallback = "ApiException(response.status.value, response.bodyAsText())";
+    const fallback = "ApiException(response.status.value, response.errorMessage())";
     const branches = [...op.errors]
       .sort((a, b) => rank(a.statusCodes) - rank(b.statusCodes))
       .map((e) => ({

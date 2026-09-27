@@ -53,3 +53,4 @@ export {
 } from "./features.js";
 export { declarationScopes } from "./ir/feature-meta.js";
 export { checkMovedOptions, movedOptionSchemas, type MovedOptions } from "./moved-options.js";
+export { authDocs, authHeader, authHeaderConflicts, authKind, authSchemeTarget, type AuthKind } from "./auth.js";

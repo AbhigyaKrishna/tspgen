@@ -2,6 +2,7 @@ package com.example.petstore
 
 import com.example.petstore.api.ApiException
 import com.example.petstore.client.SecureStoreApiClient
+import com.example.petstore.client.SecureStoreAuth
 import com.example.petstore.client.secureStoreDefaults
 import com.example.petstore.models.Greeting
 import com.example.petstore.models.Ticks
@@ -13,8 +14,10 @@ import com.example.petstore.server.secureStoreModule
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.request
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -157,6 +160,27 @@ private suspend fun HttpClient.checkMatrix(mode: String) {
     assertEquals(emptyList(), failures)
 }
 
+/** The generated client call for a MATRIX route. */
+private suspend fun SecureStoreApiClient.call(method: HttpMethod, path: String) {
+    when ("${method.value} $path") {
+        "GET /secure/secret" -> secure.secret()
+        "GET /secure/public" -> secure.open()
+        "GET /secure/optional" -> secure.optional()
+        "GET /secure/either" -> secure.either()
+        "GET /secure/both" -> secure.both()
+        "GET /partner" -> partner.list()
+        "GET /partner/bearer" -> partner.bearer()
+        "GET /lobby" -> lobby.index()
+        "GET /lobby/members" -> lobby.members()
+        "GET /items" -> items.list()
+        "POST /items" -> items.create()
+        "DELETE /items" -> items.purge()
+        "GET /stream/ticks" -> stream.ticks().toList()
+        "GET /stream/ticks-plugin" -> stream.ticksPlugin().toList()
+        else -> error("no client call for ${method.value} $path")
+    }
+}
+
 /** Routes wrapped in authenticate(...) generated from @useAuth; the provider is named after the scheme id. */
 class SecureE2ETest {
     @Test
@@ -220,6 +244,60 @@ class SecureE2ETest {
         assertEquals(401, assertFailsWith<ApiException> { wrong.stream.ticksPlugin().toList() }.status)
     }
 
+    /** The same matrix through the generated SecureStoreAuth: each operation sends its first satisfied alternative. */
+    @Test
+    fun generatedClientAuthMatrix() = testApplication {
+        application {
+            installSecureAuth()
+            secureStoreModule(Greetings(), PartnerGreetings(), LobbyGreetings(), ItemGreetings(), TickStream())
+        }
+        val failures = MATRIX.mapNotNull { (route, creds, expected) ->
+            val (method, path) = route
+            val api = SecureStoreApiClient(
+                createClient { secureStoreDefaults() },
+                "http://localhost",
+                SecureStoreAuth(bearerAuth = { creds.bearer }, partnerKey = { creds.partner }),
+            )
+            val status = try {
+                api.call(method, path)
+                200
+            } catch (e: ApiException) {
+                e.status
+            }
+            if (status == expected) null else "generated auth: ${method.value} $path [$creds] -> $status, expected $expected"
+        }
+        assertEquals(emptyList(), failures)
+    }
+
+    @Test
+    fun providersAreCalledOncePerRequest() = testApplication {
+        application {
+            installSecureAuth()
+            secureStoreModule(Greetings(), PartnerGreetings(), LobbyGreetings(), ItemGreetings(), TickStream())
+        }
+        var bearerCalls = 0
+        var partnerCalls = 0
+        val api = SecureStoreApiClient(
+            createClient { secureStoreDefaults() },
+            "http://localhost",
+            SecureStoreAuth(bearerAuth = { bearerCalls++; null }, partnerKey = { partnerCalls++; "partner" }),
+        )
+        // BearerAuth | PartnerKey: the bearer provider returns nothing, the partner key is sent.
+        assertEquals(Greeting("either"), api.secure.either())
+        assertEquals(1, bearerCalls)
+        assertEquals(1, partnerCalls)
+        // A stream resolves its credentials per collection.
+        val streaming = SecureStoreApiClient(
+            createClient { secureStoreDefaults() },
+            "http://localhost",
+            SecureStoreAuth(bearerAuth = { bearerCalls++; "secret" }),
+        )
+        val ticks = streaming.stream.ticks()
+        assertEquals(listOf<Ticks>(Ticks.Tick(1), Ticks.Tick(2)), ticks.toList())
+        assertEquals(listOf<Ticks>(Ticks.Tick(1), Ticks.Tick(2)), ticks.toList())
+        assertEquals(3, bearerCalls)
+    }
+
     @Test
     fun dslRoutingAuthMatrix() = testApplication {
         application {
@@ -261,6 +339,12 @@ class SecureE2ETest {
             )
         }
         client.checkMatrix("resources")
+        for (path in listOf("/stream/ticks", "/stream/ticks-plugin")) {
+            val response = client.get(path) { bearerAuth("secret") }
+            assertEquals("no-cache", response.headers[HttpHeaders.CacheControl], path)
+            assertEquals("secure", response.headers["X-Stream"], path)
+            assertEquals(null, response.headers["X-Accel-Buffering"], path)
+        }
     }
 
     @Test

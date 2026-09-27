@@ -74,16 +74,11 @@ fun Route.petsRoutes(service: PetsService) {
     expect(outputs[`${DIR}/PetStoreModule.kt`]).toBe(`${HEADER}
 package com.acme.server
 
-import com.acme.api.ApiErrorException
-import com.acme.api.ApiException
-import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.plugins.statuspages.StatusPagesConfig
-import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.routing
 
@@ -92,7 +87,7 @@ import io.ktor.server.routing.routing
  */
 fun Application.petStoreModule(petsService: PetsService) {
     install(ContentNegotiation) {
-        json()
+        json(serverJson)
     }
     install(StatusPages) {
         petStoreErrors()
@@ -104,15 +99,6 @@ fun Application.petStoreModule(petsService: PetsService) {
 
 fun Route.petStoreApiRoutes(petsService: PetsService) {
     petsRoutes(petsService)
-}
-
-fun StatusPagesConfig.petStoreErrors() {
-    exception<ApiErrorException> { call, cause ->
-        call.respond(HttpStatusCode.fromValue(cause.status), cause.error)
-    }
-    exception<ApiException> { call, cause ->
-        call.respond(HttpStatusCode.fromValue(cause.status))
-    }
 }
 `);
   });
@@ -169,8 +155,8 @@ fun StatusPagesConfig.petStoreErrors() {
     expect(clash).toContain(`{ java.time.Duration.parse(it) }`);
     expect(clash).not.toContain("import java.time.Duration");
     const module = (await server().compile(spec)).outputs[`${DIR}/SModule.kt`];
-    expect(module).toContain("json(Json { serializersModule = modelSerializersModule })");
-    expect(module).toContain("import com.acme.models.modelSerializersModule\n");
+    expect(module).toContain("json(serverJson)");
+    expect(module).not.toContain("modelSerializersModule");
     const kotlin = (await server({}, { "date-time": "kotlin.time" }).compile(spec)).outputs[`${DIR}/SRoutes.kt`];
     expect(kotlin).toContain(`{ decodeParam<LocalDate>(it) }`);
     expect(kotlin).toContain(`call.response.header("x-next", encodeParam(result.next))`);

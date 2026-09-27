@@ -155,6 +155,13 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Auth scheme '${"scheme"}' (${"kind"}) is not supported by ${"target"}; alternatives needing it are ignored.`,
       },
     },
+    "auth-header-conflict": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Operation '${"operation"}' sends several credentials (${"schemes"}) as the '${"header"}' header in one auth alternative; ${"target"} sends only the last one.`,
+        parameter: paramMessage`Operation '${"operation"}' has a '${"header"}' header parameter, which auth scheme '${"scheme"}' also sends; ${"target"} sends the credential instead.`,
+      },
+    },
     "module-load-failed": {
       severity: "error",
       messages: {

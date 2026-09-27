@@ -190,9 +190,11 @@ function multipartUpload(
         fields: [{ name: body.name, type: body.type }],
         lines: [
           `val ${body.name} = call.receiveParts(${limit}, ${names("text")}${hasFiles ? `, ${names("file")}` : ""}${multiArg}).let { parts ->`,
-          `    ${model}(`,
-          ...parts.map((p) => `        ${p.name} = ${bufferedPartExpr(p)},`),
-          "    )",
+          "    validRequest {",
+          `        ${model}(`,
+          ...parts.map((p) => `            ${p.name} = ${bufferedPartExpr(p)},`),
+          "        )",
+          "    }",
           "}",
         ],
         routeImports: [...body.type.imports, ...partImports],
@@ -237,7 +239,7 @@ function multipartUpload(
 /** Expression converting the text `expr` of a text/json part to its Kotlin value. */
 function decodeText(expr: string, p: KtPart, safe: boolean): string {
   const wire = str(p.wireName);
-  if (p.kind === "json") return `${expr}${safe ? "?" : ""}.convertParam(${wire}) { partJson.decodeFromString<${p.type.text}>(it) }`;
+  if (p.kind === "json") return `${expr}${safe ? "?" : ""}.convertParam(${wire}) { serverJson.decodeFromString<${p.type.text}>(it) }`;
   return convert(expr, wire, p.type, safe);
 }
 

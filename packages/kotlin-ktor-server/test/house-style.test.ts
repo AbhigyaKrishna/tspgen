@@ -40,6 +40,7 @@ describe("ktor server house-style options", () => {
       "server/com/acme/graph/GraphApi.kt",
       "server/com/acme/graph/GraphRoutes.kt",
       "server/com/acme/server/ServerSupport.kt",
+      "server/com/acme/server/ShopErrors.kt",
     ]);
     expect(outputs["server/com/acme/graph/GraphApi.kt"]).toBe(`${HEADER}
 package com.acme.graph

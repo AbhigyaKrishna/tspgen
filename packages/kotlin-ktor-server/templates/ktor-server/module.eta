@@ -1,17 +1,19 @@
 <% const s = it.h.ktorServer; const params = it.units.map((u) => `${s.paramName(u)}: ${u.serviceName}`).join(", "); const args = it.units.map((u) => s.paramName(u)).join(", "); -%>
 /**
- * Installs content negotiation, error handling and all <%= it.service.name %> routes.
+ * Installs content negotiation<%= it.statusPages ? ", error handling" : "" %> and all <%= it.service.name %> routes.
  */
 <%= it.h.visibility(it) %>fun Application.<%= it.moduleFn %>(<%= params %>) {
     install(ContentNegotiation) {
-        json(<%~ it.json %>)
+        json(serverJson)
     }
 <% for (const p of it.installs) { -%>
     install(<%= it.h.simpleName(p) %>)
 <% } -%>
+<% if (it.statusPages) { -%>
     install(StatusPages) {
         <%= it.errorsFn %>()
     }
+<% } -%>
     routing {
         <%= it.apiRoutesFn %>(<%= args %>)
     }
@@ -23,15 +25,4 @@
     <%= fn %>(<%= s.paramName(u) %>)
 <% } -%>
 <% } -%>
-}
-
-<%= it.h.visibility(it) %>fun StatusPagesConfig.<%= it.errorsFn %>() {
-<% for (const e of it.exceptions) { -%>
-    exception<<%= e %>> { call, cause ->
-        call.respond(HttpStatusCode.fromValue(cause.status), cause.error)
-    }
-<% } -%>
-    exception<ApiException> { call, cause ->
-        call.respond(HttpStatusCode.fromValue(cause.status))
-    }
 }

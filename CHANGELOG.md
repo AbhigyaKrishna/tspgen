@@ -37,6 +37,14 @@ Generated output changes for existing specs are listed in the README under
 - ts-nextjs-client (flat): methods' trailing parameter is `RequestOptions`; `ClientOptions.headers` is
   `HeadersInput`; `client.ts` exports `RequestOptions`, `RequestDefaults`, `NextFetchOptions`, `HeadersInput`
   and uses `Omit` (generated types with those names now clash); operations with `@meta` `next` now send it.
+- **Ktor server JSON**: one `serverJson` (Ktor's `DefaultJson`, `encodeDefaults = false`) for bodies, multipart JSON
+  parts and events; unset optional properties are omitted instead of written as `null`
+  (`features.encode-defaults: true` restores them). With java.time, `DefaultJson`'s settings are no longer dropped.
+- **Ktor server errors**: `<svc>Errors()` moves to `<Service>Errors.kt` (emitted without the module too); unmapped
+  `ApiException`, 400 and 413 answer RFC 9457 `application/problem+json` (`error-body: none` restores empty bodies).
+- **Ktor client JSON**: `<Service>Json` ignores unknown response keys (`features.ignore-unknown-keys: false`
+  restores strict decoding); multipart JSON parts use the `<svc>Defaults(format)` Json.
+- **Ktor client requests** set `expectSuccess = false`; `ApiException.message` is a problem body's `detail`.
 
 ### Added
 
@@ -62,6 +70,12 @@ Generated output changes for existing specs are listed in the README under
 - Kotlin `features.enum-unknown` (UNKNOWN fallback member; declaration override) and `scalar-style`
   (`typealias`, `value-class`; `scalarStyle` meta).
 - Diagnostics `unsupported-encoding` (core), `unsupported-bounds` (TypeScript).
+- Ktor server: `features.status-pages`, `features.ignore-unknown-keys`, `features.encode-defaults`, `error-body`,
+  `sse-headers`; buffered multipart models failing their checks answer 400.
+- Ktor client: generated `<Service>Auth` credential providers from `@useAuth` (bearer, basic, OAuth2/OpenID Connect
+  tokens, API keys in header, query or cookie; `features.auth`), `features.ignore-unknown-keys`,
+  `features.encode-defaults`, `sse-max-size`.
+- Core: `auth-header-conflict` warning for the Ktor client; client auth helpers (`authKind`, …) shared by both clients.
 
 ### For plugin and target authors
 

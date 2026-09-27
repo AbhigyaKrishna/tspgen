@@ -1,21 +1,40 @@
-<% const s = it.service; -%>
+<% const s = it.service; const a = it.auth; -%>
 /**
  * Entry point for the <%= s.name %> API.
  */
-<%= it.h.visibility(it) %>class <%= it.clientName %>(http: HttpClient, baseUrl: String) {
+<%= it.h.visibility(it) %>class <%= it.clientName %>(http: HttpClient, baseUrl: String<% if (a) { %>, auth: <%= a.className %>? = null<% } %>) {
 <% for (const g of s.groups) { -%>
-    val <%= it.h.ktorClient.propertyName(g) %> = <%= g.name %>Client(http, baseUrl)
+    val <%= it.h.ktorClient.propertyName(g) %> = <%= g.name %>Client(http, baseUrl<% if (a) { %>, auth<% } %>)
 <% } -%>
 }
+<% if (a) { -%>
+
+/**
+ * Credentials of the <%= s.name %> API by auth scheme. Each provider is called at most once per request and may return
+ * null (no credential); an operation sends the first of its `@useAuth` alternatives whose providers all return one.
+ */
+<%= it.h.visibility(it) %>class <%= a.className %>(
+<% for (const m of a.members) { -%>
+    /** <%= m.docs %> */
+    val <%= m.property %>: <%~ m.type %> = null,
+<% } -%>
+)
+<% } -%>
+
+/**
+ * JSON of the <%= s.name %> API: the models' serializers and this target's `features.ignore-unknown-keys` /
+ * `features.encode-defaults`. Derive your own with `Json(<%= it.jsonName %>) { … }` and pass it to `<%= it.defaultsFn %>(format)`.
+ */
+<%= it.h.visibility(it) %>val <%= it.jsonName %>: Json = <%~ it.json %>
 
 /**
  * Installs JSON content negotiation compatible with the generated models.
  */
-<%= it.h.visibility(it) %>fun HttpClientConfig<*>.<%= it.defaultsFn %>(format: Json = <%~ it.json %>) {
+<%= it.h.visibility(it) %>fun HttpClientConfig<*>.<%= it.defaultsFn %>(format: Json = <%= it.jsonName %>) {
     install(ContentNegotiation) {
         json(format)
     }
-<% if (it.sseJson) { -%>
-    install(sseJsonPlugin(format))
+<% if (it.apiJson) { -%>
+    install(apiJsonPlugin(format))
 <% } -%>
 }

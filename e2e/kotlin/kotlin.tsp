@@ -76,3 +76,4 @@ namespace PetStore {
 @@meta(PetStore.Extras.small, "kotlin:ktor-server", #{ maxUploadSize: 64 });
 @@meta(PetStore.Extras.smallRaw, "kotlin:ktor-server", #{ multipart: "raw", maxUploadSize: 64 });
 @@meta(PetStore.Extras.smallFile, "kotlin:ktor-server", #{ maxUploadSize: 64 });
+@@meta(PetStore.NoteForm.title, "kotlin", #{ notBlank: true });

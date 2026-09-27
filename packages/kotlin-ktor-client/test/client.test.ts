@@ -32,10 +32,10 @@ import com.acme.models.Kind
 import com.acme.models.Pet
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.appendPathSegments
@@ -49,6 +49,7 @@ class PetsClient(
 ) {
     suspend fun get(petId: Long, trace: String? = null): Pet {
         val response = http.request {
+            expectSuccess = false
             method = HttpMethod.Get
             url {
                 takeFrom(baseUrl)
@@ -72,6 +73,7 @@ class PetsClient(
     expect(outputs[`${DIR}/PetsClient.kt`]).toContain(`
     suspend fun create(pet: Pet): CreateResult {
         val response = http.request {
+            expectSuccess = false
             method = HttpMethod.Post
             url {
                 takeFrom(baseUrl)
@@ -85,7 +87,7 @@ class PetsClient(
             200 -> return CreateResult.Ok(response.body())
         }
         throw when (response.status.value) {
-            else -> ApiException(response.status.value, response.bodyAsText())
+            else -> ApiException(response.status.value, response.errorMessage())
         }
     }
 `);
@@ -136,9 +138,17 @@ class PetStoreApiClient(http: HttpClient, baseUrl: String) {
 }
 
 /**
+ * JSON of the PetStore API: the models' serializers and this target's \`features.ignore-unknown-keys\` /
+ * \`features.encode-defaults\`. Derive your own with \`Json(PetStoreJson) { … }\` and pass it to \`petStoreDefaults(format)\`.
+ */
+val PetStoreJson: Json = Json {
+    ignoreUnknownKeys = true
+}
+
+/**
  * Installs JSON content negotiation compatible with the generated models.
  */
-fun HttpClientConfig<*>.petStoreDefaults(format: Json = Json) {
+fun HttpClientConfig<*>.petStoreDefaults(format: Json = PetStoreJson) {
     install(ContentNegotiation) {
         json(format)
     }
