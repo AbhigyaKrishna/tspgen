@@ -66,6 +66,10 @@ export interface RequestSpec {
   cookies?: Record<string, ParamValue>;
   body?: unknown;
   contentType?: string;
+<% if (it.streams) { -%>
+  /** Accept header, unless the call's headers set one (server-sent event streams). */
+  accept?: string;
+<% } -%>
 <% if (it.uploads) { -%>
   /** Multipart body: `body` is sent as FormData built from these parts (fetch sets the boundary). */
   multipart?: readonly PartSpec[];
@@ -160,6 +164,9 @@ export async function request(config: ClientConfig, spec: RequestSpec, options: 
   }
 <% } -%>
   if (cookies.length > 0) headers.append("cookie", cookies.join("; "));
+<% if (it.streams) { -%>
+  if (spec.accept !== undefined && !headers.has("accept")) headers.set("accept", spec.accept);
+<% } -%>
 <% if (it.uploads) { -%>
   let body: BodyInit | undefined;
   if (spec.body !== undefined && spec.multipart) {
@@ -222,6 +229,25 @@ export function optionalHeader<T = string>(res: Response, name: string, map?: (v
 export function optionalEntry<K extends string, T>(key: K, value: T | undefined): { [P in K]?: T } {
   return (value === undefined ? {} : { [key]: value }) as { [P in K]?: T };
 }
+<% if (it.streams) { -%>
+
+<%~ include("ts-nextjs/sse-runtime", { exported: true }) %>
+
+/**
+ * Yields the events of a streaming response (see decodeEvents), validated with `schema` unless the config turns
+ * validation off. Stopping the iteration cancels the response body; `RequestOptions.signal` aborts it.
+ */
+export async function* streamEvents<T>(
+  config: ClientConfig,
+  res: Response,
+  specs: readonly EventSpec[] | undefined,
+  schema?: Schema<T>,
+): AsyncGenerator<T, void, undefined> {
+  for await (const value of decodeEvents(res.body, specs)) {
+    yield schema && config.validate !== false ? schema.parse(value) : (value as T);
+  }
+}
+<% } -%>
 <% if (it.withoutUndefined) { -%>
 
 <%~ include("ts-nextjs/without-undefined", { exported: true }) %>

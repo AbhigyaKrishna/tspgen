@@ -136,8 +136,28 @@ export interface TsResultDecl {
   variants: TsResultVariant[];
 }
 
+/** A server-sent event stream: the method yields `type`s (`result.type` is `AsyncIterable<type>`). */
+export interface TsStream {
+  /** Element type: the events union of a typed stream, else `SseMessage`. */
+  type: TsTypeUse;
+  /** How each event of a typed stream is recognized and decoded. */
+  events?: TsEvent[];
+}
+
+/** One event of a typed stream, as the client runtime decodes it. */
+export interface TsEvent {
+  /** SSE `event:` value. */
+  event: string;
+  /** How `data:` decodes: JSON, or text kept as a string / read as a number or boolean. */
+  data: "json" | "text" | "number" | "boolean";
+  /** Wire `data:` of a literal payload: the event is recognized by it and carries `value`. */
+  literal?: string;
+  value?: string | number | boolean;
+  terminal: boolean;
+}
+
 export type TsResult =
-  | { kind: "single"; type: TsTypeUse; status: number; contentType?: string }
+  | { kind: "single"; type: TsTypeUse; status: number; contentType?: string; stream?: TsStream }
   | { kind: "union"; type: TsTypeUse; decl: TsResultDecl };
 
 export interface TsErrorClass {
@@ -195,6 +215,8 @@ export interface TsIR {
   /** True when some service has operations (api/ files are emitted). */
   apiActive: boolean;
   zod: boolean;
+  /** The generated `SseMessage` interface, when an operation streams untyped server-sent events. */
+  sseMessage?: TsInterface;
   /** "" or ".js" — suffix for relative imports. */
   importExtension: string;
   /** "per-type": models/<Name>.ts; "single-file": every model in types.ts. */

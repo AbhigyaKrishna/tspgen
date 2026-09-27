@@ -116,6 +116,12 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`TypeScript type '${"name"}' is generated from both '${"first"}' and '${"second"}'. Use @TS.name to disambiguate.`,
       },
     },
+    "sse-message-conflict": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Type '${"id"}' is generated as SseMessage, the type untyped server-sent events use; rename it with @TS.name.`,
+      },
+    },
     "invalid-pattern": {
       severity: "warning",
       messages: {

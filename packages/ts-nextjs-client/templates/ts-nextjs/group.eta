@@ -23,7 +23,11 @@ export const <%= name %>Schema: z.ZodType<<%= name %>> = z.object({
   }
 <% for (const op of g.operations) { -%>
 
-<%~ it.h.jsdoc(op.docs, "  ", op.deprecated) %>  async <%= op.name %>(<%= n.signature(g, op) %>): Promise<<%= op.result.type.text %>> {
+<%~ it.h.jsdoc(op.docs, "  ", op.deprecated) %><% if (n.isStream(op)) { -%>
+  async *<%= op.name %>(<%= n.signature(g, op) %>): <%= op.result.type.text %> {
+<% } else { -%>
+  async <%= op.name %>(<%= n.signature(g, op) %>): Promise<<%= op.result.type.text %>> {
+<% } -%>
     const res = await request(
       this.config,
       {

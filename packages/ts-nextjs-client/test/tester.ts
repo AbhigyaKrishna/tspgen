@@ -29,3 +29,21 @@ export const petSpec = `
   }
   @route("/health") op health(): { status: string };
 `;
+
+/** Tester with the optional SSE libraries (`@typespec/streams`, `@typespec/events`, `@typespec/sse`). */
+export const SseTester = createTester(resolvePath(import.meta.dirname, ".."), {
+  libraries: [
+    "@typespec/http",
+    "@typespec/streams",
+    "@typespec/events",
+    "@typespec/sse",
+    "@abhigyakrishna/tspgen-core",
+    "@abhigyakrishna/tspgen-typescript",
+  ],
+})
+  .importLibraries()
+  .using("Http", "SSE", "Events");
+
+export function sseNextjs(targetOptions: Record<string, unknown> = {}, emitterOptions: Record<string, unknown> = {}) {
+  return SseTester.emit("@abhigyakrishna/tspgen-typescript", { targets: [{ [TARGET]: targetOptions }], ...emitterOptions });
+}

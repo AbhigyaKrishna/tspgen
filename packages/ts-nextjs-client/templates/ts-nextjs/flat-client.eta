@@ -92,11 +92,18 @@ export class <%= c.name %> {
 <%~ it.h.banner(g.title, "  ") %>
 <% for (const m of g.methods) { -%>
 
-<%~ it.h.jsdoc(m.docs, "  ", m.deprecated) %>  <% if (m.void || m.checks.length > 0) { %>async <% } %><%= m.name %>(<%~ m.params %>): Promise<<%~ m.returnType %>> {
+<%~ it.h.jsdoc(m.docs, "  ", m.deprecated) %><% if (m.stream) { -%>
+  async *<%= m.name %>(<%~ m.params %>): <%~ m.returnType %> {
+<% } else { -%>
+  <% if (m.void || m.checks.length > 0) { %>async <% } %><%= m.name %>(<%~ m.params %>): Promise<<%~ m.returnType %>> {
+<% } -%>
 <% for (const check of m.checks) { -%>
     <%~ check %>
 <% } -%>
-<% if (m.void) { -%>
+<% if (m.stream) { -%>
+    const response = await this.request(<%~ m.args %>);
+    yield* decodeEvents(response.body, <%~ m.stream.events %>) as AsyncIterable<<%~ m.stream.element %>>;
+<% } else if (m.void) { -%>
     await this.request(<%~ m.args %>);
 <% } else { -%>
     return this.send(<%~ m.args %>);
@@ -119,12 +126,17 @@ export class <%= c.name %> {
   }
 <% } -%>
 
+<% const requestInit = it.usesStreams ? "{ signal?: AbortSignal | undefined; accept?: string }" : "{ signal?: AbortSignal }"; -%>
 <% if (c.auth) { -%>
-  private async request(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }, auth?: readonly (readonly AuthScheme[])[]): Promise<Response> {
+  private async request(method: string, path: string, body?: unknown, init?: <%~ requestInit %>, auth?: readonly (readonly AuthScheme[])[]): Promise<Response> {
 <% } else { -%>
-  private async request(method: string, path: string, body?: unknown, init?: { signal?: AbortSignal }): Promise<Response> {
+  private async request(method: string, path: string, body?: unknown, init?: <%~ requestInit %>): Promise<Response> {
 <% } -%>
     const headers = new globalThis.Headers(this.headers);
+<% if (it.usesStreams) { -%>
+    // A stream's Accept: text/event-stream, unless the client's headers set one.
+    if (init?.accept !== undefined && !headers.has("accept")) headers.set("accept", init.accept);
+<% } -%>
 <% if (it.usesUploads) { -%>
     const raw = body instanceof RawBody;
     const contentType = raw ? body.contentType : "application/json";
@@ -216,6 +228,10 @@ function toFormData(value: object, parts: readonly PartSpec[]): globalThis.FormD
 <% } -%>
 <% if (it.usesAuth) { -%>
 <%~ include("ts-nextjs/auth", { exported: false }) %>
+<% } -%>
+<% if (it.usesStreams) { -%>
+<%~ include("ts-nextjs/sse-runtime", { exported: false }) %>
+
 <% } -%>
 async function toError(response: Response): Promise<<%= e.name %>> {
   const body: unknown = await response.json().catch(() => undefined);

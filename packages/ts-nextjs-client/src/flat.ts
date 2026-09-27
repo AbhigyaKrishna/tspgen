@@ -54,6 +54,20 @@ const TEMPLATE_GLOBALS = new Set([
 const UPLOAD_GLOBALS = ["BodyInit", "RawBody", "PartSpec", "toFormData"];
 /** Module-local helpers client.ts declares when a service uses `@useAuth` (TextEncoder and btoa via globalThis). */
 const AUTH_LOCALS = ["AuthScheme", "AuthEntries", "resolveAuth", "base64"];
+/** Globals and module-local helpers client.ts uses when an operation streams server-sent events. */
+const STREAM_GLOBALS = [
+  "AsyncGenerator",
+  "AsyncIterable",
+  "ReadableStream",
+  "TextDecoder",
+  "Uint8Array",
+  "EventSpec",
+  "RawEvent",
+  "readEvents",
+  "decodeEvents",
+  "decodeData",
+  "MAX_SSE_SIZE",
+];
 /** Names tried, in order, for a method's query-object parameter. */
 const QUERY_NAMES = ["query", "queryParams", "params"];
 /** Names tried, in order, for a method's trailing request-init parameter (`{ signal }`). */
@@ -71,6 +85,8 @@ export interface FlatMethod {
   void: boolean;
   /** zod `.parse(…)` statements run before the request (validate option). */
   checks: string[];
+  /** A server-sent event stream: an async generator method. */
+  stream?: { element: string; events: string };
   docs?: string;
   deprecated?: string;
 }
@@ -87,7 +103,8 @@ export interface FlatErrorClass {
 
 function unsupported(op: TsOperation, auth: boolean): string | undefined {
   if (op.result.kind === "union") return "multiple success responses or response headers";
-  if (op.result.contentType && !op.result.contentType.includes("json")) return "a non-JSON response";
+  const stream = op.result.kind === "single" && op.result.stream !== undefined;
+  if (op.result.contentType && !op.result.contentType.includes("json") && !stream) return "a non-JSON response";
   if (CLIENT_MEMBERS.has(op.name) || (auth && op.name === "auth")) return "its name clashes with a client member";
   if (op.params.some((p) => p.location === "path" && p.optional)) return "optional path parameters";
   if (op.params.some((p) => p.location === "header" || p.location === "cookie")) return "header or cookie parameters";
@@ -136,6 +153,7 @@ function method(op: TsOperation, validate: boolean, auth: string | undefined): F
   }
   const initName = pickName(INIT_NAMES, "init", taken);
   params.push(`${initName}?: { signal?: AbortSignal }`);
+  const stream = op.result.kind === "single" ? op.result.stream : undefined;
   const exploded = query.filter((p) => p.explode && isArray(p)).map((p) => JSON.stringify(p.wireName));
   const queryCall = exploded.length > 0 ? `toQuery(${queryName}, [${exploded.join(", ")}])` : `toQuery(${queryName})`;
   const url = op.path.replace(/\{([^}]+)\}/g, (match, wire: string) => {
@@ -157,19 +175,22 @@ function method(op: TsOperation, validate: boolean, auth: string | undefined): F
       checks.push(`z.object({ ${fields.join(", ")} }).parse(${queryName});`);
     }
   }
+  // A stream asks for text/event-stream: request() takes the accept header next to the caller's signal.
+  const args = [
+    JSON.stringify(op.verb.toUpperCase()),
+    urlExpr,
+    bodyName ? bodyArg(op, bodyName) : "undefined",
+    stream ? `{ accept: "text/event-stream", signal: ${initName}?.signal }` : initName,
+    ...(auth ? [auth] : []),
+  ];
   return {
     name: op.name,
     params: params.join(", "),
     returnType: op.result.type.text,
     void: op.result.type.text === "void",
-    args: [
-      JSON.stringify(op.verb.toUpperCase()),
-      urlExpr,
-      bodyName ? bodyArg(op, bodyName) : "undefined",
-      initName,
-      ...(auth ? [auth] : []),
-    ].join(", "),
+    args: args.join(", "),
     checks,
+    ...(stream ? { stream: { element: stream.type.text, events: nextjsHelpers.eventsExpr(op) } } : {}),
     ...(op.docs ? { docs: op.docs } : {}),
     ...(op.deprecated ? { deprecated: op.deprecated } : {}),
   };
@@ -253,6 +274,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   }
   const authNames = services.filter((s) => auths.has(s.id)).map((s) => `${s.name}Auth`);
   const rqNames = reactQuery ? reactQueryNames(services) : [];
+  const usesStreams = services.some((s) => s.groups.some((g) => g.operations.some(nextjsHelpers.isStream)));
   const exported = new Set([
     options["error-class"],
     "ClientOptions",
@@ -265,6 +287,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
   const internal = new Set([
     ...TEMPLATE_GLOBALS,
     ...(usesUploads ? UPLOAD_GLOBALS : []),
+    ...(usesStreams ? STREAM_GLOBALS : []),
     ...(validate ? ["z"] : []),
     ...(auths.size > 0 ? AUTH_LOCALS : []),
     // Key paths (`shopKeys.nodes.all`) are not identifiers; they only matter for the duplicate check below.
@@ -288,7 +311,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         seen.set(op.name, op.id);
         const reason = unsupported(op, auth !== undefined);
         if (reason) return fail("flat-client-unsupported", { operation: op.id, reason });
-        const skipped = reactQuery ? varsKeyClash(op) : undefined;
+        const skipped = reactQuery && !nextjsHelpers.isStream(op) ? varsKeyClash(op) : undefined;
         if (skipped) {
           reportDiagnostic(ctx.program, { code: "flat-react-query-skipped", format: { operation: op.id, reason: skipped }, target: NoTarget });
         }
@@ -309,7 +332,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
       }
       groups.push({ title: group.name, methods });
     }
-    const usesSend = groups.some((g) => g.methods.some((m) => !m.void));
+    const usesSend = groups.some((g) => g.methods.some((m) => !m.void && !m.stream));
     clients.push({
       name: `${service.name}Client`,
       groups,
@@ -347,6 +370,7 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
         usesQuery: queryParams.length > 0,
         usesUploads,
         usesAuth: auths.size > 0,
+        usesStreams,
         /** toQuery comma-joins arrays and takes the list of exploded keys. */
         usesArrays: queryParams.some(isArray),
         /** Body checks validate a copy without undefined-valued keys. */

@@ -73,9 +73,9 @@ export function isFlatQuery(op: TsOperation): boolean {
 const pathParams = (op: TsOperation) => op.params.filter((p) => p.location === "path");
 const queryParams = (op: TsOperation) => op.params.filter((p) => p.location === "query");
 
-/** Operations that get React Query code (see `varsKeyClash`). */
+/** Operations that get React Query code: not server-sent event streams (async generators), nor `varsKeyClash`. */
 export function hasReactQuery(op: TsOperation): boolean {
-  return varsKeyClash(op) === undefined;
+  return !h.isStream(op) && varsKeyClash(op) === undefined;
 }
 
 /**

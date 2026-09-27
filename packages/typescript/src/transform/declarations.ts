@@ -12,6 +12,7 @@ import {
   type EnumIR,
   type ModelIR,
   type PropertyIR,
+  type StreamIR,
   type TypeIR,
   type TypeRef,
   type UnionIR,
@@ -20,7 +21,7 @@ import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "../lib.js";
 import { memberName, propertyKey, RESERVED_WORDS, typeName } from "../naming.js";
 import { constrain } from "./constraints.js";
-import type { TsDecl, TsEnumMember, TsProperty, TsTypeUse } from "./model.js";
+import type { TsDecl, TsEnumMember, TsEvent, TsInterface, TsProperty, TsStream, TsTypeUse } from "./model.js";
 import {
   arrayOf,
   declUse,
@@ -60,6 +61,7 @@ export class DeclarationBuilder {
   /** Template instances mapped with @TS.type: rendered as `<name><args>`. */
   private readonly generic = new Map<string, { base: TsTypeUse; args: TypeRef[] }>();
   private readonly types: Map<string, TypeIR>;
+  private sseMessageDecl: TsInterface | undefined;
 
   constructor(
     private readonly program: Program,
@@ -83,6 +85,51 @@ export class DeclarationBuilder {
     for (const t of own) if (t.kind === "union") this.fillUnion(t);
     this.checkDuplicates();
     return [...this.decls.values()];
+  }
+
+  /** `SseMessage`, the element of untyped event streams, once some operation streams them. */
+  get sseMessage(): TsInterface | undefined {
+    return this.sseMessageDecl;
+  }
+
+  /** The TypeScript side of a response stream whose body type is `ref`: its events union, else `SseMessage`. */
+  stream(stream: StreamIR, ref: TypeRef): TsStream {
+    const id = stream.events && ref.kind === "named" ? ref.id : undefined;
+    const union = id ? this.types.get(id) : undefined;
+    if (id && union?.kind === "union" && union.events && this.decls.has(id)) {
+      return {
+        type: this.typeUse(ref),
+        events: union.events.map((e): TsEvent => {
+          const json = /[/+]json(;|$)/.test(e.contentType);
+          const payload = this.typeUse(e.payload);
+          const data = json ? "json" : payload.text === "number" ? "number" : payload.text === "boolean" ? "boolean" : "text";
+          const literal = e.payload.kind === "literal" ? e.payload.value : undefined;
+          return {
+            event: e.name,
+            data,
+            ...(literal !== undefined ? { literal: json ? JSON.stringify(literal) : String(literal), value: literal } : {}),
+            terminal: e.terminal,
+          };
+        }),
+      };
+    }
+    this.sseMessageDecl ??= {
+      kind: "interface",
+      id: "$sse.SseMessage",
+      name: "SseMessage",
+      file: this.options.layout === "single-file" ? "types" : "models/SseMessage",
+      namespace: [],
+      docs: "One server-sent event of an untyped event stream.",
+      meta: {},
+      jsdoc: [],
+      extends: [],
+      properties: [
+        { key: "event", wireName: "event", type: simple("string", "z.string()"), optional: true, docs: 'The `event:` name; absent for the default "message" type.', meta: {}, readonly: false, jsdoc: [] },
+        { key: "data", wireName: "data", type: simple("string", "z.string()"), optional: false, docs: 'The `data:` lines, joined with "\\n".', meta: {}, readonly: false, jsdoc: [] },
+        { key: "id", wireName: "id", type: simple("string", "z.string()"), optional: true, docs: "The last `id:`.", meta: {}, readonly: false, jsdoc: [] },
+      ],
+    };
+    return { type: declUse("SseMessage", this.sseMessageDecl.file) };
   }
 
   /** Wire name (the TS object key) of property `name` of model `modelId`; `name` when unknown. */
@@ -140,7 +187,7 @@ export class DeclarationBuilder {
       meta: scopes,
       jsdoc: metaStrings(this.program, meta, "jsdoc", t.id),
     };
-    if (t.kind === "enum" || (t.kind === "union" && this.isStringLiteralUnion(t))) {
+    if (t.kind === "enum" || (t.kind === "union" && !t.events && this.isStringLiteralUnion(t))) {
       const [values] = metaStrings(this.program, meta, "values", t.id);
       const validValues =
         values && IDENTIFIER.test(values) && values !== name && !RESERVED_WORDS.has(values) ? values : undefined;
@@ -211,6 +258,10 @@ export class DeclarationBuilder {
 
   private fillUnion(u: UnionIR): void {
     const decl = this.decls.get(u.id)!;
+    if (u.events && decl.kind === "alias") {
+      decl.type = this.eventsUse(u);
+      return;
+    }
     if (decl.kind === "enum") {
       decl.members = u.variants.map((v) => {
         const value = v.type.kind === "literal" ? String(v.type.value) : "";
@@ -242,6 +293,30 @@ export class DeclarationBuilder {
       for (const v of u.variants) if (v.name && v.type.kind === "named") this.inject(v.type.id, disc.property, v.name);
     }
     decl.type = unionOf(types.map((t) => this.typeUse(t)));
+  }
+
+  /**
+   * An `@events` union: `{ event: "<name>"; data: <payload> }` per event, one per line; a discriminated zod union
+   * unless event names repeat (unnamed variants are all "message").
+   */
+  private eventsUse(u: UnionIR): TsTypeUse {
+    const variants = (u.events ?? []).map((e) =>
+      objectUse([
+        { key: "event", type: literalUse(e.name), optional: false },
+        { key: "data", type: this.typeUse(e.payload), optional: false },
+      ]),
+    );
+    if (variants.length === 0) return simple("never", "z.never()");
+    const union = unionOf(variants);
+    const names = (u.events ?? []).map((e) => e.name);
+    return {
+      ...union,
+      text: variants.map((v) => `\n  | ${v.text}`).join(""),
+      schema:
+        new Set(names).size === names.length
+          ? `z.discriminatedUnion("event", [${variants.map((v) => v.schema).join(", ")}])`
+          : union.schema,
+    };
   }
 
   /** Ensure a variant interface declares the discriminator as a literal property. */

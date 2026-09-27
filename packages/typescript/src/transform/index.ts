@@ -1,7 +1,6 @@
 import { apiVersionConstants, type ApiIR, type ApiVersionConstant } from "@abhigyakrishna/tspgen-core";
-import { NoTarget } from "@typespec/compiler";
+import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "../lib.js";
-import type { Program } from "@typespec/compiler";
 import { DeclarationBuilder } from "./declarations.js";
 import type { TsDecl, TsIR } from "./model.js";
 import { ApiBuilder } from "./operations.js";
@@ -30,8 +29,15 @@ export function transformToTs(program: Program, api: ApiIR, options: TsTransform
   const declarations = builder.build();
   const apiBuilder = new ApiBuilder(builder, { errors: options.errors ?? "typed" });
   const services = apiBuilder.services(api);
+  const sseMessage = builder.sseMessage;
+  if (sseMessage) {
+    const clash = declarations.find((d) => d.name === sseMessage.name);
+    if (clash) reportDiagnostic(program, { code: "sse-message-conflict", format: { id: clash.id }, target: NoTarget });
+    else declarations.push(sseMessage);
+  }
   return {
     declarations,
+    ...(sseMessage ? { sseMessage } : {}),
     errorClasses: apiBuilder.errors(),
     results: apiBuilder.results,
     services,

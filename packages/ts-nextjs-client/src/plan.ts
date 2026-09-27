@@ -47,8 +47,9 @@ function groupImports(ir: TsIR, g: TsGroup): TsImport[] {
   const results = ops.map((op) => op.result);
   const variants = results.flatMap((r) => (r.kind === "union" ? r.decl.variants : []));
   const headers = variants.flatMap((v) => v.headers);
+  const streams = results.flatMap((r) => (r.kind === "single" && r.stream ? [r.stream] : []));
   const bodies = [
-    ...results.flatMap((r) => (r.kind === "single" && r.type.text !== "void" ? [r.type] : [])),
+    ...results.flatMap((r) => (r.kind === "single" && r.type.text !== "void" && !r.stream ? [r.type] : [])),
     ...variants.flatMap((v) => (v.body ? [v.body] : [])),
   ];
   const fields = ops.flatMap((op) => h.fields(op).map((f) => f.type));
@@ -58,13 +59,21 @@ function groupImports(ir: TsIR, g: TsGroup): TsImport[] {
     value("request", CORE),
     value("toError", CORE),
     ...(bodies.length > 0 ? [value("parse", CORE)] : []),
+    ...(streams.length > 0 ? [value("streamEvents", CORE)] : []),
     ...(headers.some((x) => !x.optional) ? [value("requireHeader", CORE)] : []),
     ...(headers.some((x) => x.optional) ? [value("optionalHeader", CORE), value("optionalEntry", CORE)] : []),
     ...ops.flatMap((op) => op.errors.flatMap((e) => [...e.errorClass.imports, ...(e.body?.imports ?? [])])),
     ...results.flatMap((r) => r.type.imports),
     ...headers.flatMap((x) => x.type.imports),
     ...fields.flatMap((t) => t.imports),
-    ...(ir.zod ? [Z, ...fields.flatMap((t) => t.schemaImports), ...bodies.flatMap((t) => t.schemaImports)] : []),
+    ...(ir.zod
+      ? [
+          Z,
+          ...fields.flatMap((t) => t.schemaImports),
+          ...bodies.flatMap((t) => t.schemaImports),
+          ...streams.flatMap((t) => (t.events ? t.type.schemaImports : [])),
+        ]
+      : []),
     ...bodies.flatMap((t) => t.imports),
   ];
 }
@@ -79,7 +88,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
   const extras = nextExtras(ctx, groups);
   for (const g of groups) {
     for (const op of g.operations) {
-      if (!h.isJson(op) && !h.isUpload(op)) {
+      if (op.body && !h.isJson(op) && !h.isUpload(op)) {
         reportDiagnostic(ctx.program, {
           code: "non-json-body",
           format: { operation: op.id, contentType: op.body!.contentType },
@@ -93,6 +102,8 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
   const withoutUndefined = ir.zod && actions && groups.some((g) => actionOps(g).some(h.hasParams));
   // PartSpec, toFormData and the multipart/file request branches only when an operation uploads.
   const uploads = groups.some((g) => g.operations.some(h.isUpload));
+  // EventSpec, readEvents and streamEvents only when an operation streams server-sent events.
+  const streams = groups.some((g) => g.operations.some(h.isStream));
   // Services using @useAuth schemes the client can send, by service id; the auth runtime only when there is one.
   const auth: Record<string, ClientAuth> = {};
   for (const s of services) {
@@ -101,7 +112,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
   }
   const auths = Object.values(auth);
   const files: FileSpec[] = [
-    file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", { withoutUndefined, uploads, auth: auths.length > 0 }),
+    file(CORE, ir, [HTTP_ERROR_IMPORT], "ts-nextjs/core", { withoutUndefined, uploads, streams, auth: auths.length > 0 }),
   ];
   for (const s of services) {
     for (const g of s.groups) {
@@ -139,8 +150,8 @@ function paramsImports(g: TsGroup, ops: TsOperation[]): TsImport[] {
 }
 
 function reactQueryFiles(ir: TsIR, services: TsService[], extras: Record<string, NextOpExtras>): FileSpec[] {
-  const queryOps = (g: TsGroup) => g.operations.filter((op) => h.isQuery(op) && h.isJson(op));
-  const mutationOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isJson(op));
+  const queryOps = (g: TsGroup) => g.operations.filter((op) => h.isQuery(op) && h.isHookable(op));
+  const mutationOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isHookable(op));
   const groups = services.flatMap((s) => s.groups);
   const queries = file(
     QUERIES,
@@ -180,7 +191,7 @@ function reactQueryFiles(ir: TsIR, services: TsService[], extras: Record<string,
 const RESULT = "client/actions/result";
 const SERVER_CLIENT = "client/actions/server-client";
 
-const actionOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isJson(op));
+const actionOps = (g: TsGroup) => g.operations.filter((op) => !h.isQuery(op) && h.isHookable(op));
 
 function actionFiles(ir: TsIR, services: TsService[], options: NextClientOptions, auth: Record<string, ClientAuth>): FileSpec[] {
   const files: FileSpec[] = [

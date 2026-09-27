@@ -1,0 +1,117 @@
+<% const ex = it.exported ? "export " : ""; -%>
+/** How a typed stream's event is recognized (by name, then literal data) and its data decoded. */
+<%= ex %>interface EventSpec {
+  event: string;
+  data: "json" | "text" | "number" | "boolean";
+  /** Wire data of a literal event, which then carries `value`. */
+  literal?: string;
+  value?: string | number | boolean;
+  /** The stream ends after this event. */
+  terminal?: boolean;
+}
+
+/** One server-sent event: `event:` (absent for the default "message" type), `data:` lines joined with "\n", last `id:`. */
+<%= ex %>interface RawEvent {
+  event?: string;
+  data: string;
+  id?: string;
+}
+
+/** Longest line and longest event data (characters) a stream may send; longer ones fail the stream. */
+const MAX_SSE_SIZE = 1 << 20;
+
+/**
+ * Parses a text/event-stream body. Lines end with CRLF, LF or CR (also across chunks); a leading byte order mark,
+ * comments and `retry:` are skipped; an event without data, or unterminated at the end of the body, is not
+ * dispatched; a line or event data over 1 MiB throws. Stopping the iteration cancels the body.
+ */
+<%= ex %>async function* readEvents(body: ReadableStream<Uint8Array> | null): AsyncGenerator<RawEvent, void, undefined> {
+  if (!body) return;
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let line = "";
+  let afterCr = false;
+  let data: string[] = [];
+  let size = 0;
+  let event: string | undefined;
+  let id: string | undefined;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return;
+      // Multi-byte characters split across chunks are completed by the next chunk.
+      const text = decoder.decode(chunk.value, { stream: true });
+      let start = 0;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === "\n" && afterCr) {
+          afterCr = false;
+          start = i + 1;
+          continue;
+        }
+        afterCr = c === "\r";
+        if (c !== "\n" && c !== "\r") continue;
+        const field = line + text.slice(start, i);
+        if (field.length > MAX_SSE_SIZE) throw new Error(`Server-sent event line longer than ${MAX_SSE_SIZE} characters`);
+        line = "";
+        start = i + 1;
+        if (field === "") {
+          if (data.length > 0) yield { data: data.join("\n"), ...(event !== undefined ? { event } : {}), ...(id !== undefined ? { id } : {}) };
+          data = [];
+          size = 0;
+          event = undefined;
+          continue;
+        }
+        if (field.startsWith(":")) continue;
+        const colon = field.indexOf(":");
+        const name = colon < 0 ? field : field.slice(0, colon);
+        const value = colon < 0 ? "" : field.slice(colon + 1).replace(/^ /, "");
+        if (name === "data") {
+          data.push(value);
+          size += value.length + 1;
+          if (size > MAX_SSE_SIZE) throw new Error(`Server-sent event data longer than ${MAX_SSE_SIZE} characters`);
+        }
+        else if (name === "event") event = value || undefined;
+        else if (name === "id" && !value.includes("\0")) id = value;
+      }
+      line += text.slice(start);
+      if (line.length > MAX_SSE_SIZE) throw new Error(`Server-sent event line longer than ${MAX_SSE_SIZE} characters`);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * The events of a stream body: with `specs`, `{ event, data }` values picked by event name (literal data first) and
+ * decoded, unknown events skipped, ending after a terminal event; without, the raw events.
+ */
+<%= ex %>async function* decodeEvents(body: ReadableStream<Uint8Array> | null, specs: readonly EventSpec[] | undefined): AsyncGenerator<unknown, void, undefined> {
+  for await (const raw of readEvents(body)) {
+    if (!specs) {
+      yield raw;
+      continue;
+    }
+    const named = specs.filter((s) => s.event === (raw.event ?? "message"));
+    const spec = named.find((s) => s.literal !== undefined && s.literal === raw.data) ?? named.find((s) => s.literal === undefined);
+    if (!spec) continue;
+    yield { event: spec.event, data: spec.literal !== undefined ? spec.value : decodeData(spec.data, raw.data) };
+    if (spec.terminal) return;
+  }
+}
+
+/** Decodes event data; malformed JSON, numbers or booleans throw (ending the iteration). */
+function decodeData(kind: EventSpec["data"], data: string): unknown {
+  switch (kind) {
+    case "json":
+      return JSON.parse(data);
+    case "number":
+      if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/.test(data)) throw new Error(`Invalid number in event data: ${JSON.stringify(data)}`);
+      return Number(data);
+    case "boolean":
+      if (data !== "true" && data !== "false") throw new Error(`Invalid boolean in event data: ${JSON.stringify(data)}`);
+      return data === "true";
+    default:
+      return data;
+  }
+}

@@ -32,6 +32,32 @@ function isJson(op: TsOperation): boolean {
   return !op.body || (!isUpload(op) && op.body.contentType.includes("json"));
 }
 
+/** A server-sent event stream: the method is an async generator of its events. */
+function isStream(op: TsOperation): boolean {
+  return op.result.kind === "single" && op.result.stream !== undefined;
+}
+
+/** Operations React Query hooks and Server Actions cover: JSON, not uploads nor streams. */
+function isHookable(op: TsOperation): boolean {
+  return isJson(op) && !isStream(op);
+}
+
+/**
+ * Static event descriptors of a typed stream: `[{ event, data, literal?, value?, terminal? }, …]` (the runtime picks
+ * the event by name, literal data first); undefined for an untyped stream.
+ */
+function eventsExpr(op: TsOperation): string {
+  const events = op.result.kind === "single" ? op.result.stream?.events : undefined;
+  if (!events) return "undefined";
+  const items = events.map((e) => {
+    const parts = [`event: ${str(e.event)}`, `data: ${str(e.data)}`];
+    if (e.literal !== undefined) parts.push(`literal: ${str(e.literal)}`, `value: ${JSON.stringify(e.value)}`);
+    if (e.terminal) parts.push("terminal: true");
+    return `{ ${parts.join(", ")} }`;
+  });
+  return `[${items.join(", ")}]`;
+}
+
 /** Multipart and file bodies: sent by the request runtime as FormData / a Blob. */
 function isUpload(op: TsOperation): boolean {
   return op.body?.kind === "multipart" || op.body?.kind === "file";
@@ -102,6 +128,9 @@ export const nextjsHelpers = {
   isQuery,
   isJson,
   isUpload,
+  isStream,
+  isHookable,
+  eventsExpr,
   partsExpr,
   key,
   memberType,
@@ -154,11 +183,16 @@ export const nextjsHelpers = {
       lines.push(`body: params.${body.name},`, `contentType: ${str(body.contentType)},`);
     }
     if (auth) lines.push(`auth: ${auth},`);
+    if (isStream(op)) lines.push(`accept: "text/event-stream",`);
     return lines;
   },
 
   successLines(op: TsOperation, zod: boolean): string[] {
     const r = op.result;
+    if (r.kind === "single" && r.stream) {
+      const schema = zod && r.stream.events ? `, ${r.stream.type.schema}` : "";
+      return [`if (res.ok) return yield* streamEvents(this.config, res, ${eventsExpr(op)}${schema});`];
+    }
     if (r.kind === "single") {
       return [r.type.text === "void" ? "if (res.ok) return;" : `if (res.ok) return ${parseExpr(r.type, zod)};`];
     }

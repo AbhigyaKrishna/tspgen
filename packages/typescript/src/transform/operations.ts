@@ -13,6 +13,7 @@ import type {
   TsResultDecl,
   TsResultVariant,
   TsService,
+  TsStream,
   TsTypeUse,
 } from "./model.js";
 import { VOID } from "./type-map.js";
@@ -32,6 +33,7 @@ interface Response {
   body?: TsTypeUse;
   contentType?: string;
   headers: TsHeader[];
+  stream?: TsStream;
 }
 
 /** Builds TS services plus the shared result unions and error classes they reference. */
@@ -89,6 +91,7 @@ export class ApiBuilder {
       statusCodes: r.statusCodes,
       isError: r.isError,
       ...(r.body ? { body: this.types.typeUse(r.body.type), contentType: r.body.contentTypes[0] ?? "application/json" } : {}),
+      ...(r.body?.stream ? { stream: this.types.stream(r.body.stream, r.body.type) } : {}),
       headers: r.headers.map((h) => ({
         name: camel(h.name),
         wireName: h.wireName,
@@ -142,6 +145,17 @@ export class ApiBuilder {
   private result(opName: string, groupName: string, success: Response[]): TsResult {
     if (success.length === 0) return { kind: "single", type: VOID, status: 204 };
     const [only] = success;
+    // Core streams only a single success response without headers.
+    if (only.stream && typeof only.statusCodes === "number") {
+      const element = only.stream.type;
+      return {
+        kind: "single",
+        type: { ...element, text: `AsyncIterable<${element.text}>`, schema: "" },
+        status: only.statusCodes,
+        ...(only.contentType ? { contentType: only.contentType } : {}),
+        stream: only.stream,
+      };
+    }
     if (success.length === 1 && typeof only.statusCodes === "number" && only.headers.length === 0) {
       return {
         kind: "single",
