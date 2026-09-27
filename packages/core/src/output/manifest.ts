@@ -42,7 +42,7 @@ export async function writeOutputs(
 ): Promise<ManifestEntry> {
   const owner = options.owner ?? "";
   const manifest = await readManifest(program, outputDir);
-  // A manifest without owners was written by 0.1.x for a single emitter: it belongs to whoever writes next.
+  // A manifest without owners was written by 0.1.2 or earlier for a single emitter: it belongs to whoever writes next.
   const previous: ManifestEntry = manifest.owners ? (manifest.owners[owner] ?? { files: [] }) : { files: manifest.files };
   if (program.compilerOptions.noEmit) return previous;
   const others = Object.entries(manifest.owners ?? {}).filter(([name]) => name !== owner);

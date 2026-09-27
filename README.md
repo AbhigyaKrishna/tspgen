@@ -400,11 +400,11 @@ and vitest.
   base `templates`, `helpers`, optional `format`) and a built-in models target, and call `runPipeline`
   from `$onEmit`. Core (IR, plugins, templates, targets, manifest) is reused unchanged.
 
-## Upgrading from 0.1
+## Upgrading from 0.1.2
 
-0.2 changes generated output by default; each change has an option restoring the old behaviour.
+0.1.3 changes generated output by default; each change has an option restoring the old behaviour.
 
-| Change | Restore 0.1 output |
+| Change | Restore 0.1.2 output |
 |---|---|
 | Template models are generic (`Page<T>`) instead of one model per instance (`PagePet`) | `generics: false` |
 | Kotlin date/time types come from `java.time`, with generated serializers | `date-time: kotlin.time` |
