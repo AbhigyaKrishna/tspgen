@@ -58,6 +58,36 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Metadata key '${"key"}' on '${"where"}' must be ${"expected"}; it is ignored.`,
       },
     },
+    "unsupported-auth-combination": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Operation '${"operation"}' requires ${"requirement"}, which ${"target"} cannot express; it requires ${"fallback"} instead. Set its auth explicitly with ${"hint"}.`,
+      },
+    },
+    "auth-combination-approximated": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Operation '${"operation"}' requires ${"requirement"}; ${"target"} generates ${"wrapper"}, which lets anonymous calls through and accepts the first valid credential without checking the others, so one scheme of a combination is enough. Set its auth explicitly with ${"hint"} to silence this.`,
+      },
+    },
+    "auth-wrapper-not-rendered": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Operation '${"operation"}' needs ${"wrapper"}, but ${"where"} may render only the provider names in ServerOpExtras.authenticate, dropping its strategy, optional flag or provider expressions; render ServerOpExtras.auth (or authProviders, authStrategy and authOptional) there.`,
+      },
+    },
+    "unknown-auth-provider": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`auth-providers maps '${"key"}', which is no auth scheme id (scheme ids: ${"ids"}; a different scheme reusing an id gets '_' appended, e.g. ApiKeyAuth_); it is unused.`,
+      },
+    },
+    "unsupported-auth-scheme": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Auth scheme '${"scheme"}' (${"kind"}) is not supported by ${"target"}; alternatives needing it are ignored.`,
+      },
+    },
     "module-load-failed": {
       severity: "error",
       messages: {

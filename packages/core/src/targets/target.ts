@@ -44,6 +44,11 @@ export interface TargetContext {
    * `@abhigyakrishna/tspgen-typescript`, which rebases imports marked `root: "models"`).
    */
   modelsOutputDir: string;
+  /**
+   * Absolute path of the file that renders a logical template name, after template-dir and plugin overrides;
+   * `undefined` when none does. Lets a target notice that one of its templates was overridden.
+   */
+  resolveTemplate?(name: string): string | undefined;
 }
 
 /** A server or client library (or the language's shared models) producing files from language IR. */

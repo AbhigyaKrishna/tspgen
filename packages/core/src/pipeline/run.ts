@@ -8,7 +8,7 @@ import type { PluginContext, TspGenPlugin } from "../plugins/plugin.js";
 import { resolveMeta, type MetaScopes } from "../meta.js";
 import { ExtensionRegistry } from "../plugins/registry.js";
 import type { FileSpec, LanguageModule, Target } from "../targets/target.js";
-import { TemplateEngine, type TemplateLayer } from "../templates/engine.js";
+import { TemplateEngine, TemplateNotFoundError, type TemplateLayer } from "../templates/engine.js";
 
 export interface PipelineTarget<L> {
   target: Target<L>;
@@ -67,11 +67,21 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
     if (result !== undefined) ir = result;
   }
 
+  const layers = templateLayers(opts, plugins);
+  const resolver = new TemplateEngine(layers);
+  const resolveTemplate = (name: string): string | undefined => {
+    try {
+      return resolver.resolve(name).path;
+    } catch (error) {
+      if (error instanceof TemplateNotFoundError) return undefined;
+      throw error;
+    }
+  };
   const modelsOutputDir = opts.targets.find((t) => t.target.kind === "models")?.outputDir ?? opts.outputDir;
   let files: FileSpec[] = [];
   for (const { target, options, outputDir = opts.outputDir } of opts.targets) {
     const result = guard("target-failed", target.name, "files", () =>
-      target.files(ir, { program, language: language.name, emitterOptions, options, registry, outputDir, modelsOutputDir }),
+      target.files(ir, { program, language: language.name, emitterOptions, options, registry, outputDir, modelsOutputDir, resolveTemplate }),
     );
     if (result === FAILED) return;
     files.push(...result.map((file) => ({ ...file, outputDir: normalizeDir(file.outputDir ?? outputDir) })));
@@ -94,7 +104,7 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
     seen.add(absolute);
   }
 
-  const engine = new TemplateEngine(templateLayers(opts, plugins), {
+  const engine = new TemplateEngine(layers, {
     meta: (item: { meta?: MetaScopes } | undefined, target?: string) => resolveMeta(item?.meta, language.name, target),
     ...language.helpers,
     ...Object.assign({}, ...opts.targets.map((t) => t.target.helpers ?? {})),

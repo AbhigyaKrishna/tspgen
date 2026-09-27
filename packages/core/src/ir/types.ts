@@ -119,7 +119,9 @@ export interface ServerIR {
   parameters: string[];
 }
 
+/** An auth scheme; `ServiceIR.auth` lists every scheme the service or any of its operations uses. */
 export interface AuthIR {
+  /** Scheme id (the scheme model's name); a different scheme reusing an id gets `_` appended, as in OpenAPI output. */
   id: string;
   type: "http" | "apiKey" | "oauth2" | "openIdConnect" | "noAuth";
   scheme?: string;
@@ -148,6 +150,17 @@ export interface OperationIR extends DocInfo {
   body?: BodyIR;
   responses: ResponseIR[];
   decorators: DecoratorData;
+  /** Resolved `@useAuth` (operation, then interface, then enclosing namespaces); absent when none applies. */
+  auth?: AuthRequirementIR;
+}
+
+/**
+ * An operation's auth requirement: any one of `options` suffices, and each option lists scheme ids
+ * (`AuthIR.id`) that are all required. `NoAuth` is an empty option: `@useAuth(NoAuth)` is `[[]]`,
+ * `@useAuth(A | NoAuth)` is `[["A"], []]`, `@useAuth(A & B)` is `[["A", "B"]]`.
+ */
+export interface AuthRequirementIR {
+  options: string[][];
 }
 
 export interface ParamIR extends DocInfo {

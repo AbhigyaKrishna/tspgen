@@ -80,6 +80,22 @@ describe("runPipeline", () => {
     expect((await program.host.readFile(resolvePath(out, "models/Pet.txt"))).text).toBe("custom Pet");
   });
 
+  it("tells targets which file renders a template (resolveTemplate)", async () => {
+    const { program } = await Tester.compile(spec);
+    const templateDir = dirWith({ "fake/model.eta": "custom" });
+    const seen: Record<string, string | undefined> = {};
+    const probe: Target<FakeIR> = {
+      ...target,
+      files: (_ir, ctx) => {
+        seen.model = ctx.resolveTemplate?.("fake/model");
+        seen.missing = ctx.resolveTemplate?.("missing");
+        return [];
+      },
+    };
+    await runPipeline({ program, outputDir: resolveVirtualPath("out"), language, targets: [{ target: probe, options: {} }], templateDir });
+    expect(seen).toEqual({ model: join(templateDir, "fake/model.eta"), missing: undefined });
+  });
+
   it("reports template errors and writes nothing", async () => {
     const { program } = await Tester.compile(spec);
     const out = resolveVirtualPath("out");

@@ -14,6 +14,8 @@ import {
   getAllHttpServices,
   getAuthentication,
   getServers,
+  type Authentication,
+  type HttpAuth,
   type HttpOperation,
   type HttpOperationPart,
   type HttpOperationResponse,
@@ -26,6 +28,7 @@ import { docInfo } from "./docs.js";
 import { hasParts, isBytes, splitNamespace, type TypeCollector } from "./type-collector.js";
 import type {
   AuthIR,
+  AuthRequirementIR,
   DecoratorData,
   OperationGroupIR,
   OperationIR,
@@ -58,6 +61,8 @@ function buildService(program: Program, collector: TypeCollector, service: HttpS
   const ns = service.namespace;
   collector.collectNamespace(ns);
   const groups = new Map<string, OperationGroupIR>();
+  const schemes = new AuthSchemes();
+  schemes.requirement(getAuthentication(program, ns));
   for (const op of service.operations) {
     const body = op.parameters.body;
     if (body?.bodyKind === "multipart" && body.multipartKind === "tuple") {
@@ -98,6 +103,8 @@ function buildService(program: Program, collector: TypeCollector, service: HttpS
       groups.set(groupId, group);
     }
     const ir = buildOperation(program, collector, op, groupId);
+    const auth = schemes.requirement(op.authentication);
+    if (auth) ir.auth = auth;
     built.push([op, ir]);
     group.operations.push(ir);
   }
@@ -114,7 +121,7 @@ function buildService(program: Program, collector: TypeCollector, service: HttpS
       ...(s.description ? { description: s.description } : {}),
       parameters: [...s.parameters.keys()],
     })),
-    auth: buildAuth(program, ns),
+    auth: schemes.all(),
     groups: [...groups.values()],
   };
 }
@@ -134,21 +141,57 @@ function enclosingNamespaceDecorators(container: Namespace | Interface, service:
   return [];
 }
 
-function buildAuth(program: Program, ns: Namespace): AuthIR[] {
-  const seen = new Map<string, AuthIR>();
-  for (const option of getAuthentication(program, ns)?.options ?? []) {
-    for (const scheme of option.schemes) {
-      if (seen.has(scheme.id)) continue;
-      const auth: AuthIR = { id: scheme.id, type: scheme.type };
-      if (scheme.type === "http") auth.scheme = scheme.scheme;
-      if (scheme.type === "apiKey") {
-        auth.in = scheme.in;
-        auth.name = scheme.name;
-      }
-      seen.set(scheme.id, auth);
-    }
+/**
+ * The auth schemes of one service, deduplicated by id in first-use order (service `@useAuth` first). A different
+ * scheme reusing an id gets `_` appended until unique, as `resolveAuthentication` does for OpenAPI, without
+ * renaming the scheme objects TypeSpec keeps in its state.
+ */
+class AuthSchemes {
+  private readonly byId = new Map<string, { auth: AuthIR; key: string }>();
+  private readonly ids = new Map<HttpAuth, string>();
+
+  requirement(authentication: Authentication | undefined): AuthRequirementIR | undefined {
+    if (!authentication) return undefined;
+    return {
+      options: authentication.options.map((option) =>
+        option.schemes.flatMap((scheme) => {
+          const id = this.add(scheme);
+          return scheme.type === "noAuth" ? [] : [id];
+        }),
+      ),
+    };
   }
-  return [...seen.values()];
+
+  all(): AuthIR[] {
+    return [...this.byId.values()].map((entry) => entry.auth);
+  }
+
+  private add(scheme: HttpAuth): string {
+    const known = this.ids.get(scheme);
+    if (known) return known;
+    const auth: AuthIR = { id: scheme.id, type: scheme.type };
+    if (scheme.type === "http") auth.scheme = scheme.scheme;
+    if (scheme.type === "apiKey") {
+      auth.in = scheme.in;
+      auth.name = scheme.name;
+    }
+    const key = schemeKey(scheme);
+    let id = scheme.id;
+    for (let entry = this.byId.get(id); entry && entry.key !== key; entry = this.byId.get(id)) id += "_";
+    if (!this.byId.has(id)) this.byId.set(id, { auth: { ...auth, id }, key });
+    this.ids.set(scheme, id);
+    return id;
+  }
+}
+
+/** What makes two schemes the same one: everything but the id, the model, the description and scopes. */
+function schemeKey(scheme: HttpAuth): string {
+  const { id: _id, model: _model, description: _description, ...rest } = scheme;
+  if (rest.type === "oauth2") {
+    return JSON.stringify({ ...rest, flows: rest.flows.map((flow) => ({ ...flow, scopes: [] })) });
+  }
+  if (rest.type === "openIdConnect") return JSON.stringify({ ...rest, scopes: [] });
+  return JSON.stringify(rest);
 }
 
 function buildOperation(
