@@ -272,6 +272,40 @@ export function useOldNQuery(`);
     expect(typecheck(outputs, SHIPYARD_FLAGS)).toBe("");
   });
 
+  it("type-checks with @useAuth: the provider takes a client configured with ClientOptions<ShopAuth>", async () => {
+    const spec = `@service @useAuth(BearerAuth | Key) namespace Shop;
+      model Key is ApiKeyAuth<ApiKeyLocation.header, "X-Key">;
+      model Node { id: string }
+      @route("/nodes") interface Nodes {
+        @get list(@query limit?: int32): Node[];
+        @get @route("/{id}") read(@path id: string): Node;
+        @put @route("/{id}") @useAuth(NoAuth) update(@path id: string, @body body: Node): Node;
+      }`;
+    const consumer = `import { createElement } from "react";
+import { ShopClient, shopQueries, type ClientOptions, type Node, type ShopAuth } from "./index";
+import { ShopClientProvider, useListQuery, useReadQuery, useUpdateMutation } from "./hooks";
+
+const auth: ShopAuth = { BearerAuth: async () => "t", Key: () => undefined };
+const options: ClientOptions<ShopAuth> = { baseUrl: "/api", auth };
+const api = new ShopClient(options);
+export const tree = createElement(ShopClientProvider, { client: api }, null);
+export const read = shopQueries.nodes.read(api, { id: "1" });
+export function Component(): void {
+  const all: Node[] | undefined = useListQuery({ query: { limit: 1 } }).data;
+  const one: Node | undefined = useReadQuery({ id: "1" }).data;
+  useUpdateMutation().mutate({ id: "1", body: { id: "1" } });
+  // @ts-expect-error unknown scheme id
+  new ShopClient({ baseUrl: "/api", auth: { Nope: () => "x" } });
+  void [all, one];
+}
+`;
+    for (const emitterOptions of [house, {}]) {
+      const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, emitterOptions).compile(spec);
+      expect(outputs["client.ts"]).toContain("export interface ShopAuth {");
+      expect(typecheck({ ...outputs, "usage.ts": consumer }, SHIPYARD_FLAGS)).toBe("");
+    }
+  });
+
   it("reports hooks, Vars and keys generated twice across services or groups", async () => {
     const cases: [string, string, string, string][] = [
       [

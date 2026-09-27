@@ -145,6 +145,34 @@ describe("flat client react-query (runtime)", () => {
     expect([init.method, url]).toEqual(["HEAD", "http://x/nodes/1"]);
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
+
+  it("sends @useAuth credentials and the query's signal from a query hook", async () => {
+    const authSpec = `@service @useAuth(BearerAuth) namespace Shop;
+      model Node { id: string; name: string }
+      @route("/nodes") interface Nodes {
+        @get @route("/{id}") read(@path id: string, @query expand?: boolean): Node;
+        @put @route("/{id}") @useAuth(NoAuth) update(@path id: string, @body body: Node): Node;
+      }`;
+    const { outputs } = await nextjs({ "client-style": "flat", "react-query": true }, { layout: "single-file" }).compile(authSpec);
+    const importFile = await write("flat-auth", outputs);
+    const [{ ShopClient }, hooks] = await Promise.all([importFile("client.ts"), importFile("hooks.ts")]);
+    const fetch = vi.fn(async () => json(node));
+    const token = vi.fn(async () => "t0k");
+    current.client = new ShopClient({ baseUrl: "http://x", fetch, headers: { authorization: "Bearer stale" }, auth: { BearerAuth: token } });
+
+    const options = hooks.useReadQuery({ id: "a b", query: { expand: true } });
+    await expect(new QueryClient().fetchQuery(options)).resolves.toEqual(node);
+    const [url, init] = fetch.mock.calls[0] as unknown as Call;
+    expect(url).toBe("http://x/nodes/a%20b?expand=true");
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer t0k");
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(token).toHaveBeenCalledTimes(1);
+
+    await hooks.useUpdateMutation().mutationFn({ id: "1", body: node });
+    const [, noAuth] = fetch.mock.calls[1] as unknown as Call;
+    expect(new Headers(noAuth.headers).get("authorization")).toBe("Bearer stale");
+    expect(token).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("grouped client react-query (runtime)", () => {
