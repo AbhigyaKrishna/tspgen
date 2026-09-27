@@ -201,7 +201,7 @@ importers:
         version: 1.16.0(@types/node@24.13.6)
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
 
   e2e/kotlin:
     dependencies:
@@ -217,9 +217,18 @@ importers:
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)
+      '@typespec/events':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/sse':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/versioning':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
@@ -244,9 +253,18 @@ importers:
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)
+      '@typespec/events':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/sse':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/versioning':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
@@ -275,9 +293,18 @@ importers:
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)
+      '@typespec/events':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/sse':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/versioning':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
@@ -291,9 +318,18 @@ importers:
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)
+      '@typespec/events':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/sse':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/versioning':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
@@ -310,9 +346,18 @@ importers:
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)
+      '@typespec/events':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/sse':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
 
   packages/kotlin-ktor-server:
     dependencies:
@@ -326,9 +371,18 @@ importers:
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)
+      '@typespec/events':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/sse':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
 
   packages/ts-nextjs-client:
     dependencies:
@@ -348,9 +402,18 @@ importers:
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)
+      '@typespec/events':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/sse':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -367,9 +430,18 @@ importers:
       '@typespec/compiler':
         specifier: 1.16.0
         version: 1.16.0(@types/node@24.13.6)
+      '@typespec/events':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/http':
         specifier: 1.16.0
-        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/sse':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams':
+        specifier: 0.86.0
+        version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
       '@typespec/versioning':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
@@ -1008,6 +1080,12 @@ packages:
     engines: {node: '>=22.0.0'}
     hasBin: true
 
+  '@typespec/events@0.86.0':
+    resolution: {integrity: sha512-lT+5uBXSjjJi4npZZsleJel9yhqT6Y39m4d3wIYVsQq/zOznBMylRTrBDuQD5xntTgwKc/nLsxXJ0cuTrUBHDQ==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@typespec/compiler': ^1.16.0
+
   '@typespec/http@1.16.0':
     resolution: {integrity: sha512-4cODL4uqoj6YGj3Z04mQx1JwrM7o4Ytv4dO75o3Y3fx66v4BF4B5hF2dwnwh02Xe0e9qO1aDoaRlO2QGDz3mEA==}
     engines: {node: '>=22.0.0'}
@@ -1017,6 +1095,21 @@ packages:
     peerDependenciesMeta:
       '@typespec/streams':
         optional: true
+
+  '@typespec/sse@0.86.0':
+    resolution: {integrity: sha512-32+WQ4NDoIA70nkuhpr8MdF+hkBx3VKESNocWMN8z4/RaYq9/CdBOJhV7Y/hy3Y5+tbVg0/3u7lLSfvmtyg5Cw==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@typespec/compiler': ^1.16.0
+      '@typespec/events': ^0.86.0
+      '@typespec/http': ^1.16.0
+      '@typespec/streams': ^0.86.0
+
+  '@typespec/streams@0.86.0':
+    resolution: {integrity: sha512-zK2kFtj53dVYnza6a6peEc5KPZ2l9iQCLaaoN1mO7IIYhNCaUMotv6qvbNJF7rw46HMm7u1Xzbi6NqeyVnnb9A==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@typespec/compiler': ^1.16.0
 
   '@typespec/versioning@0.86.0':
     resolution: {integrity: sha512-/VUgQXSNcwbhNllTKptGAcoxYCh3+E/a9RUcmlBj7v04yIN4rkSFFmxHKRWKuKaz9LYQerXSPrVNM6Ja1msFlw==}
@@ -2004,7 +2097,24 @@ snapshots:
     transitivePeerDependencies:
       - '@types/node'
 
-  '@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))':
+  '@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))':
+    dependencies:
+      '@typespec/compiler': 1.16.0(@types/node@24.13.6)
+
+  '@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))':
+    dependencies:
+      '@typespec/compiler': 1.16.0(@types/node@24.13.6)
+    optionalDependencies:
+      '@typespec/streams': 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+
+  '@typespec/sse@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/events@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))(@typespec/http@1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))':
+    dependencies:
+      '@typespec/compiler': 1.16.0(@types/node@24.13.6)
+      '@typespec/events': 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+      '@typespec/http': 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+      '@typespec/streams': 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+
+  '@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))':
     dependencies:
       '@typespec/compiler': 1.16.0(@types/node@24.13.6)
 

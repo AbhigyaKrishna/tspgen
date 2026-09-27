@@ -2,6 +2,7 @@ import { NoTarget, resolvePath, type Program } from "@typespec/compiler";
 import { relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApiIR } from "../ir/build.js";
+import { loadSseLibraries, usesSseLibraries } from "../ir/sse.js";
 import { loadVersioning, resolveServices } from "../ir/versioning.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
 import { normalizeDir, writeOutputs, type OutputFile } from "../output/manifest.js";
@@ -63,7 +64,13 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
   const version = typeof emitterOptions.version === "string" ? emitterOptions.version : undefined;
   const resolution = resolveServices(program, loaded.versioning, version);
   if (resolution.failed) return;
-  const api = buildApiIR(program, { generics: emitterOptions.generics !== false, services: resolution.services });
+  // Without the SSE libraries, event streams are untyped (the operations report sse-libraries-missing).
+  const sse = usesSseLibraries(program) ? await loadSseLibraries() : undefined;
+  const api = buildApiIR(program, {
+    generics: emitterOptions.generics !== false,
+    services: resolution.services,
+    ...(sse ? { sse } : {}),
+  });
   let ir = language.transform(api, {
     program,
     options: emitterOptions,

@@ -34,7 +34,8 @@ import { reportDiagnostic } from "../lib.js";
 import { pascal } from "../naming.js";
 import { collectDecorators } from "./decorators.js";
 import { docInfo } from "./docs.js";
-import type { ConstraintsIR, EnumIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
+import { isEventsUnion, type SseLibraries } from "./sse.js";
+import type { ConstraintsIR, EnumIR, EventIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
 import type { ResolvedService } from "./versioning.js";
 
 const UNKNOWN: TypeRef = { kind: "unknown" };
@@ -57,13 +58,18 @@ export class TypeCollector {
 
   constructor(
     private readonly program: Program,
-    private readonly options: { generics: boolean } = { generics: true },
+    private readonly options: { generics: boolean; sse?: SseLibraries | undefined } = { generics: true },
   ) {}
 
   /** The TypeSpec type collected under `id`, if any. */
   sourceOf(id: string): Type | undefined {
     for (const [type, typeId] of this.ids) if (typeId === id) return type;
     return undefined;
+  }
+
+  /** The type collected under `id`, if any. */
+  typeOf(id: string): TypeIR | undefined {
+    return this.types.get(id);
   }
 
   getTypes(): TypeIR[] {
@@ -113,7 +119,8 @@ export class TypeCollector {
         if (!e.node || e.node !== this.service?.versionEnum) this.collectEnum(e);
       },
       union: (u) => {
-        if (u.name && !isTemplateDeclaration(u)) this.unionRef(u, u.name);
+        // An @events union is generated only when a stream (or a JSON use) refers to it.
+        if (u.name && !isTemplateDeclaration(u) && !isEventsUnion(this.program, u, this.options.sse)) this.unionRef(u, u.name);
       },
     });
   }
@@ -474,6 +481,7 @@ export class TypeCollector {
   }
 
   private unionRef(union: Union, hint: string): TypeRef {
+    if (isEventsUnion(this.program, union, this.options.sse)) return { kind: "named", id: this.collectEvents(union, hint) };
     const variants = [...union.variants.values()];
     const nonNull = variants.filter((v) => !isNullType(v.type));
     const single = !union.name && nonNull.length === 1;
@@ -521,6 +529,58 @@ export class TypeCollector {
     }
     return id;
   }
+
+  /**
+   * An `@events` union: a union whose variants are the event payloads, plus the events (name, payload, content type,
+   * terminal) from `@typespec/events` / `@typespec/sse`.
+   */
+  private collectEvents(union: Union, hint: string): string {
+    const existing = this.ids.get(union);
+    if (existing) return existing;
+    const { id, name, namespace } = this.identify(union, hint);
+    if (this.collected(union, id)) return id;
+    this.ids.set(union, id);
+    const ir: UnionIR = {
+      kind: "union",
+      id,
+      name,
+      namespace,
+      ...docInfo(this.program, union),
+      decorators: collectDecorators(union),
+      variants: [],
+      events: [],
+    };
+    this.types.set(id, ir);
+    const libs = this.options.sse!;
+    const [definitions] = libs.getEventDefinitions(this.program, union);
+    for (const definition of definitions) {
+      const variant = definition.root;
+      const variantName = typeof variant.name === "string" ? variant.name : undefined;
+      const payload = this.ref(definition.payloadType, `${name}${pascal(variantName ?? "Message")}`);
+      const { docs } = docInfo(this.program, variant);
+      ir.variants.push({ ...(variantName ? { name: variantName } : {}), type: payload, ...(docs ? { docs } : {}) });
+      const event: EventIR = {
+        name: definition.eventType ?? "message",
+        payload,
+        contentType: definition.payloadContentType ?? defaultEventContentType(definition.payloadType),
+        terminal: libs.isTerminalEvent(this.program, variant),
+        ...(docs ? { docs } : {}),
+      };
+      ir.events!.push(event);
+    }
+    return id;
+  }
+}
+
+/** "text/plain" for string payloads (scalars deriving from string, string literals), "application/json" otherwise. */
+function defaultEventContentType(type: Type): string {
+  if (type.kind === "String") return "text/plain";
+  for (let current = type.kind === "Scalar" ? type : undefined; current; current = current.baseScalar) {
+    if (current.name === "string" && current.namespace && getNamespaceFullName(current.namespace) === "TypeSpec") {
+      return "text/plain";
+    }
+  }
+  return "application/json";
 }
 
 /** What distinguishes versions of a declaration: its properties, members or variants. */

@@ -52,6 +52,24 @@ export const $lib = createTypeSpecLibrary({
         default: paramMessage`Type '${"id"}' is used by several services at different versions; the first one is generated.`,
       },
     },
+    "sse-libraries-missing": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Operation '${"operation"}' streams typed server-sent events, but tspgen could not load @typespec/streams, @typespec/events and @typespec/sse; install them next to tspgen. The events are generated untyped (SseMessage).`,
+      },
+    },
+    "unsupported-sse-response": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`Operation '${"operation"}' returns a text/event-stream response together with other success responses or response headers; only a single success response can stream. It is treated as a text body.`,
+      },
+    },
+    "events-in-json": {
+      severity: "warning",
+      messages: {
+        default: paramMessage`@events union '${"union"}' is used as a regular type (${"where"}); it is generated as an event type for server-sent event streams and can't be serialized as JSON.`,
+      },
+    },
     "template-error": {
       severity: "error",
       messages: {

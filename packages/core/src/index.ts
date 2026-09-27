@@ -10,6 +10,7 @@ export {
   type ServiceResolution,
   type VersioningApi,
 } from "./ir/versioning.js";
+export { loadSseLibraries, usesSseLibraries, type EventDefinition, type SseLibraries } from "./ir/sse.js";
 export { collectDecorators, decoratorArg, decoratorArgs } from "./ir/decorators.js";
 export { TemplateEngine, TemplateNotFoundError, type TemplateLayer } from "./templates/engine.js";
 export { ExtensionRegistry } from "./plugins/registry.js";

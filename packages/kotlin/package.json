@@ -46,7 +46,10 @@
   },
   "devDependencies": {
     "@typespec/compiler": "1.16.0",
+    "@typespec/events": "0.86.0",
     "@typespec/http": "1.16.0",
+    "@typespec/sse": "0.86.0",
+    "@typespec/streams": "0.86.0",
     "@typespec/versioning": "0.86.0"
   }
 }

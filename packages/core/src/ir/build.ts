@@ -1,5 +1,6 @@
 import type { Program } from "@typespec/compiler";
 import { buildServices } from "./services.js";
+import type { SseLibraries } from "./sse.js";
 import { TypeCollector } from "./type-collector.js";
 import type { ApiIR } from "./types.js";
 import { resolveServices, type ResolvedService, type VersioningApi } from "./versioning.js";
@@ -20,11 +21,16 @@ export interface BuildOptions {
    * is skipped.
    */
   services?: ResolvedService[];
+  /**
+   * The SSE libraries (`loadSseLibraries`) for typed event streams; without them every `text/event-stream`
+   * response is untyped.
+   */
+  sse?: SseLibraries;
 }
 
 export function buildApiIR(program: Program, options: BuildOptions = {}): ApiIR {
-  const collector = new TypeCollector(program, { generics: options.generics ?? true });
+  const collector = new TypeCollector(program, { generics: options.generics ?? true, sse: options.sse });
   const resolved = options.services ?? resolveServices(program, options.versioning, options.version).services;
-  const services = buildServices(program, collector, resolved);
+  const services = buildServices(program, collector, resolved, options.sse);
   return { services, types: collector.getTypes() };
 }

@@ -25,6 +25,7 @@ import { reportDiagnostic } from "../lib.js";
 import { pascal } from "../naming.js";
 import { collectDecorators } from "./decorators.js";
 import { docInfo } from "./docs.js";
+import { declaresStream, isEventStream, streamEvents, type SseLibraries } from "./sse.js";
 import { hasParts, isBytes, splitNamespace, type TypeCollector } from "./type-collector.js";
 import type { ResolvedService } from "./versioning.js";
 import type {
@@ -43,7 +44,12 @@ import type {
 
 type BuiltOperation = [HttpOperation, OperationIR];
 
-export function buildServices(program: Program, collector: TypeCollector, services: ResolvedService[]): ServiceIR[] {
+export function buildServices(
+  program: Program,
+  collector: TypeCollector,
+  services: ResolvedService[],
+  sse?: SseLibraries,
+): ServiceIR[] {
   const httpServices = services.map((resolved) => {
     const [service, diagnostics] = getHttpService(program, resolved.namespace);
     program.reportDiagnostics(diagnostics);
@@ -52,7 +58,7 @@ export function buildServices(program: Program, collector: TypeCollector, servic
   const built: BuiltOperation[] = [];
   const result = httpServices.map((service, i) => {
     collector.enterService(services[i]);
-    const ir = buildService(program, collector, service, built, services[i].version);
+    const ir = buildService(program, collector, service, built, services[i].version, sse);
     collector.enterService(undefined);
     return ir;
   });
@@ -72,6 +78,7 @@ function buildService(
   service: HttpService,
   built: BuiltOperation[],
   version: ServiceIR["version"],
+  sse: SseLibraries | undefined,
 ): ServiceIR {
   const ns = service.namespace;
   collector.collectNamespace(ns);
@@ -117,7 +124,7 @@ function buildService(
       };
       groups.set(groupId, group);
     }
-    const ir = buildOperation(program, collector, op, groupId);
+    const ir = buildOperation(program, collector, op, groupId, sse);
     const auth = schemes.requirement(op.authentication);
     if (auth) ir.auth = auth;
     built.push([op, ir]);
@@ -215,6 +222,7 @@ function buildOperation(
   collector: TypeCollector,
   op: HttpOperation,
   groupId: string,
+  sse: SseLibraries | undefined,
 ): OperationIR {
   const opName = op.operation.name;
   const base = pascal(opName);
@@ -243,9 +251,18 @@ function buildOperation(
     path: op.path,
     ...docInfo(program, op.operation),
     params,
-    responses: op.responses.flatMap((r) => buildResponses(program, collector, r, base, op.responses.length > 1)),
+    responses: [],
     decorators: collectDecorators(op.operation),
   };
+  const streams = { sse, streamable: streamable(program, op), rejected: false };
+  ir.responses = op.responses.flatMap((r) => buildResponses(program, collector, op, r, base, op.responses.length > 1, streams));
+  if (streams.rejected) {
+    reportDiagnostic(program, {
+      code: "unsupported-sse-response",
+      format: { operation: getTypeName(op.operation) },
+      target: op.operation,
+    });
+  }
   if (body) {
     const property = "property" in body ? body.property : undefined;
     const bodyDocs = property ? docInfo(program, property).docs : undefined;
@@ -347,6 +364,15 @@ function namedIds(ref: TypeRef): string[] {
 function checkJsonUses(program: Program, collector: TypeCollector, built: BuiltOperation[]): void {
   const types = collector.getTypes();
   const multipart = new Set(types.filter((t) => t.kind === "model" && t.multipart).map((t) => t.id));
+  const events = new Set(types.filter((t) => t.kind === "union" && t.events).map((t) => t.id));
+  // @events unions only describe event streams; generated as event types, they have no JSON form.
+  const warnEvents = (refs: TypeRef[], where: string, target: () => Type | typeof NoTarget) => {
+    for (const id of new Set(refs.flatMap(namedIds))) {
+      if (events.has(id)) {
+        reportDiagnostic(program, { code: "events-in-json", format: { union: id, where }, target: target() });
+      }
+    }
+  };
   // Targets are resolved only when reporting: `sourceOf` scans every type.
   const warnMultipart = (refs: TypeRef[], where: string, target: () => Type | typeof NoTarget) => {
     for (const id of new Set(refs.flatMap(namedIds))) {
@@ -366,6 +392,7 @@ function checkJsonUses(program: Program, collector: TypeCollector, built: BuiltO
       reportDiagnostic(program, { code: "file-in-json", messageId: "default", format: { model: t.id }, target: target() });
     }
     warnMultipart(refs, `in '${t.id}'`, target);
+    if (!(t.kind === "union" && t.events)) warnEvents(refs, `in '${t.id}'`, target);
   }
   for (const [op, ir] of built) {
     const responses = ir.responses.flatMap((r) => (r.body ? [r.body.type] : []));
@@ -379,15 +406,45 @@ function checkJsonUses(program: Program, collector: TypeCollector, built: BuiltO
     }
     warnMultipart(responses, `response of '${getTypeName(op.operation)}'`, () => op.operation);
     if (ir.body?.kind === "single") warnMultipart([ir.body.type], `JSON body of '${getTypeName(op.operation)}'`, () => op.operation);
+    const name = getTypeName(op.operation);
+    warnEvents(
+      [
+        ...ir.params.map((p) => p.type),
+        ...(ir.body ? [ir.body.type, ...(ir.body.parts ?? []).map((p) => p.type)] : []),
+        ...ir.responses.flatMap((r) => [...r.headers.map((h) => h.type), ...(r.body && !r.body.stream ? [r.body.type] : [])]),
+      ],
+      `'${name}'`,
+      () => op.operation,
+    );
   }
+}
+
+/** Only the single success response of an operation (a fixed status, no response headers) can stream. */
+function streamable(program: Program, op: HttpOperation): boolean {
+  const success = op.responses.filter((r) => !isErrorModel(program, r.type));
+  const contents = success.flatMap((r) => r.responses);
+  return (
+    contents.length === 1 &&
+    typeof success[0].statusCodes === "number" &&
+    !contents[0].properties.some((p) => p.kind === "header")
+  );
+}
+
+interface StreamContext {
+  sse: SseLibraries | undefined;
+  streamable: boolean;
+  /** Set when a text/event-stream response could not stream: it is then a text body (unsupported-sse-response). */
+  rejected: boolean;
 }
 
 function buildResponses(
   program: Program,
   collector: TypeCollector,
+  op: HttpOperation,
   response: HttpOperationResponse,
   base: string,
   multiple: boolean,
+  streams: StreamContext,
 ): ResponseIR[] {
   const codes = response.statusCodes;
   const statusCodes: StatusCodes =
@@ -414,10 +471,28 @@ function buildResponses(
       ),
     };
     if (content.body) {
+      const eventStream = !isError && isEventStream(content.body.contentTypes);
+      if (eventStream && !streams.streamable) streams.rejected = true;
+      const stream = eventStream && streams.streamable;
+      // Rejected streams keep their declared (string) body: their events union is not collected for them.
+      const events = stream ? streamEvents(program, content, streams.sse) : undefined;
+      const hint = `${base}Response${multiple ? suffix : ""}`;
       ir.body = {
-        type: collector.ref(content.body.type, `${base}Response${multiple ? suffix : ""}`),
+        type: collector.ref(events ?? content.body.type, events ? `${base}Events` : hint),
         contentTypes: content.body.contentTypes,
       };
+      if (stream) {
+        const union = ir.body.type.kind === "named" ? collector.typeOf(ir.body.type.id) : undefined;
+        const typed = union?.kind === "union" ? union.events : undefined;
+        ir.body.stream = { protocol: "sse", ...(typed ? { events: typed } : {}) };
+        if (!events && !streams.sse && declaresStream(program, content)) {
+          reportDiagnostic(program, {
+            code: "sse-libraries-missing",
+            format: { operation: getTypeName(op.operation) },
+            target: op.operation,
+          });
+        }
+      }
     }
     return ir;
   });

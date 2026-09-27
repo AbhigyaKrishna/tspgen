@@ -46,7 +46,10 @@
     "@tanstack/react-query": "^5.100.0",
     "@types/react": "^19.3.0",
     "@typespec/compiler": "1.16.0",
+    "@typespec/events": "0.86.0",
     "@typespec/http": "1.16.0",
+    "@typespec/sse": "0.86.0",
+    "@typespec/streams": "0.86.0",
     "react": "^19.3.0",
     "zod": "^4.6.5"
   }

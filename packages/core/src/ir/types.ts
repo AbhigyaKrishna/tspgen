@@ -89,6 +89,34 @@ export interface UnionIR extends NamedTypeBase {
   kind: "union";
   variants: UnionVariantIR[];
   discriminator?: { property: string; envelope: "object" | "none"; envelopeProperty: string };
+  /**
+   * An `@events` union (`@typespec/events`): the events of a typed server-sent event stream, one per variant, in
+   * declaration order. `variants` then hold the event payload types.
+   */
+  events?: EventIR[];
+}
+
+/** One event of an `@events` union. */
+export interface EventIR {
+  /** SSE `event:` field value: the variant name, "message" for an unnamed variant. */
+  name: string;
+  /** Payload type: the `@data` property's type of an event envelope, else the variant's type. */
+  payload: TypeRef;
+  /**
+   * Payload content type: its `@contentType`; otherwise "text/plain" for string (and string literal) payloads,
+   * "application/json" for the others.
+   */
+  contentType: string;
+  /** `@terminalEvent`: the server ends the stream after this event. */
+  terminal: boolean;
+  docs?: string;
+}
+
+/** A streamed response body. */
+export interface StreamIR {
+  protocol: "sse";
+  /** Events of a typed stream (the response body type is the `@events` union); absent for an untyped stream. */
+  events?: EventIR[];
 }
 
 export interface UnionVariantIR extends DocInfo {
@@ -223,7 +251,11 @@ export interface ResponseIR {
   description?: string;
   isError: boolean;
   headers: HeaderIR[];
-  body?: { type: TypeRef; contentTypes: string[] };
+  /**
+   * `stream`: a server-sent event stream (`text/event-stream`), set only on the single success response of an
+   * operation. Its `type` is the `@events` union of a typed stream, the declared body type (string) otherwise.
+   */
+  body?: { type: TypeRef; contentTypes: string[]; stream?: StreamIR };
 }
 
 export interface HeaderIR {
