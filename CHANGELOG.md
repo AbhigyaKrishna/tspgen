@@ -3,6 +3,46 @@
 All packages (`@abhigyakrishna/tspgen-core`, `-kotlin`, `-kotlin-ktor-server`, `-kotlin-ktor-client`,
 `-typescript`, `-ts-nextjs-client`) are released together with the same version.
 
+## Unreleased
+
+### Added
+
+- Ktor server: `ServerError` (`status`, safe `detail`, `kind`, `cause`), `ServerErrorKind` and
+  `ServerErrorResponder` in `ServerSupport.kt`; `<svc>Errors(responder)` sends every error without a declared body
+  (unmapped `ApiException`, 400, 413, 415) through the responder, so an API can answer them in its own error model.
+  The default follows `error-body` (problem+json, or status only with `none`).
+- Ktor server: `ApplicationCall.serverErrorOf(cause)` classifies the same errors for a hand-written StatusPages;
+  `respondProblem()` is public and emitted whatever `error-body` says.
+- Ktor server: `features.errors` (default `true`); `false` skips `<Service>Errors.kt` and the module's StatusPages
+  install, so no StatusPages dependency is needed.
+- Ktor server: `features.explicit-nulls` (default `true`); `false` sets `explicitNulls = false` on `serverJson`.
+
+### Changed
+
+- Kotlin: generated model checks (constraint decorators, `notBlank`) throw `ModelCheckException`, an
+  `IllegalArgumentException` emitted in the models package when a model has a check, instead of calling `require`;
+  messages are unchanged. The Ktor server reports only it as `FailedCheck`; any other `IllegalArgumentException` from
+  decoding a body (a `decimal` that does not parse, …) is `MalformedBody` and its message is not sent.
+- Ktor server: with `error-body: none`, `<svc>Errors()` now also registers the `BadRequestException`,
+  `PayloadTooLargeException` and `ContentTransformationException` handlers, answering the status with an empty body,
+  so a custom responder receives them too. In 0.2.0 `none` left them to Ktor, which answers a `text/plain` body with
+  the exception's message (which can name model classes) and debug-logs them.
+
+### Breaking
+
+- Ktor server: because of the above, with `error-body: none` and `features.status-pages: false`, a hand-written
+  `install(StatusPages) { exception<BadRequestException> { … } }` (or `PayloadTooLargeException` /
+  `ContentTransformationException`) registered *before* your call to `<svc>Errors()` is now replaced by the
+  generated handler for the same exception class (Ktor's rule: the later registration wins for the same class) —
+  register yours after `<svc>Errors()` instead, or pass it a `responder`.
+- Ktor server: `respondProblem` is now `public` (previously `internal`, and only emitted with `error-body: problem`);
+  a function of the same name elsewhere in the server package now clashes with it.
+- Ktor server template overrides: `ServerError`, `ServerErrorKind`, `ServerErrorResponder` and the now-always-emitted
+  `respondProblem` live in `ServerSupport.kt`, so a 0.2.0 override of `ktor-server/support` no longer satisfies the
+  new `ktor-server/errors` template, which needs all four — add them to your override. The `problem` context
+  variable `ktor-server/support` used to receive (to gate emitting `respondProblem`) is gone; `ktor-server/errors`
+  still receives it, to choose its default responder.
+
 ## 0.2.0 — 2026-09-28
 
 Generated output changes for existing specs are listed in the README under

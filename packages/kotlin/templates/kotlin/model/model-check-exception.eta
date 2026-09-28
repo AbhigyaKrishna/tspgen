@@ -1,0 +1,5 @@
+/**
+ * Thrown by the models' generated checks (constraint decorators, `notBlank`) when a value violates one; the message
+ * names the property and the rule, e.g. "name must not be blank". An [IllegalArgumentException], as `require` throws.
+ */
+<%= it.h.visibility(it) %>class ModelCheckException(message: String) : IllegalArgumentException(message)

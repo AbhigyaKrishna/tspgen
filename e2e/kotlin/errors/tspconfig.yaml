@@ -1,0 +1,11 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../build/generated/tspgen-errors"
+    package: "com.example.faults"
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          features:
+            module: false
+            explicit-nulls: false

@@ -1,8 +1,9 @@
 /**
- * Maps the <%= it.service.name %> API's exceptions to responses. A handler registered after this call replaces the one here for
- * the same exception class.
+ * Maps the <%= it.service.name %> API's exceptions to responses. Typed exceptions answer their declared body; every other error the
+ * generated routes raise goes to [responder] as a [ServerError] (default: <%= it.problem ? "an RFC 9457 problem" : "the status without a body" %>). A handler registered
+ * after this call replaces the one here for the same exception class.
  */
-<%= it.h.visibility(it) %>fun StatusPagesConfig.<%= it.errorsFn %>() {
+<%= it.h.visibility(it) %>fun StatusPagesConfig.<%= it.errorsFn %>(responder: ServerErrorResponder = { <%~ it.problem ? "respondProblem(it.status, it.detail)" : "respond(it.status)" %> }) {
 <% for (const e of it.exceptions) { -%>
     exception<<%= e %>> { call, cause ->
 <% const serializer = it.exceptionSerializers?.[e]; -%>
@@ -13,22 +14,9 @@
 <% } -%>
     }
 <% } -%>
-    exception<ApiException> { call, cause ->
-<% if (it.problem) { -%>
-        call.respondProblem(HttpStatusCode.fromValue(cause.status), cause.message)
-<% } else { -%>
-        call.respond(HttpStatusCode.fromValue(cause.status))
-<% } -%>
-    }
-<% if (it.problem) { -%>
-    exception<BadRequestException> { call, cause ->
-        call.respondProblem(HttpStatusCode.BadRequest, cause.problemDetail())
-    }
-    exception<PayloadTooLargeException> { call, cause ->
-        call.respondProblem(HttpStatusCode.PayloadTooLarge, cause.message)
-    }
-    exception<ContentTransformationException> { call, _ ->
-        call.respondProblem(HttpStatusCode.UnsupportedMediaType, "Content type ${call.request.contentType()} is not supported")
+<% for (const e of ["ApiException", "BadRequestException", "PayloadTooLargeException", "ContentTransformationException"]) { -%>
+    exception<<%= e %>> { call, cause ->
+        responder(call, call.serverErrorOf(cause)!!)
     }
 <% } -%>
 }

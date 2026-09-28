@@ -200,14 +200,14 @@ data class Req(
     val b: String? = null,
 ) {
     init {
-        require(name.isNotEmpty()) { "name must not be empty" }
-        require(name.length <= 200) { "name must be at most 200 characters" }
-        require(code == null || code.length >= 3) { "code must be at least 3 characters" }
-        require(Regex("^[a-z]+\\$").containsMatchIn(slug)) { "slug must match ^[a-z]+\\$" }
-        require(tags.size >= 1) { "tags must have at least 1 item" }
-        require(tags.size <= 10) { "tags must have at most 10 items" }
-        require(score >= 0) { "score must be at least 0" }
-        require(score <= 100) { "score must be at most 100" }
+        if (!(name.isNotEmpty())) throw ModelCheckException("name must not be empty")
+        if (!(name.length <= 200)) throw ModelCheckException("name must be at most 200 characters")
+        if (!(code == null || code.length >= 3)) throw ModelCheckException("code must be at least 3 characters")
+        if (!(Regex("^[a-z]+\\$").containsMatchIn(slug))) throw ModelCheckException("slug must match ^[a-z]+\\$")
+        if (!(tags.size >= 1)) throw ModelCheckException("tags must have at least 1 item")
+        if (!(tags.size <= 10)) throw ModelCheckException("tags must have at most 10 items")
+        if (!(score >= 0)) throw ModelCheckException("score must be at least 0")
+        if (!(score <= 100)) throw ModelCheckException("score must be at most 100")
         require((a == null) == (b == null)) { "a and b go together" }
     }
 }
@@ -224,8 +224,8 @@ data class Req(
       }
     `;
     const checks = [
-      `require(name.isNotBlank()) { "name must not be blank" }`,
-      `require(note == null || note.isNotBlank()) { "note must not be blank" }`,
+      `if (!(name.isNotBlank())) throw ModelCheckException("name must not be blank")`,
+      `if (!(note == null || note.isNotBlank())) throw ModelCheckException("note must not be blank")`,
     ];
     for (const validation of [true, false]) {
       const req = (await emitter({ features: { validation } }).compile(spec)).outputs["models/com/acme/models/Req.kt"];
@@ -240,7 +240,7 @@ data class Req(
       model Req { @pattern("[0-9]") code: string }
     `);
     const req = outputs["models/com/acme/models/Req.kt"];
-    expect(req).toContain(`require(Regex("[0-9]").containsMatchIn(code)) { "code must match [0-9]" }`);
+    expect(req).toContain(`if (!(Regex("[0-9]").containsMatchIn(code))) throw ModelCheckException("code must match [0-9]")`);
     expect(req).not.toContain(".matches(");
   });
 
@@ -252,7 +252,7 @@ data class Req(
       model Req { b: Slug | null }
     `);
     expect(outputs["models/com/acme/models/Req.kt"]).toContain(
-      `require(b == null || Regex("^[a-z]+\\$").containsMatchIn(b)) { "b must match ^[a-z]+\\$" }`,
+      `if (!(b == null || Regex("^[a-z]+\\$").containsMatchIn(b))) throw ModelCheckException("b must match ^[a-z]+\\$")`,
     );
   });
 

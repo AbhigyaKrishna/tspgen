@@ -127,7 +127,7 @@ export type ScalarStyle = "inline" | "typealias" | "value-class";
 export interface KtValueClass extends KtDeclBase {
   kind: "value-class";
   value: KtTypeUse;
-  /** `init { require(…) }` lines from the scalar's own constraints (features.validation). */
+  /** `init { }` check lines (throwing `ModelCheckException`) from the scalar's own constraints (features.validation). */
   checks: string[];
 }
 
@@ -280,6 +280,11 @@ export interface KotlinIR {
    * not empty: bodies that are such values themselves (`List<Instant>`) need it in the Json configuration.
    */
   serializersModule?: string;
+  /**
+   * FQN of the generated `ModelCheckException`, when a model has a check throwing it (constraint decorators,
+   * `notBlank`, or an @meta check naming it): targets reference it only then.
+   */
+  modelCheckException?: string;
   /** `@encode(string)` on uint64 is used: ModelSerializers.kt declares `ULongAsStringSerializer`. */
   ulongAsString?: boolean;
   /**

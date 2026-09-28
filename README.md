@@ -35,7 +35,7 @@ options:
       - { namespace: "PetStore.Admin", package: "com.acme.admin" }
     errors: typed                       # typed | thrown (error responses documented only; you throw your own)
     features:                           # on/off gates; every key with its default: Options reference
-      validation: true                  # constraint decorators → init { require(...) } (default true)
+      validation: true                  # constraint decorators → init { } checks (default true)
     targets:
       - "@abhigyakrishna/tspgen-kotlin-ktor-server":
           output-dir: ./gen/server      # optional, any target: write its files elsewhere
@@ -125,21 +125,44 @@ wire format. A body whose JSON form its Kotlin type does not carry — an `@enco
 your content negotiation installs; typed error bodies, JSON event payloads and multipart JSON parts get the same
 serializer. Such a request body with a non-JSON content type answers 415.
 
-**Errors.** `<Service>Errors.kt` declares `StatusPagesConfig.<svc>Errors()` (emitted with or without the module):
-typed `…Exception`s answer their status and error body; any other `ApiException`, `BadRequestException` (missing or
-unparsable parameters, request bodies that fail to decode or fail a model check) and `PayloadTooLargeException`
-answer an RFC 9457 `application/problem+json` body — `{"type":"about:blank","title":"Bad Request","status":400,"detail":"name must not be blank"}`.
-The 400 detail is the message of a missing or unparsable parameter, a multipart check or a failed model check
-(`require`); a body that does not decode reads `Malformed request body`, plus the fields missing and the JSON path
-when known (`Malformed request body: missing 'name'`, `Malformed request body at path $.species`) — kotlinx's own
-messages name model classes and echo the request body, so they are never sent. A body Ktor cannot read at all
-(`ContentTransformationException`: an unsupported content type) answers a 415 problem naming the content type.
-`error-body: none` keeps 0.1.x's responses (the `ApiException` status without a body; Ktor's defaults for 400, 413
-and 415). The module
-installs StatusPages with it; `features.status-pages: false` leaves StatusPages to you (call `<svc>Errors()` in your
-own `install(StatusPages) { … }`). Handlers registered after `<svc>Errors()` replace the generated one for the same
-exception class. A buffered multipart model whose `init { require(…) }` fails answers 400, not 500.
-`IllegalArgumentException` is not mapped globally: thrown by a service, it is still a 500.
+**Errors.** `<Service>Errors.kt` declares `StatusPagesConfig.<svc>Errors(responder)`: typed `…Exception`s answer their
+status and error body; every other error the generated routes raise — any other `ApiException`,
+`BadRequestException` (missing or unparsable parameters, request bodies that fail to decode or fail a model check),
+`PayloadTooLargeException` and `ContentTransformationException` (an unsupported content type) — goes to `responder`
+as a `ServerError` (`status`, `detail`, `kind`, `cause`). The default responder answers an RFC 9457
+`application/problem+json` body — `{"type":"about:blank","title":"Bad Request","status":400,"detail":"name must not be blank"}`;
+with `error-body: none` it answers the status without a body.
+
+`detail` is safe to send: the message of a missing or unparsable parameter, a multipart check or a failed model check
+(`ModelCheckException`); `Malformed request body` plus the fields missing and the JSON path when known for a body that
+does not decode (`Malformed request body: missing 'name'`), a value its serializer rejects (`"abc"` for a `decimal`)
+included; `Content type … is not supported` for a 415. kotlinx's own messages
+name model classes and echo the request body, so don't build messages from `cause.message`. `kind` is one of
+`MissingParameter`, `InvalidParameter`, `MalformedBody`, `FailedCheck`, `PayloadTooLarge`, `UnsupportedMediaType`,
+`ApiException`. Kinds and `ServerError` fields may be added in later releases: keep an `else` branch in a `when` over
+`kind`.
+
+To answer in your own error model:
+
+```kotlin
+install(StatusPages) {
+    shopErrors { error ->
+        respond(error.status, ErrorResponse(error.status.value, codeOf(error.kind), error.detail, callId))
+    }
+}
+```
+
+(`callId` needs the `CallId` plugin installed; drop it, or use whatever request id your app already carries, if you
+don't install one.)
+
+Your own `install(StatusPages)` — in another module, or with `features.errors: false` (no `<Service>Errors.kt`, and
+no StatusPages dependency) — can classify the same errors with `call.serverErrorOf(cause)` (null for exceptions the
+generated server doesn't raise) and answer problem+json with `call.respondProblem(status, detail)`.
+
+The module installs StatusPages with `<svc>Errors()`; `features.status-pages: false` leaves StatusPages to you (call
+`<svc>Errors()` in your own `install(StatusPages) { … }`). Handlers registered after `<svc>Errors()` replace the
+generated one for the same exception class. A buffered multipart model whose `init { }` check fails answers 400,
+not 500. `IllegalArgumentException` is not mapped globally: thrown by a service, it is still a 500.
 
 ### Client
 
@@ -197,7 +220,7 @@ generated by `pnpm docs:options`.
 | `features.docs` | feature | `true` | declaration | KDoc/JSDoc from @doc and doc comments. |
 | `features.api-version` | feature | `true` | — | Version constant (API_VERSION) for @versioned services; unversioned services never get one. |
 | `features.generics` | feature | `true` | model | Template models once as generic types (Page<T>); false: one model per instance (PagePet). |
-| `features.validation` | feature | `true` | — | Constraint decorators (@minLength, @maxLength, @pattern, @minItems, @maxItems, @minValue, @maxValue) as init { require(...) } checks. |
+| `features.validation` | feature | `true` | — | Constraint decorators (@minLength, @maxLength, @pattern, @minItems, @maxItems, @minValue, @maxValue) as init { } checks throwing ModelCheckException (an IllegalArgumentException). |
 | `features.enum-unknown` | feature | `false` | declaration | String enums get an UNKNOWN member that unknown wire values decode to (encoding it throws); for clients — servers should reject unknown input. |
 
 ### `@abhigyakrishna/tspgen-kotlin-ktor-server` (target)
@@ -213,7 +236,7 @@ generated by `pnpm docs:options`.
 | `auth-providers` | object | `{}` | — | Auth scheme id → Kotlin expression naming its Ktor authentication provider (e.g. { BearerAuth: "JWT_AUTH" }); unmapped ids are used as string literals. |
 | `sse` | `text-writer` \| `plugin` | `text-writer` | — | How server-sent event streams are written: text-writer (respondBytesWriter, no extra dependency) or plugin (the ktor-server-sse plugin, installed by the module); per operation via @meta("kotlin:ktor-server", #{ sse }). |
 | `package` | string | — | — | Server package (default "<package>.server"). |
-| `error-body` | `problem` \| `none` | `problem` | — | Body of generated error responses without a declared body (unmapped ApiException, validation failures, 413): problem (RFC 9457 application/problem+json) or none. |
+| `error-body` | `problem` \| `none` | `problem` | — | Default responder of <svc>Errors() for errors without a declared body (unmapped ApiException, 400, 413, 415): problem (RFC 9457 application/problem+json) or none (status only). |
 | `sse-headers` | object | `{"Cache-Control":"no-store","X-Accel-Buffering":"no"}` | — | Headers set on every event-stream response (both sse modes); a configured map replaces the default, {} sets none. |
 | `features.module` | feature | `true` | — | <Service>Module.kt: content negotiation, StatusPages and routing. |
 | `features.auth` | feature | `true` | — | Wrap routes in authenticate(...) per the operations' @useAuth (off: only the authenticate/wrap meta keys). |
@@ -222,6 +245,8 @@ generated by `pnpm docs:options`.
 | `features.status-pages` | feature | `true` | — | The module installs StatusPages with <svc>Errors(); false: call <svc>Errors() inside your own install(StatusPages). |
 | `features.ignore-unknown-keys` | feature | `false` | — | Accept request JSON with keys the models don't declare (false: 400). |
 | `features.encode-defaults` | feature | `false` | — | Write optional properties equal to their default (unset ones as null) in responses and events; required ones are always written. |
+| `features.errors` | feature | `true` | — | <Service>Errors.kt: StatusPagesConfig.<svc>Errors(). false: not emitted and the module installs no StatusPages; classify errors with serverErrorOf() in your own. |
+| `features.explicit-nulls` | feature | `true` | — | serverJson writes null properties as null (kotlinx's explicitNulls); false: omits them (a required-but-nullable property included, which clients expecting the key, e.g. the generated TypeScript types, may not accept) and reads absent nullable ones as null. |
 
 ### `@abhigyakrishna/tspgen-kotlin-ktor-client` (target)
 
@@ -996,7 +1021,7 @@ unknown input value with 400; turn it on for client-only projects, or per enum/n
 
 **Kotlin `scalar-style`** (per scalar: `@meta("kotlin", #{ scalarStyle: "…" })`, `@Kotlin.type` still wins):
 `inline` (default) uses the base type; `typealias` declares `typealias PetId = String`; `value-class` declares
-`@Serializable @JvmInline value class PetId(val value: String)` whose `init { require }` checks the scalar's own
+`@Serializable @JvmInline value class PetId(val value: String)` whose `init { }` checks the scalar's own
 constraints (with `features.validation`) — constraints declared on a base scalar further up an `extends` chain are
 not carried onto the value class, only the most-derived scalar's own. Value classes serialize as their value (the
 wire is unchanged); Ktor parameters convert through the base type (`PetId(it)`, `id.value`); defaults render
@@ -1077,10 +1102,10 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `kotlin` | `annotations: string[]` | types, properties, enum members, operations | annotation lines |
 | `kotlin` | `imports: string[]` | types | extra imports |
 | `kotlin` | `implements: string[]` | models, sealed hierarchies | extra supertypes (FQN; qualified automatically on name clashes) |
-| `kotlin` | `checks: string[]` | models | statements appended to the data class `init { }` block (`init` is reserved in TypeSpec) |
+| `kotlin` | `checks: string[]` | models | statements appended to the data class `init { }` block (`init` is reserved in TypeSpec); throw `ModelCheckException("…")` (models package) for the Ktor server to answer `FailedCheck` with the message |
 | `kotlin` | ``features: #{ `enum-unknown` }`` | enums, string-literal unions, namespaces | override `features.enum-unknown` |
 | `kotlin` | `scalarStyle: "inline" \| "typealias" \| "value-class"` | scalars | override `scalar-style` |
-| `kotlin` / `typescript` (or `*`) | `notBlank: boolean` | string properties | `require(x.isNotBlank())`, emitted with or without `features.validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract; TypeScript: `.regex(/\S/)` on the zod schema |
+| `kotlin` / `typescript` (or `*`) | `notBlank: boolean` | string properties | an `x.isNotBlank()` check, emitted with or without `features.validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract; TypeScript: `.regex(/\S/)` on the zod schema |
 | `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`); replaces the wrapper generated from `@useAuth` |
 | `kotlin:ktor-server` / `kotlin:ktor-client` | `annotations: string[]` | operations, groups | annotations on service / client methods |
 | `kotlin:ktor-server` | `wrap: string[]` | namespaces, groups, operations | route-builder calls wrapped around routes, outermost first (dsl style); duplicates within one chain are dropped and shared prefixes share one block |
@@ -1278,7 +1303,7 @@ New defaults change generated output:
 | Flat per-call `headers` override `@useAuth` credentials, and a per-call `accept` header wins over a stream's `text/event-stream` | none |
 | Grouped `RequestOptions` accepts every `RequestInit` field (0.1.x: `next`, `cache`, `signal`, `headers`) and both styles take `init` defaults | none |
 | Ktor server responses and events omit unset optional properties (and optional properties equal to their default) instead of writing `"field": null`; clients that required the explicit `null` are affected. Required properties with a default are still written (`@EncodeDefault(EncodeDefault.Mode.ALWAYS)`) | `features: { encode-defaults: true }` on the Ktor server target |
-| Unmapped `ApiException`, 400, 413 and 415 responses from the Ktor server carry an RFC 9457 `application/problem+json` body where 0.1.x sent Ktor's defaults without one (clients asserting an empty body are affected); a body that does not decode gets the detail `Malformed request body` (with the missing fields / JSON path, never model class names or the body), one Ktor cannot read (unsupported content type) a 415 naming only the content type | `error-body: none` on the Ktor server target |
+| Unmapped `ApiException`, 400, 413 and 415 responses from the Ktor server carry an RFC 9457 `application/problem+json` body where 0.1.x sent Ktor's defaults without one (clients asserting an empty body are affected); a body that does not decode gets the detail `Malformed request body` (with the missing fields / JSON path, never model class names or the body), one Ktor cannot read (unsupported content type) a 415 naming only the content type | `error-body: none` on the Ktor server target (since the next release, `none` answers status-only and no longer falls back to Ktor's own defaults, which send a `text/plain` body with the exception's message) |
 | Buffered multipart models failing their `require` checks answer 400 instead of 500 | none (bug fix) |
 | `serverJson` (public; `internal` with `visibility: internal`) is generated in `ServerSupport.kt` with `features.module: false` too; a hand-written `serverJson` in the server package now clashes | rename yours |
 | `<svc>Errors()` moves from `<Service>Module.kt` to `<Service>Errors.kt` (same package and name) and is emitted with `features.module: false` too; a hand-written `<svc>Errors` in the same package now clashes | rename yours |

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "tsp compile kotlin.tsp && tsp compile secure.tsp --config tspconfig.resources.yaml && tsp compile secure.tsp --config tspconfig.nest.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml && tsp compile clash && tsp compile mapping && tsp compile mapping/resources.tsp --config mapping/tspconfig.resources.yaml",
+    "generate": "tsp compile kotlin.tsp && tsp compile secure.tsp --config tspconfig.resources.yaml && tsp compile secure.tsp --config tspconfig.nest.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml && tsp compile clash && tsp compile mapping && tsp compile mapping/resources.tsp --config mapping/tspconfig.resources.yaml && tsp compile errors && tsp compile errors/main.tsp --config errors/tspconfig.none.yaml",
     "test": "pnpm generate && ./gradlew test --console=plain"
   },
   "dependencies": {

@@ -12,11 +12,14 @@ const WRITER_HEADERS = ["content-type", "content-length", "transfer-encoding", "
 export interface ServerRuntime {
   /** `features.module`: `<Service>Module.kt` is emitted. */
   module: boolean;
-  /** The module installs StatusPages (`features.module` and `features.status-pages`). */
+  /** `features.errors`: `<Service>Errors.kt` is emitted. */
+  errors: boolean;
+  /** The module installs StatusPages (`features.module`, `features.errors` and `features.status-pages`). */
   statusPages: boolean;
   errorBody: "problem" | "none";
   ignoreUnknownKeys: boolean;
   encodeDefaults: boolean;
+  explicitNulls: boolean;
   /** `sse-headers` entries as Kotlin string literals, in configured order. */
   sseHeaders: [string, string][];
 }
@@ -25,10 +28,12 @@ export function serverRuntime(options: KtorServerOptions): ServerRuntime {
   const features = options.features;
   return {
     module: features.module,
-    statusPages: features.module && features["status-pages"],
+    errors: features.errors,
+    statusPages: features.module && features.errors && features["status-pages"],
     errorBody: options["error-body"] ?? "problem",
     ignoreUnknownKeys: features["ignore-unknown-keys"],
     encodeDefaults: features["encode-defaults"],
+    explicitNulls: features["explicit-nulls"],
     sseHeaders: Object.entries(options["sse-headers"] ?? { "Cache-Control": "no-store", "X-Accel-Buffering": "no" }).map(
       ([name, value]) => [kotlinString(name), kotlinString(value)],
     ),
@@ -37,10 +42,12 @@ export function serverRuntime(options: KtorServerOptions): ServerRuntime {
 
 /**
  * Option checks the JSON schema cannot express. `sse-headers` naming a writer-owned header is an error (the server
- * code is not emitted); `features.status-pages: true` set explicitly with `features.module: false` warns.
+ * code is not emitted); `features.status-pages: true` set explicitly with `features.module: false` or
+ * `features.errors: false` warns.
  */
 export function checkRuntime(program: Program, options: KtorServerOptions, features: ResolvedFeatures<string>): boolean {
   if (!options.features.module) reportUnsupportedFeature(program, features, "status-pages", "features.module: false");
+  else if (!options.features.errors) reportUnsupportedFeature(program, features, "status-pages", "features.errors: false");
   const owned = Object.keys(options["sse-headers"] ?? {}).filter((name) => WRITER_HEADERS.includes(name.toLowerCase()));
   if (owned.length === 0) return true;
   reportDiagnostic(program, {
@@ -64,6 +71,7 @@ export function serverJsonLines(ir: KotlinIR, runtime: ServerRuntime): string[] 
     "val serverJson: Json = Json(DefaultJson) {",
     `    encodeDefaults = ${runtime.encodeDefaults}`,
     ...(runtime.ignoreUnknownKeys ? ["    ignoreUnknownKeys = true"] : []),
+    ...(runtime.explicitNulls ? [] : ["    explicitNulls = false"]),
     ...(module ? [`    serializersModule = ${module}`] : []),
     "}",
   ];

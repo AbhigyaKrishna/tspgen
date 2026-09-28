@@ -19,7 +19,7 @@ export const kotlinFeatures = defineFeatures({
   validation: {
     default: true,
     description:
-      "Constraint decorators (@minLength, @maxLength, @pattern, @minItems, @maxItems, @minValue, @maxValue) as init { require(...) } checks.",
+      "Constraint decorators (@minLength, @maxLength, @pattern, @minItems, @maxItems, @minValue, @maxValue) as init { } checks throwing ModelCheckException (an IllegalArgumentException).",
   },
   "enum-unknown": {
     default: false,
@@ -198,6 +198,12 @@ export const $lib = createTypeSpecLibrary({
       severity: "error",
       messages: {
         default: paramMessage`Model '${"id"}' is generated as '${"fqn"}', the class untyped server-sent events map to. Rename it with @Kotlin.name.`,
+      },
+    },
+    "model-check-exception-conflict": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Model '${"id"}' is generated as '${"fqn"}', the exception the generated checks throw. Rename it with @Kotlin.name.`,
       },
     },
     "http-file-conflict": {

@@ -375,7 +375,7 @@ interface UploadsService {
       @post op send(@header contentType: "multipart/form-data", @multipartBody body: Form): void;
       @@meta(S.Form.title, "kotlin", #{ notBlank: true });
     `);
-    expect(outputs["models/com/acme/models/Form.kt"]).toContain(`require(title.isNotBlank()) { "title must not be blank" }`);
+    expect(outputs["models/com/acme/models/Form.kt"]).toContain(`if (!(title.isNotBlank())) throw ModelCheckException("title must not be blank")`);
     expect(outputs[`${DIR}/SRoutes.kt`]).toContain(`        val body = call.receiveParts(52428800L, setOf("title")).let { parts ->
             validRequest {
                 Form(

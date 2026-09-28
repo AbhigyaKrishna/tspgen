@@ -200,7 +200,7 @@ fun Route.petsRoutes(service: PetsService) {
     const module = outputs[`${DIR}/PetStoreModule.kt`];
     expect(module).toContain("\ninternal fun Application.petStoreModule(");
     expect(module).toContain("\ninternal fun Route.petStoreApiRoutes(");
-    expect(outputs[`${DIR}/PetStoreErrors.kt`]).toMatch(/\ninternal fun StatusPagesConfig\.\w+\(\) \{/);
+    expect(outputs[`${DIR}/PetStoreErrors.kt`]).toMatch(/\ninternal fun StatusPagesConfig\.\w+\(responder: ServerErrorResponder = \{ [^\n]* \}\) \{/);
     const resources = await server({ "routing-style": "resources" }, { visibility: "internal" }).compile(petSpec);
     expect(resources.outputs[`${DIR}/PetsRoutes.kt`]).toMatch(/\ninternal object \w+ \{/);
     expect(resources.outputs[`${DIR}/PetsRoutes.kt`]).toContain("\ninternal fun Route.petsRoutes(service: PetsService) {");
@@ -243,9 +243,22 @@ fun Route.petsRoutes(service: PetsService) {
     expect(defaulted.filter((d) => d.code.endsWith("unsupported-feature"))).toEqual([]);
   });
 
+  it("warns that status-pages needs features.errors only when it is set explicitly", async () => {
+    const [, explicit] = await server({ features: { errors: false, "status-pages": true } }).compileAndDiagnose(petSpec);
+    expectDiagnostics(explicit, {
+      code: "@abhigyakrishna/tspgen-core/unsupported-feature",
+      message: /`features\.status-pages` has no effect with features\.errors: false/,
+    });
+    const [, defaulted] = await server({ features: { errors: false } }).compileAndDiagnose(petSpec);
+    expect(defaulted.filter((d) => d.code.endsWith("unsupported-feature"))).toEqual([]);
+    // module: false already explains it: one diagnostic, not two.
+    const [, both] = await server({ features: { module: false, errors: false, "status-pages": true } }).compileAndDiagnose(petSpec);
+    expect(both.filter((d) => d.code.endsWith("unsupported-feature"))).toHaveLength(1);
+  });
+
   it("accepts the runtime features", async () => {
     const [, diagnostics] = await server({
-      features: { "status-pages": false, "ignore-unknown-keys": true, "encode-defaults": true },
+      features: { "status-pages": false, "ignore-unknown-keys": true, "encode-defaults": true, errors: true, "explicit-nulls": false },
     }).compileAndDiagnose(petSpec);
     expect(diagnostics).toEqual([]);
   });

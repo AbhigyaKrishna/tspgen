@@ -60,11 +60,14 @@ const MODULE_IMPORTS = [
   "io.ktor.server.routing.routing",
 ];
 
-/** ServerSupport.kt imports of the problem helpers (`error-body: problem`). */
-const PROBLEM_IMPORTS = [
+/** ServerSupport.kt imports of ServerError, serverErrorOf, respondProblem and problemDetail (always emitted). */
+const ERROR_IMPORTS = [
   "io.ktor.http.ContentType",
   "io.ktor.http.HttpStatusCode",
   "io.ktor.server.plugins.BadRequestException",
+  "io.ktor.server.plugins.ContentTransformationException",
+  "io.ktor.server.plugins.PayloadTooLargeException",
+  "io.ktor.server.request.contentType",
   "io.ktor.server.response.respondText",
   "kotlinx.serialization.ExperimentalSerializationApi",
   "kotlinx.serialization.MissingFieldException",
@@ -512,7 +515,9 @@ export function planServerFiles(
           // One Json for bodies (the module's or the application's content negotiation), JSON parts and JSON events.
           "io.ktor.serialization.kotlinx.json.DefaultJson",
           ...(ir.serializersModule ? [ir.serializersModule] : []),
-          ...(runtime.errorBody === "problem" ? PROBLEM_IMPORTS : []),
+          ...ERROR_IMPORTS,
+          ...(ir.modelCheckException ? [ir.modelCheckException] : []),
+          `${ir.apiPackage}.ApiException`,
           ...(receiveJson ? RECEIVE_JSON_IMPORTS : []),
           ...(respondJson ? RESPOND_JSON_IMPORTS : []),
         ],
@@ -521,10 +526,12 @@ export function planServerFiles(
       body: "ktor-server/support",
       uploads: Object.fromEntries(needs.map((n) => [n, true])),
       flowType: flowClash ? "kotlinx.coroutines.flow.Flow" : "Flow",
-      problem: runtime.errorBody === "problem",
       receiveJson,
       respondJson,
       serverJson: serverJsonLines(ir, runtime).join("\n"),
+      serverJsonOptIn: !runtime.explicitNulls,
+      // What the models' generated checks throw: a failed one is FailedCheck.
+      ...(ir.modelCheckException ? { modelCheck: ir.modelCheckException.slice(ir.modelCheckException.lastIndexOf(".") + 1) } : {}),
       ...(sse
         ? {
             sse: {
@@ -568,7 +575,7 @@ export function planServerFiles(
       );
     }
     if (runtime.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style, runtime));
-    files.push(errorsFile(ir, service, units, supportPkg, dirOf(supportPkg), runtime));
+    if (runtime.errors) files.push(errorsFile(ir, service, units, supportPkg, dirOf(supportPkg), runtime));
   }
   return files;
 }
@@ -692,7 +699,7 @@ function moduleFile(
   };
 }
 
-/** `<Service>Errors.kt`: `StatusPagesConfig.<svc>Errors()`, emitted with or without the module. */
+/** `<Service>Errors.kt`: `StatusPagesConfig.<svc>Errors(responder)`, emitted unless `features.errors: false`. */
 function errorsFile(ir: KotlinIR, service: KtService, units: ServerUnit[], pkg: string, dir: string, runtime: ServerRuntime): FileSpec {
   const exceptions = new Map<string, string>();
   for (const unit of units) {
@@ -708,18 +715,13 @@ function errorsFile(ir: KotlinIR, service: KtService, units: ServerUnit[], pkg: 
   const imports = [
     `${ir.apiPackage}.ApiException`,
     ...[...serializers.values()].flatMap((s) => s.imports),
-    "io.ktor.http.HttpStatusCode",
+    ...(exceptions.size > 0 ? ["io.ktor.http.HttpStatusCode"] : []),
+    "io.ktor.server.plugins.BadRequestException",
+    "io.ktor.server.plugins.ContentTransformationException",
+    "io.ktor.server.plugins.PayloadTooLargeException",
     "io.ktor.server.plugins.statuspages.StatusPagesConfig",
     ...exceptions.keys(),
     ...(plainErrors.length > 0 || !problem ? ["io.ktor.server.response.respond"] : []),
-    ...(problem
-      ? [
-          "io.ktor.server.plugins.BadRequestException",
-          "io.ktor.server.plugins.ContentTransformationException",
-          "io.ktor.server.plugins.PayloadTooLargeException",
-          "io.ktor.server.request.contentType",
-        ]
-      : []),
   ];
   return {
     path: `${dir}/${service.name}Errors.kt`,

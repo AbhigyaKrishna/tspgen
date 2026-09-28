@@ -33,7 +33,7 @@ describe("scalar-style", () => {
 )`);
     // A typealias of a java.time class still needs its serializer in the files using it.
     expect(pet).toContain("@file:UseSerializers(InstantSerializer::class)");
-    expect(pet).toContain('require(id.length >= 3) { "id must be at least 3 characters" }');
+    expect(pet).toContain('if (!(id.length >= 3)) throw ModelCheckException("id must be at least 3 characters")');
   });
 
   it("value-class wraps values; the class checks the scalar's constraints", async () => {
@@ -45,14 +45,14 @@ describe("scalar-style", () => {
 @JvmInline
 value class PetId(val value: String) {
     init {
-        require(value.length >= 3) { "PetId must be at least 3 characters" }
+        if (!(value.length >= 3)) throw ModelCheckException("PetId must be at least 3 characters")
     }
 }`);
     expect(outputs[`${M}/Seen.kt`]).toContain("@file:UseSerializers(InstantSerializer::class)");
     expect(outputs[`${M}/Seen.kt`]).toContain("value class Seen(val value: Instant)");
     const pet = outputs[`${M}/Pet.kt`];
     expect(pet).toContain('    val id: PetId = PetId("abc"),\n');
-    expect(pet).toContain('require(alias == null || alias.value.length <= 10) { "alias must be at most 10 characters" }');
+    expect(pet).toContain('if (!(alias == null || alias.value.length <= 10)) throw ModelCheckException("alias must be at most 10 characters")');
     expect(pet).not.toContain("length >= 3");
     expect(pet).not.toContain("UseSerializers");
   });

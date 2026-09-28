@@ -17,8 +17,8 @@ describe("decimal", () => {
     val tax: BigDecimal = BigDecimal("0.25"),
     val history: List<BigDecimal>,
 )`);
-    expect(price).toContain('require(amount >= BigDecimal("0")) { "amount must be at least 0" }');
-    expect(price).toContain('require(amount <= BigDecimal("1000.5")) { "amount must be at most 1000.5" }');
+    expect(price).toContain('if (!(amount >= BigDecimal("0"))) throw ModelCheckException("amount must be at least 0")');
+    expect(price).toContain('if (!(amount <= BigDecimal("1000.5"))) throw ModelCheckException("amount must be at most 1000.5")');
     const serializers = outputs["models/com/acme/models/ModelSerializers.kt"];
     expect(serializers).toContain(`/** Writes \`BigDecimal\` as a JSON string (\`toPlainString()\`); reads a JSON string or number. */
 object BigDecimalSerializer : KSerializer<BigDecimal> {

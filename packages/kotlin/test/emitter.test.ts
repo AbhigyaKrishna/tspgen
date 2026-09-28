@@ -187,7 +187,7 @@ sealed interface Pet {
         val id: UUID,
     ) : Pet {
         init {
-            require(name.isNotEmpty()) { "name must not be empty" }
+            if (!(name.isNotEmpty())) throw ModelCheckException("name must not be empty")
         }
     }
 

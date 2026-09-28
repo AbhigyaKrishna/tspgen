@@ -73,6 +73,13 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
       }
     }
   }
+  if (builder.modelCheckUsed) {
+    for (const d of declarations) {
+      if (d.fqn === builder.modelCheckExceptionFqn) {
+        reportDiagnostic(program, { code: "model-check-exception-conflict", format: { id: d.id, fqn: d.fqn }, target: NoTarget });
+      }
+    }
+  }
   if (builder.sseMessageUsed) {
     for (const d of declarations) {
       if (d.fqn === builder.sseMessageFqn) {
@@ -92,6 +99,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     apiVersions: options.apiVersion === false ? [] : apiVersionConstants(api),
     ...(builder.fileUsed ? { httpFile: builder.httpFileFqn } : {}),
     ...(builder.sseMessageUsed ? { sseMessage: builder.sseMessageFqn } : {}),
+    ...(builder.modelCheckUsed ? { modelCheckException: builder.modelCheckExceptionFqn } : {}),
     ...(serializers.length > 0 ? { serializersModule: `${modelsPackage}.modelSerializersModule` } : {}),
     ...(builder.ulongAsStringUsed ? { ulongAsString: true } : {}),
     ...(builder.valueClassAsStringSerializers.length > 0

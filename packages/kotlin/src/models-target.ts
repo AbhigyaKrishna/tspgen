@@ -101,6 +101,18 @@ function sseMessageFile(ir: KotlinIR): FileSpec[] {
   ];
 }
 
+/** `ModelCheckException`, what the models' generated checks throw, when a model has one. */
+function modelCheckFile(ir: KotlinIR): FileSpec[] {
+  if (!ir.modelCheckException) return [];
+  return [
+    {
+      path: `models/${ir.modelsPackage.replaceAll(".", "/")}/ModelCheckException.kt`,
+      template: "kotlin/file",
+      data: { package: ir.modelsPackage, imports: [], body: "kotlin/model/model-check-exception" },
+    },
+  ];
+}
+
 /** Built-in target: one Kotlin file per declaration under `models/`. */
 export const modelsTarget: Target<KotlinIR> = {
   name: "kotlin-models",
@@ -134,7 +146,7 @@ export const modelsTarget: Target<KotlinIR> = {
         },
       };
     });
-    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...modelSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
+    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...modelCheckFile(ir), ...modelSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
   },
 };
 

@@ -54,6 +54,10 @@ kotlin {
             "build/generated/tspgen-mapping/client",
             "build/generated/tspgen-mapping-resources/models",
             "build/generated/tspgen-mapping-resources/server",
+            "build/generated/tspgen-errors/models",
+            "build/generated/tspgen-errors/server",
+            "build/generated/tspgen-errors-none/models",
+            "build/generated/tspgen-errors-none/server",
         )
     }
 }

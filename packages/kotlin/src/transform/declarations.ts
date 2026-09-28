@@ -102,6 +102,7 @@ export class DeclarationBuilder {
   private usesFile = false;
   private usesSseMessage = false;
   private usesULongAsString = false;
+  private usesModelCheck = false;
   /** Value-class scalars used with a property's own `@encode(string)`: their generated `<Name>AsStringSerializer`. */
   private readonly usedValueClassAsString = new Map<string, { name: string; fqn: string; wraps: "Long" | "ULong" }>();
 
@@ -139,6 +140,16 @@ export class DeclarationBuilder {
   /** Whether some operation streams untyped server-sent events (so `SseMessage` is generated). */
   get sseMessageUsed(): boolean {
     return this.usesSseMessage;
+  }
+
+  /** FQN of the generated `ModelCheckException` class (models package): what the generated checks throw. */
+  get modelCheckExceptionFqn(): string {
+    return `${this.options.modelsPackage}.ModelCheckException`;
+  }
+
+  /** Whether some generated check (or an @meta check naming it) throws `ModelCheckException`. */
+  get modelCheckUsed(): boolean {
+    return this.usesModelCheck;
   }
 
   /** Whether some type use is a string-encoded ULong (ModelSerializers.kt then declares ULongAsStringSerializer). */
@@ -428,7 +439,9 @@ export class DeclarationBuilder {
     };
     if (style === "typealias") return { ...base, kind: "typealias", target: value };
     const c = this.options.validation ? s.constraints : undefined;
-    return { ...base, kind: "value-class", value, checks: c ? this.constraintChecks("value", name, c, value, false) : [] };
+    const checks = c ? this.constraintChecks("value", name, c, value, false) : [];
+    this.throwsModelCheck(base, checks);
+    return { ...base, kind: "value-class", value, checks };
   }
 
   private unionShape(u: UnionIR): UnionShape {
@@ -639,14 +652,21 @@ export class DeclarationBuilder {
     for (const [id, byWireName] of this.modelProps) {
       const decl = this.decls.get(id);
       if (decl?.kind !== "data-class") continue;
-      decl.checks = [
-        ...decl.properties.flatMap((prop) => {
-          const p = byWireName.get(prop.wireName);
-          return p ? this.checks(p, prop, `${id}.${p.name}`) : [];
-        }),
-        ...metaStrings(this.program, resolveMeta(decl.meta, "kotlin"), "checks", id),
-      ];
+      const generated = decl.properties.flatMap((prop) => {
+        const p = byWireName.get(prop.wireName);
+        return p ? this.checks(p, prop, `${id}.${p.name}`) : [];
+      });
+      const meta = metaStrings(this.program, resolveMeta(decl.meta, "kotlin"), "checks", id);
+      this.throwsModelCheck(decl, [...generated, ...meta.filter((line) => /\bModelCheckException\b/.test(line))]);
+      decl.checks = [...generated, ...meta];
     }
+  }
+
+  /** Records that `decl`'s `checks` (generated ones, or @meta ones naming it) throw `ModelCheckException`. */
+  private throwsModelCheck(decl: { imports: string[] }, checks: readonly string[]): void {
+    if (checks.length === 0) return;
+    this.usesModelCheck = true;
+    decl.imports.push(this.modelCheckExceptionFqn);
   }
 
   private fillSealedParents(model: ModelIR, decl: KtDataClass, sealedBases: ModelIR[]): void {
@@ -698,7 +718,7 @@ export class DeclarationBuilder {
   }
 
   /**
-   * `require` lines for a property: its constraint decorators when `validation` is on, and the
+   * Check lines (throwing `ModelCheckException`) for a property: its constraint decorators when `validation` is on, and the
    * `notBlank` meta flag (an explicit request, so emitted regardless of `validation`). Typealias scalars are checked
    * as their base type; value-class scalars through `.value`, minus the constraints the class checks itself.
    */
@@ -717,7 +737,7 @@ export class DeclarationBuilder {
     return this.constraintChecks(expr, p.name, c, type, notBlank, prop.name);
   }
 
-  /** `require` lines checking `c` (and `notBlank`) on `expr` of `type`; `guard` is null-checked first when nullable. */
+  /** Lines checking `c` (and `notBlank`) on `expr` of `type`; `guard` is null-checked first when nullable. */
   private constraintChecks(
     expr: string,
     label: string,
@@ -732,7 +752,7 @@ export class DeclarationBuilder {
     const out: string[] = [];
     const add = (condition: string, message: string) => {
       const guarded = type.nullable ? `${guard} == null || ${condition}` : condition;
-      out.push(`require(${guarded}) { ${kotlinString(message)} }`);
+      out.push(`if (!(${guarded})) throw ModelCheckException(${kotlinString(message)})`);
     };
     if (notBlank && base === "String") add(`${name}.isNotBlank()`, `${label} must not be blank`);
     if (!c) return out;

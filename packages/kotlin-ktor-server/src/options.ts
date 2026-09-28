@@ -23,6 +23,16 @@ export const ktorServerFeatures = defineFeatures({
     default: false,
     description: "Write optional properties equal to their default (unset ones as null) in responses and events; required ones are always written.",
   },
+  errors: {
+    default: true,
+    description:
+      "<Service>Errors.kt: StatusPagesConfig.<svc>Errors(). false: not emitted and the module installs no StatusPages; classify errors with serverErrorOf() in your own.",
+  },
+  "explicit-nulls": {
+    default: true,
+    description:
+      "serverJson writes null properties as null (kotlinx's explicitNulls); false: omits them (a required-but-nullable property included, which clients expecting the key, e.g. the generated TypeScript types, may not accept) and reads absent nullable ones as null.",
+  },
 });
 
 export type KtorServerFeatures = Record<keyof typeof ktorServerFeatures.defs, boolean>;
@@ -109,7 +119,7 @@ export const ktorServerOptionsSchema = {
       enum: ["problem", "none"],
       default: "problem",
       description:
-        "Body of generated error responses without a declared body (unmapped ApiException, validation failures, 413): problem (RFC 9457 application/problem+json) or none.",
+        "Default responder of <svc>Errors() for errors without a declared body (unmapped ApiException, 400, 413, 415): problem (RFC 9457 application/problem+json) or none (status only).",
     },
     "sse-headers": {
       type: "object",

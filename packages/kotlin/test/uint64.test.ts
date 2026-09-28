@@ -13,7 +13,7 @@ describe("uint64", () => {
     val total: ULong = 5uL,
     val all: List<ULong>,
 )`);
-    expect(counter).toContain('require(hits >= 1uL) { "hits must be at least 1" }');
-    expect(counter).toContain('require(hits <= 1000uL) { "hits must be at most 1000" }');
+    expect(counter).toContain('if (!(hits >= 1uL)) throw ModelCheckException("hits must be at least 1")');
+    expect(counter).toContain('if (!(hits <= 1000uL)) throw ModelCheckException("hits must be at most 1000")');
   });
 });

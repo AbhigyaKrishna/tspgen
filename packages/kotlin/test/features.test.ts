@@ -102,7 +102,7 @@ describe("kotlin: validation", () => {
 
   it("renders constraint checks by default", async () => {
     const { outputs } = await emitter().compile(constrained);
-    expect(outputs[REQ]).toContain(`        require(name.length <= 200) { "name must be at most 200 characters" }\n`);
+    expect(outputs[REQ]).toContain(`        if (!(name.length <= 200)) throw ModelCheckException("name must be at most 200 characters")\n`);
   });
 
   it("renders no checks with features.validation false", async () => {
