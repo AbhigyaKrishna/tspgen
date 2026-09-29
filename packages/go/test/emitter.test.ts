@@ -54,7 +54,7 @@ describe("Go standard-library targets", () => {
       ],
     }).compile(spec);
     expect(outputs["models/models.go"]).toContain("type Pet struct {");
-    expect(outputs["models/models.go"]).toMatch(/Name\s+\*string\s+`json:"name,omitempty"`/);
+    expect(outputs["models/models.go"]).toMatch(/Name\s+\*string\s+`json:"name,omitempty" tsp:"optional,_"`/);
     expect(outputs["client/go.mod"]).toContain(`module ${modules.client}`);
     expect(outputs["client/go.mod"]).toContain(`require ${modules.models} v2.0.0`);
     expect(outputs["server/go.mod"]).toContain(`module ${modules.server}`);

@@ -1,6 +1,6 @@
 module <%= it.module %>
 
-go 1.22
+go <%= it.goVersion ?? "1.22" %>
 
 require <%= it.modelsModule %> <%= it.modelsVersion %>
 

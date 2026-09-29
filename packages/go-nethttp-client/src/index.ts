@@ -1,125 +1,136 @@
 import type { FileSpec, Target, TargetContext } from "@abhigyakrishna/tspgen-core";
-import { goName, goOperations, goType, localModuleVersion, validModule, validPackage, reportDiagnostic, type GoIR, type GoOperation, type GoType } from "@abhigyakrishna/tspgen-go";
-import { NoTarget } from "@typespec/compiler";
-import { relative, resolve, sep } from "node:path";
+import {
+  atLeastGo, bodyCheck, checkHTTPConfiguration, goClientFeatures, goClientOptionsSchema, goFile, goOperations, nullShape,
+  localModuleVersion, matchesStatus, modelsDirectory, operationImports, operationUnits, parameterCheck,
+  parameterField, requestDeclaration, requestName, typedErrorDeclaration, typedErrors, typeUse, wireOptions,
+  type GoClientOptions, type GoIR, type GoOperation, type TypedHTTPError,
+} from "@abhigyakrishna/tspgen-go";
 
-interface Options { module: string; package?: string }
-
-const optionsSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    module: { type: "string", description: "Import path of the generated Go client module." },
-    package: { type: "string", default: "client", description: "Go package name of generated client files." },
-  },
-  required: ["module"],
-};
-
-function fieldType(type: GoType, optional: boolean): string {
-  return optional && !type.pointer && type.text !== "any" ? `*${type.text}` : type.text;
-}
-
-function requestFields(op: GoOperation, ir: GoIR): string[] {
-  const params = op.params.map((p) => `\t${goName(`${p.location} ${p.name}`)} ${fieldType(goType(p.type, ir.api, "models."), p.optional)}`);
-  if (op.body) params.push(`\tBody ${fieldType(goType(op.body.type, ir.api, "models."), op.body.optional)}`);
-  return params;
-}
-
-function method(op: GoOperation, ir: GoIR): string {
-  const response = op.success.body ? goType(op.success.body.type, ir.api, "models.").text : undefined;
+function method(op: GoOperation, ir: GoIR, ctx: TargetContext, options: GoClientOptions, errors: TypedHTTPError[]): string {
+  const response = op.success.body ? typeUse(op.success.body.type, ir).text : undefined;
   const ret = response ? "return result, err" : "return err";
-  const signature = response ? `(result ${response}, err error)` : `(err error)`;
+  const wire = wireOptions(ctx, ir);
+  const name = options["client-name"] ?? "Client";
   const out = [
-    `func (c *Client) ${op.name}(ctx context.Context, request ${op.name}Request) ${signature} {`,
-    `\tpath := ${JSON.stringify(op.path)}`,
+    ...(op.docs?.split("\n").map((line) => `// ${line}`) ?? []),
+    `func (c *${name}) ${op.name}(ctx context.Context, request ${requestName(op, options)}) ${response ? `(result ${response}, err error)` : `(err error)`} {`,
   ];
-  for (const p of op.params.filter((p) => p.location === "path")) {
-    const field = `request.${goName(`${p.location} ${p.name}`)}`;
-    out.push(`\tpath = strings.ReplaceAll(path, ${JSON.stringify(`{${p.wireName}}`)}, url.PathEscape(fmt.Sprint(${field})))`);
+  if (wire.validate) {
+    for (const check of parameterCheck(op, ir)) out.push(`\t${check} { ${ret} }`);
+    if (op.body) out.push(`\t${bodyCheck(op, ir)} { ${ret} }`, `\tif validationErr := models.ValidateValue(request.Body); validationErr != nil { err = validationErr; ${ret} }`);
   }
-  out.push(
-    `\tu, err := url.Parse(strings.TrimRight(c.BaseURL, "/") + path)`,
-    `\tif err != nil { ${ret} }`,
-    `\tquery := u.Query()`,
+  out.push(`\tpath := ${JSON.stringify(op.path)}`);
+  for (const p of op.params.filter((p) => p.location === "path")) out.push(
+    `\t{`, `\t\traw, encodeErr := models.EncodeParameter(request.${parameterField(p, ir)})`,
+    `\t\tif encodeErr != nil { err = encodeErr; ${ret} }`,
+    `\t\tpath = strings.ReplaceAll(path, ${JSON.stringify(`{${p.wireName}}`)}, url.PathEscape(raw))`, `\t}`,
   );
+  out.push(`\tu, err := url.Parse(strings.TrimRight(c.BaseURL, "/") + path)`, `\tif err != nil { ${ret} }`, `\tquery := u.Query()`);
   for (const p of op.params.filter((p) => p.location === "query")) {
-    const field = `request.${goName(`${p.location} ${p.name}`)}`;
-    if (p.optional) out.push(`\tif ${field} != nil { query.Set(${JSON.stringify(p.wireName)}, fmt.Sprint(*${field})) }`);
-    else out.push(`\tquery.Set(${JSON.stringify(p.wireName)}, fmt.Sprint(${field}))`);
+    const field = `request.${parameterField(p, ir)}`;
+    out.push(`\t${p.optional ? `if ${field} != nil {` : "{"}`, `\t\traw, encodeErr := models.EncodeParameter(${field})`, `\t\tif encodeErr != nil { err = encodeErr; ${ret} }`, `\t\tquery.Set(${JSON.stringify(p.wireName)}, raw)`, `\t}`);
   }
   out.push(`\tu.RawQuery = query.Encode()`, `\tvar body io.Reader`);
   if (op.body) {
     if (op.body.optional) out.push(`\tif request.Body != nil {`);
-    out.push(`\tpayload, marshalErr := json.Marshal(request.Body)`, `\tif marshalErr != nil { err = marshalErr; ${ret} }`, `\tbody = bytes.NewReader(payload)`);
+    out.push(`\tpayload, marshalErr := models.EncodeJSON(request.Body, ${wire.encodeDefaults}, ${wire.explicitNulls})`, `\tif marshalErr != nil { err = marshalErr; ${ret} }`, `\tbody = bytes.NewReader(payload)`);
     if (op.body.optional) out.push(`\t}`);
   }
-  out.push(
-    `\treq, err := http.NewRequestWithContext(ctx, ${JSON.stringify(op.verb)}, u.String(), body)`,
-    `\tif err != nil { ${ret} }`,
-  );
+  out.push(`\treq, err := http.NewRequestWithContext(ctx, ${JSON.stringify(op.verb)}, u.String(), body)`, `\tif err != nil { ${ret} }`);
   if (op.body) out.push(`\tif body != nil { req.Header.Set("Content-Type", "application/json") }`);
   for (const p of op.params.filter((p) => p.location === "header")) {
-    const field = `request.${goName(`${p.location} ${p.name}`)}`;
-    if (p.optional) out.push(`\tif ${field} != nil { req.Header.Set(${JSON.stringify(p.wireName)}, fmt.Sprint(*${field})) }`);
-    else out.push(`\treq.Header.Set(${JSON.stringify(p.wireName)}, fmt.Sprint(${field}))`);
+    const field = `request.${parameterField(p, ir)}`;
+    out.push(`\t${p.optional ? `if ${field} != nil {` : "{"}`, `\t\traw, encodeErr := models.EncodeParameter(${field})`, `\t\tif encodeErr != nil { err = encodeErr; ${ret} }`, `\t\treq.Header.Set(${JSON.stringify(p.wireName)}, raw)`, `\t}`);
   }
-  out.push(
-    `\thttpClient := c.HTTPClient`,
-    `\tif httpClient == nil { httpClient = http.DefaultClient }`,
-    `\tresp, err := httpClient.Do(req)`,
-    `\tif err != nil { ${ret} }`,
-    `\tdefer resp.Body.Close()`,
-    `\tif resp.StatusCode != ${op.status} {`,
-    `\t\traw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))`,
-    `\t\tif readErr != nil { err = readErr; ${ret} }`,
-    `\t\terr = &HTTPError{StatusCode: resp.StatusCode, Body: raw}`,
-    `\t\t${ret}`,
-    `\t}`,
-  );
-  if (response) out.push(`\terr = json.NewDecoder(resp.Body).Decode(&result)`);
+  const shape = JSON.stringify(op.success.body ? nullShape(op.success.body.type) : "?_");
+  if (ctx.features.values["generic-methods"]) out.push(response ? `\tresult, err = c.Do[${response}](req, ${op.status}, true, ${shape})` : `\t_, err = c.Do[struct{}](req, ${op.status}, false)`);
+  else out.push(`\terr = c.do(req, ${op.status}, ${response ? "&result" : "nil"}, ${shape})`);
+  if (errors.length) {
+    out.push(`\tif err != nil {`, `\t\tvar rawError *HTTPError`, `\t\tif errors.As(err, &rawError) {`);
+    for (const error of [...errors].sort((a, b) => Number(a.response.statusCodes === "default") - Number(b.response.statusCodes === "default"))) {
+      out.push(`\t\t\tif ${matchesStatus(error, "rawError.StatusCode")} {`, `\t\t\t\ttyped := &${error.name}{StatusCode: rawError.StatusCode, Cause: rawError}`);
+      if (error.body) out.push(`\t\t\t\tif decodeErr := models.DecodeJSON(rawError.Body, &typed.Body, ${wire.ignoreUnknown}, ${wire.validate}, ${wire.defaults}, ${JSON.stringify(nullShape(error.body))}); decodeErr != nil { err = fmt.Errorf("decode error response: %w", decodeErr); ${ret} }`);
+      out.push(`\t\t\t\terr = typed`, `\t\t\t\t${ret}`, `\t\t\t}`);
+    }
+    out.push(`\t\t}`, `\t}`);
+  }
   out.push(`\t${ret}`, `}`);
   return out.join("\n");
 }
 
-function clientBody(ir: GoIR, ctx: TargetContext): string {
-  const operations = goOperations(ctx.program, ir);
-  const requests = operations.map((op) => [`type ${op.name}Request struct {`, ...requestFields(op, ir), "}"].join("\n"));
-  const methods = operations.map((op) => method(op, ir));
-  const imports = ["fmt", "net/http"];
-  if (operations.length) imports.push("context", "io", "net/url", "strings");
-  if (operations.some((op) => op.body)) imports.push("bytes");
-  if (operations.some((op) => op.body || op.success.body) || requests.some((s) => s.includes("json.Number"))) imports.push("encoding/json");
-  if ([...requests, ...methods].some((s) => s.includes("models."))) imports.push(ir.module);
-  imports.sort();
-  const rendered = imports.map((name) => name === ir.module ? `\tmodels ${JSON.stringify(name)}` : `\t${JSON.stringify(name)}`);
-  return [
-    `import (`, ...rendered, `)`,
-    ``,
-    `type Client struct {`, `\tBaseURL string`, `\tHTTPClient *http.Client`, `}`,
-    ``,
-    `type HTTPError struct {`, `\tStatusCode int`, `\tBody []byte`, `}`,
-    ``,
+function runtime(ir: GoIR, ctx: TargetContext, options: GoClientOptions): { body: string; imports: string[] } {
+  const name = options["client-name"] ?? "Client";
+  const generic = ctx.features.values["generic-methods"] === true;
+  const wire = wireOptions(ctx, ir);
+  const timeout = options["timeout-ms"] ?? 0;
+  const size = options["max-response-size"] ?? 1048576;
+  const ret = generic ? "return result, err" : "return err";
+  const out = [
+    `type ${name} struct {`, `\tBaseURL string`, `\tHTTPClient *http.Client`, `}`, "",
+    `type HTTPError struct {`, `\tStatusCode int`, `\tBody []byte`, `}`, "",
     `func (e *HTTPError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body) }`,
-    ...requests.flatMap((s) => ["", s]),
-    ...methods.flatMap((s) => ["", s]),
-  ].join("\n");
+  ];
+  if (ctx.features.values["client-constructor"]) out.push("", `func New${name}(baseURL string) *${name} { return &${name}{BaseURL: baseURL} }`);
+  out.push("", generic ? `// Do sends an HTTP request and decodes its expected success body as T.\nfunc (c *${name}) Do[T any](req *http.Request, successStatus int, decodeBody bool, shape ...string) (result T, err error) {` : `func (c *${name}) do(req *http.Request, successStatus int, target any, shape string) (err error) {`,
+    `\thttpClient := c.HTTPClient`, `\tif httpClient == nil { httpClient = ${timeout ? `&http.Client{Timeout: ${timeout} * time.Millisecond}` : "http.DefaultClient"} }`,
+    `\tresp, err := httpClient.Do(req)`, `\tif err != nil { ${ret} }`, `\tdefer resp.Body.Close()`,
+    `\tpayload, err := io.ReadAll(io.LimitReader(resp.Body, ${size} + 1))`, `\tif err != nil { ${ret} }`,
+    `\tif len(payload) > ${size} { err = fmt.Errorf("response body exceeds %d bytes", ${size}); ${ret} }`,
+    `\tif resp.StatusCode != successStatus { err = &HTTPError{StatusCode: resp.StatusCode, Body: payload}; ${ret} }`,
+    `\tif ${generic ? "decodeBody" : "target != nil"} { err = models.DecodeJSON(payload, ${generic ? "&result" : "target"}, ${wire.ignoreUnknown}, ${wire.validate}, ${wire.defaults}, ${generic ? "shape..." : "shape"}) }`,
+    `\t${ret}`, `}`,
+  );
+  return { body: out.join("\n"), imports: ["fmt", "net/http", "io", ir.module, ...(timeout ? ["time"] : [])] };
 }
 
 export const goNethttpClientTarget: Target<GoIR> = {
-  name: "@abhigyakrishna/tspgen-go-nethttp-client",
-  kind: "client",
-  language: "go",
-  optionsSchema,
+  name: "@abhigyakrishna/tspgen-go-nethttp-client", kind: "client", language: "go",
+  optionsSchema: goClientOptionsSchema, features: goClientFeatures,
   files: (ir, ctx): FileSpec[] => {
-    const options = ctx.options as unknown as Options;
+    const options = ctx.options as unknown as GoClientOptions;
+    const ops = goOperations(ctx.program, ir);
     const packageName = options.package ?? "client";
-    if (!validModule(options.module)) reportDiagnostic(ctx.program, { code: "invalid-module", format: { name: String(options.module) }, target: NoTarget });
-    if (!validPackage(packageName)) reportDiagnostic(ctx.program, { code: "invalid-package", format: { name: packageName }, target: NoTarget });
-    const modelsDir = relative(resolve(ctx.outputDir, "client"), resolve(ctx.modelsOutputDir, "models")).split(sep).join("/");
-    return [
-      { path: "client/go.mod", template: "go/dependent-mod", data: { module: options.module, modelsModule: ir.module, modelsVersion: localModuleVersion(ir.module), modelsDir: modelsDir.startsWith(".") ? modelsDir : `./${modelsDir}` } },
-      { path: "client/client.go", template: "go/file", data: { package: packageName, body: clientBody(ir, ctx) } },
-    ];
+    const version = checkHTTPConfiguration(ir, ctx, options, packageName, "1.22");
+    if (ctx.features.values["generic-methods"] && !atLeastGo(version, "1.27")) throw new Error("features.generic-methods requires Go 1.27 or newer; set go-version to at least 1.27.");
+    if ((options["client-name"] ?? "Client") === "HTTPError") throw new Error("client-name conflicts with HTTPError.");
+    const base = runtime(ir, ctx, options);
+    const name = options["client-name"] ?? "Client";
+    const reserved = new Set([name, "HTTPError", ...(ctx.features.values["client-constructor"] ? [`New${name}`] : [])]);
+    const reserve = (identifier: string) => {
+      if (reserved.has(identifier)) throw new Error(`Generated Go client identifier ${identifier} conflicts with another declaration.`);
+      reserved.add(identifier);
+    };
+    for (const op of ops) {
+      if (["BaseURL", "HTTPClient", ...(ctx.features.values["generic-methods"] ? ["Do"] : [])].includes(op.name)) throw new Error(`Operation ${op.name} conflicts with the client runtime.`);
+      reserve(requestName(op, options));
+    }
+    const operationBody = (operations: GoOperation[]): { body: string; imports: string[] } => {
+      const errors = new Map(operations.map((op) => [op.id, options.errors === "typed" ? typedErrors(op, ir, ctx) : []]));
+      const allErrors = [...errors.values()].flat();
+      for (const error of allErrors) reserve(error.name);
+      const types = operations.map((op) => requestDeclaration(op, ir, options));
+      const methods = operations.map((op) => method(op, ir, ctx, options, errors.get(op.id)!));
+      return { body: [...types, ...allErrors.map((e) => typedErrorDeclaration(e, ir, true)), ...methods].join("\n\n"), imports: [
+        ...(operations.length ? ["context", "io", "net/url", "strings", "net/http", ir.module] : []),
+        ...(operations.some((op) => op.body) ? ["bytes"] : []),
+        ...(allErrors.length ? ["fmt", "errors"] : []), ...operationImports(operations, ir),
+        ...allErrors.flatMap((e) => e.body ? typeUse(e.body, ir).imports ?? [] : []),
+      ] };
+    };
+    const files: FileSpec[] = [];
+    if (ctx.features.values["go-mod"]) files.push({ path: "client/go.mod", template: "go/dependent-mod", data: { module: options.module, goVersion: version, modelsModule: ir.module, modelsVersion: localModuleVersion(ir.module), modelsDir: modelsDirectory(ctx, "client") } });
+    if (!options.grouping || options.grouping === "single-file") {
+      const all = operationBody(ops);
+      files.push(goFile("client/client.go", [base.body, all.body].join("\n\n"), [...base.imports, ...all.imports], ir, packageName));
+    } else {
+      files.push(goFile("client/client.go", base.body, base.imports, ir, packageName));
+      for (const unit of operationUnits(ops, ir, options.grouping)) {
+        const part = operationBody(unit.operations);
+        files.push(goFile(`client/${unit.file}_operations.go`, part.body, part.imports, ir, packageName));
+      }
+    }
+    if (ctx.program.hasError()) throw new Error("Cannot generate Go client; see the reported diagnostics.");
+    return files;
   },
 };
 

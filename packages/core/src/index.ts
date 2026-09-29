@@ -1,5 +1,5 @@
 export { $lib, reportDiagnostic, createDiagnostic, errorMessage } from "./lib.js";
-export { apiVersionConstants, pascal, type ApiVersionConstant } from "./naming.js";
+export { apiVersionConstants, constantCase, pascal, type ApiVersionConstant } from "./naming.js";
 export * from "./ir/types.js";
 export { buildApiIR, type BuildOptions } from "./ir/build.js";
 export {

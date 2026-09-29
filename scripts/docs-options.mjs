@@ -55,6 +55,7 @@ export async function optionsReference() {
   const go = await load("go");
   const goClient = (await load("go-nethttp-client")).default;
   const goServer = (await load("go-nethttp-server")).default;
+  const goGinServer = (await load("go-gin-server")).default;
   const language = (lib, features, moved) => [
     ...optionRows(
       lib.emitter.options,
@@ -72,6 +73,7 @@ export async function optionsReference() {
     table("`@abhigyakrishna/tspgen-go`", language(go.$lib, go.goFeatures, {})),
     table("`@abhigyakrishna/tspgen-go-nethttp-client` (target)", target(goClient)),
     table("`@abhigyakrishna/tspgen-go-nethttp-server` (target)", target(goServer)),
+    table("`@abhigyakrishna/tspgen-go-gin-server` (target)", target(goGinServer)),
   ].join("\n");
 }
 

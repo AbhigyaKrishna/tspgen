@@ -6,13 +6,30 @@ import {
   type LanguageEmitterOptions,
 } from "@abhigyakrishna/tspgen-core";
 import { createTypeSpecLibrary, paramMessage, type JSONSchemaType } from "@typespec/compiler";
+import { goOptionsSchemaProperties, type GoNaming, type GoOptions } from "./options.js";
 
 export const GO_EMITTER = "@abhigyakrishna/tspgen-go";
-export const goFeatures = defineFeatures({ ...coreFeatures });
+export const goFeatures = defineFeatures({
+  ...coreFeatures,
+  validation: { default: true, override: "model", description: "Generate Validate methods for constraints, literals and enum values, and validate required JSON properties when HTTP targets enable validate." },
+  defaults: { default: true, override: "model", description: "Apply declared property defaults when decoding missing JSON properties and generate model constructors that initialize them." },
+  "omit-empty": { default: true, description: "Optional model properties carry json omitempty tags. Pointer fields preserve present zero values; value fields omit zero values." },
+  "enum-unknown": { default: false, override: "declaration", description: "String enums decode unknown wire values to an UNKNOWN sentinel accepted by validation. Encoding the sentinel fails." },
+  "go-mod": { default: true, description: "Generate the models go.mod. Client/server targets have their own go-mod feature." },
+});
 
 export interface GoEmitterOptions extends LanguageEmitterOptions {
   module: string;
   package?: string;
+  "go-version"?: string;
+  layout?: GoOptions["layout"];
+  naming?: GoNaming;
+  "type-names"?: Record<string, string>;
+  "date-time"?: GoOptions["dateTime"];
+  decimal?: GoOptions["decimal"];
+  integer?: GoOptions["integer"];
+  "scalar-style"?: GoOptions["scalarStyle"];
+  "optional-fields"?: GoOptions["optionalFields"];
 }
 
 const optionsSchema = {
@@ -22,6 +39,7 @@ const optionsSchema = {
     ...coreEmitterOptionsSchemaProperties,
     "header-text": { ...coreEmitterOptionsSchemaProperties["header-text"], default: defaultHeaderText(GO_EMITTER) },
     features: goFeatures.openSchema,
+    ...goOptionsSchemaProperties,
     module: { type: "string", description: "Import path of the generated models Go module." },
     package: { type: "string", default: "models", description: "Package name of generated models." },
     targets: {
