@@ -1,0 +1,7 @@
+module <%= it.module %>
+
+go 1.22
+
+require <%= it.modelsModule %> <%= it.modelsVersion %>
+
+replace <%= it.modelsModule %> => <%= it.modelsDir %>

@@ -309,6 +309,51 @@ importers:
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
 
+  packages/go:
+    dependencies:
+      '@abhigyakrishna/tspgen-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@typespec/compiler':
+        specifier: 1.16.0
+        version: 1.16.0(@types/node@24.13.6)
+      '@typespec/http':
+        specifier: 1.16.0
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+
+  packages/go-nethttp-client:
+    dependencies:
+      '@abhigyakrishna/tspgen-core':
+        specifier: workspace:*
+        version: link:../core
+      '@abhigyakrishna/tspgen-go':
+        specifier: workspace:*
+        version: link:../go
+    devDependencies:
+      '@typespec/compiler':
+        specifier: 1.16.0
+        version: 1.16.0(@types/node@24.13.6)
+      '@typespec/http':
+        specifier: 1.16.0
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+
+  packages/go-nethttp-server:
+    dependencies:
+      '@abhigyakrishna/tspgen-core':
+        specifier: workspace:*
+        version: link:../core
+      '@abhigyakrishna/tspgen-go':
+        specifier: workspace:*
+        version: link:../go
+    devDependencies:
+      '@typespec/compiler':
+        specifier: 1.16.0
+        version: 1.16.0(@types/node@24.13.6)
+      '@typespec/http':
+        specifier: 1.16.0
+        version: 1.16.0(@typespec/compiler@1.16.0(@types/node@24.13.6))(@typespec/streams@0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6)))
+
   packages/kotlin:
     dependencies:
       '@abhigyakrishna/tspgen-core':

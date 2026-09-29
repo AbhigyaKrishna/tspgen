@@ -1,0 +1,4 @@
+<% if (it.ctx?.headerText) { for (const line of it.ctx.headerText.split(/\r?\n/)) { %>// <%= line %>
+<% } } %>package <%= it.package %>
+
+<%~ it.body %>
