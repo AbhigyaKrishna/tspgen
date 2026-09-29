@@ -1,6 +1,6 @@
-import type { FileSpec, ResponseIR, TargetContext, TypeRef } from "@abhigyakrishna/tspgen-core";
+import { ensureRelativePrefix, isDefaultStatus, isFixedStatus, relativeOutputPath, type FileSpec, type ResponseIR, type TargetContext, type TypeRef } from "@abhigyakrishna/tspgen-core";
 import { NoTarget } from "@typespec/compiler";
-import { relative, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { reportDiagnostic } from "./lib.js";
 import { constraintsLiteral, nullShape } from "./models-target.js";
 import { effectiveGoVersion, type GoHTTPOptions } from "./options.js";
@@ -62,8 +62,7 @@ export function checkHTTPConfiguration(ir: GoIR, ctx: TargetContext, options: Go
 }
 
 export function modelsDirectory(ctx: TargetContext, kind: "client" | "server"): string {
-  const path = relative(resolve(ctx.outputDir, kind), resolve(ctx.modelsOutputDir, "models")).split(sep).join("/");
-  return path.startsWith(".") ? path : `./${path}`;
+  return ensureRelativePrefix(relativeOutputPath(resolve(ctx.outputDir, kind), resolve(ctx.modelsOutputDir, "models")));
 }
 
 export function parameterCheck(op: GoOperation, ir: GoIR): string[] {
@@ -80,7 +79,7 @@ export function typedErrors(op: GoOperation, ir: GoIR, ctx: TargetContext): Type
   return op.errors.map((response) => {
     if (response.headers.length || response.body?.stream) throw new Error(`Typed Go error ${op.id} cannot represent response headers or streams.`);
     const code = response.statusCodes;
-    const suffix = typeof code === "number" ? String(code) : code === "default" ? "Default" : `${code.start}To${code.end}`;
+    const suffix = isFixedStatus(code) ? String(code) : isDefaultStatus(code) ? "Default" : `${code.start}To${code.end}`;
     if (response.body) {
       if (!response.body.contentTypes.some((c) => c.includes("json"))) throw new Error(`Typed Go error ${op.id} ${suffix} requires a JSON body.`);
       goType(response.body.type, ir.api, "models.", ctx.program, `${op.id} error`, ir.options);
@@ -90,7 +89,7 @@ export function typedErrors(op: GoOperation, ir: GoIR, ctx: TargetContext): Type
 }
 
 export function typedErrorDeclaration(error: TypedHTTPError, ir: GoIR, client: boolean): string {
-  const fixed = typeof error.response.statusCodes === "number" ? error.response.statusCodes : 500;
+  const fixed = isFixedStatus(error.response.statusCodes) ? error.response.statusCodes : 500;
   const fields = ["\tStatusCode int", ...(error.body ? [`\tBody ${typeUse(error.body, ir).text}`] : []), ...(client ? ["\tCause *HTTPError"] : [])];
   return [
     `type ${error.name} struct {`, ...fields, "}", "",
@@ -103,5 +102,5 @@ export function typedErrorDeclaration(error: TypedHTTPError, ir: GoIR, client: b
 
 export function matchesStatus(error: TypedHTTPError, field: string): string {
   const code = error.response.statusCodes;
-  return typeof code === "number" ? `${field} == ${code}` : code === "default" ? "true" : `${field} >= ${code.start} && ${field} <= ${code.end}`;
+  return isFixedStatus(code) ? `${field} == ${code}` : isDefaultStatus(code) ? "true" : `${field} >= ${code.start} && ${field} <= ${code.end}`;
 }

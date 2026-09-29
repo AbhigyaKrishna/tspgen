@@ -1,5 +1,5 @@
 import type { ApiIR, OperationIR, StatusCodes } from "@abhigyakrishna/tspgen-core";
-import { declarationScopes, decoratorArg, mergeScopes, metaScopes, type MetaScopes } from "@abhigyakrishna/tspgen-core";
+import { declarationScopes, decoratorArg, isFixedStatus, mergeScopes, metaScopes, type MetaScopes } from "@abhigyakrishna/tspgen-core";
 import { camel, typeName } from "../naming.js";
 import { constrain } from "./constraints.js";
 import type { DeclarationBuilder } from "./declarations.js";
@@ -176,7 +176,7 @@ export class ApiBuilder {
     if (success.length === 0) return { kind: "single", type: VOID, status: 204 };
     const [only] = success;
     // Core streams only a single success response without headers.
-    if (only.stream && typeof only.statusCodes === "number") {
+    if (only.stream && isFixedStatus(only.statusCodes)) {
       const element = only.stream.type;
       return {
         kind: "single",
@@ -186,7 +186,7 @@ export class ApiBuilder {
         stream: only.stream,
       };
     }
-    if (success.length === 1 && typeof only.statusCodes === "number" && only.headers.length === 0) {
+    if (success.length === 1 && isFixedStatus(only.statusCodes) && only.headers.length === 0) {
       return {
         kind: "single",
         type: only.body ?? VOID,
@@ -197,7 +197,7 @@ export class ApiBuilder {
     const name = this.resultName(opName, groupName);
     const variants: TsResultVariant[] = success.map((r) => ({
       statusCodes: r.statusCodes,
-      ...(typeof r.statusCodes === "number" ? { status: r.statusCodes } : {}),
+      ...(isFixedStatus(r.statusCodes) ? { status: r.statusCodes } : {}),
       ...(r.body ? { body: r.body, contentType: r.contentType } : {}),
       headers: r.headers,
     }));

@@ -1,4 +1,4 @@
-import { constantCase, declarationScopes, pascal, resolveMeta, type ApiIR, type ConstraintsIR, type ModelIR, type OperationIR, type ParamIR, type PropertyIR, type ResponseIR, type TypeIR, type TypeRef } from "@abhigyakrishna/tspgen-core";
+import { constantCase, declarationScopes, isFixedStatus, pascal, resolveMeta, type ApiIR, type ConstraintsIR, type ModelIR, type OperationIR, type ParamIR, type PropertyIR, type ResponseIR, type TypeIR, type TypeRef } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "./lib.js";
 import { atLeastGo, resolveGoOptions, type GoNaming, type GoOptions } from "./options.js";
@@ -277,7 +277,7 @@ export function goOperations(program: Program, ir: GoIR): GoOperation[] {
 function unsupportedOperation(op: OperationIR): string | undefined {
   if (op.auth && op.auth.options.some((option) => option.length > 0)) return "authentication is not supported yet";
   const success = op.responses.filter((r) => !r.isError);
-  if (success.length !== 1 || typeof success[0].statusCodes !== "number") return "exactly one fixed-status success response is required";
+  if (success.length !== 1 || !isFixedStatus(success[0].statusCodes)) return "exactly one fixed-status success response is required";
   if (op.body && (op.body.kind !== "single" || !op.body.contentTypes.some((c) => c.includes("json")))) return "only JSON request bodies are supported";
   if (success[0].body && (success[0].body.stream || !success[0].body.contentTypes.some((c) => c.includes("json"))))
     return "only JSON response bodies are supported";

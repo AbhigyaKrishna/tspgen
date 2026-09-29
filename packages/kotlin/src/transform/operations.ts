@@ -1,4 +1,4 @@
-import { mergeScopes, metaScopes, type ApiIR, type MetaScopes, type OperationIR, type StatusCodes } from "@abhigyakrishna/tspgen-core";
+import { isDefaultStatus, isFixedStatus, mergeScopes, metaScopes, type ApiIR, type MetaScopes, type OperationIR, type StatusCodes } from "@abhigyakrishna/tspgen-core";
 import { camel, identifier, typeName } from "../naming.js";
 import type { DeclarationBuilder } from "./declarations.js";
 import { decoratorArg } from "./decorators.js";
@@ -38,8 +38,8 @@ const STATUS_NAMES: Record<number, string> = {
 };
 
 function variantName(codes: StatusCodes): string {
-  if (codes === "default") return "Default";
-  if (typeof codes === "number") return STATUS_NAMES[codes] ?? `Status${codes}`;
+  if (isDefaultStatus(codes)) return "Default";
+  if (isFixedStatus(codes)) return STATUS_NAMES[codes] ?? `Status${codes}`;
   return `Status${Math.floor(codes.start / 100)}xx`;
 }
 
@@ -224,7 +224,7 @@ export class ApiBuilder {
     if (success.length === 0) return { kind: "single", type: UNIT, status: 204 };
     const [only] = success;
     // Core streams only a single success response without headers.
-    if (only.stream && typeof only.statusCodes === "number") {
+    if (only.stream && isFixedStatus(only.statusCodes)) {
       return {
         kind: "single",
         // Written qualified when a generated type is named Flow (its import would clash).
@@ -236,7 +236,7 @@ export class ApiBuilder {
         stream: only.stream,
       };
     }
-    if (success.length === 1 && typeof only.statusCodes === "number" && only.headers.length === 0) {
+    if (success.length === 1 && isFixedStatus(only.statusCodes) && only.headers.length === 0) {
       return {
         kind: "single",
         type: only.body ?? UNIT,
@@ -254,7 +254,7 @@ export class ApiBuilder {
       return {
         name: vname,
         statusCodes: r.statusCodes,
-        ...(typeof r.statusCodes === "number" ? { status: r.statusCodes } : {}),
+        ...(isFixedStatus(r.statusCodes) ? { status: r.statusCodes } : {}),
         ...(r.body ? { body: r.body, contentType: r.contentType } : {}),
         headers: r.headers,
       };
@@ -320,7 +320,7 @@ export class ApiBuilder {
       };
       this.exceptions.set(key, entry);
     }
-    entry.codes.add(typeof r.statusCodes === "number" ? String(r.statusCodes) : JSON.stringify(r.statusCodes));
+    entry.codes.add(isFixedStatus(r.statusCodes) ? String(r.statusCodes) : JSON.stringify(r.statusCodes));
     error.exception = typeOf(entry.decl);
     return error;
   }

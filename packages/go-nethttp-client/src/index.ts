@@ -1,4 +1,4 @@
-import type { FileSpec, Target, TargetContext } from "@abhigyakrishna/tspgen-core";
+import { isDefaultStatus, type FileSpec, type Target, type TargetContext } from "@abhigyakrishna/tspgen-core";
 import {
   atLeastGo, bodyCheck, checkHTTPConfiguration, goClientFeatures, goClientOptionsSchema, goFile, goOperations, nullShape,
   localModuleVersion, matchesStatus, modelsDirectory, operationImports, operationUnits, parameterCheck,
@@ -47,7 +47,7 @@ function method(op: GoOperation, ir: GoIR, ctx: TargetContext, options: GoClient
   else out.push(`\terr = c.do(req, ${op.status}, ${response ? "&result" : "nil"}, ${shape})`);
   if (errors.length) {
     out.push(`\tif err != nil {`, `\t\tvar rawError *HTTPError`, `\t\tif errors.As(err, &rawError) {`);
-    for (const error of [...errors].sort((a, b) => Number(a.response.statusCodes === "default") - Number(b.response.statusCodes === "default"))) {
+    for (const error of [...errors].sort((a, b) => Number(isDefaultStatus(a.response.statusCodes)) - Number(isDefaultStatus(b.response.statusCodes)))) {
       out.push(`\t\t\tif ${matchesStatus(error, "rawError.StatusCode")} {`, `\t\t\t\ttyped := &${error.name}{StatusCode: rawError.StatusCode, Cause: rawError}`);
       if (error.body) out.push(`\t\t\t\tif decodeErr := models.DecodeJSON(rawError.Body, &typed.Body, ${wire.ignoreUnknown}, ${wire.validate}, ${wire.defaults}, ${JSON.stringify(nullShape(error.body))}); decodeErr != nil { err = fmt.Errorf("decode error response: %w", decodeErr); ${ret} }`);
       out.push(`\t\t\t\terr = typed`, `\t\t\t\t${ret}`, `\t\t\t}`);

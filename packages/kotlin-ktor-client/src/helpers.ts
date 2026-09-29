@@ -1,4 +1,4 @@
-import type { StatusCodes } from "@abhigyakrishna/tspgen-core";
+import { isDefaultStatus, isFixedStatus, statusRank, type StatusCodes } from "@abhigyakrishna/tspgen-core";
 import {
   camel,
   isJsonContentType,
@@ -76,12 +76,8 @@ export function serializerCallImports(op: KtOperation): string[] {
 }
 
 function statusMatch(codes: StatusCodes): string {
-  if (codes === "default") return "else";
-  return typeof codes === "number" ? String(codes) : `in ${codes.start}..${codes.end}`;
-}
-
-function rank(codes: StatusCodes): number {
-  return codes === "default" ? 2 : typeof codes === "number" ? 0 : 1;
+  if (isDefaultStatus(codes)) return "else";
+  return isFixedStatus(codes) ? String(codes) : `in ${codes.start}..${codes.end}`;
 }
 
 function headerExpr(h: KtParam): string {
@@ -240,7 +236,7 @@ export const ktorClientHelpers = {
   errorBranches(op: KtOperation): { match: string; expr: string }[] {
     const fallback = "ApiException(response.status.value, response.errorMessage())";
     const branches = [...op.errors]
-      .sort((a, b) => rank(a.statusCodes) - rank(b.statusCodes))
+      .sort((a, b) => statusRank(a.statusCodes) - statusRank(b.statusCodes))
       .map((e) => ({
         match: statusMatch(e.statusCodes),
         expr: e.body ? `${e.exception.text}(${bodyRead(e.body)}, response.status.value)` : fallback,
