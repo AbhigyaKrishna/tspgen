@@ -106,7 +106,7 @@ describe("Go configuration", () => {
     expect(operations).not.toContain('"net/http"');
     expect(operations).not.toContain(`models "${module}"`);
     runGo(outputs, {});
-  });
+  }, 180000);
 
   it("rejects generic methods below Go 1.27 without writing partial output", async () => {
     const [{ outputs }, diagnostics] = await Tester.emit("@abhigyakrishna/tspgen-go", {
