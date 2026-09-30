@@ -1657,10 +1657,13 @@ Known limitations:
 ```bash
 pnpm install
 pnpm test        # build all packages, run unit + emitter tests (vitest)
-pnpm e2e         # Kotlin: Gradle build + client↔server test; TypeScript: tsc --strict + stub-server tests
+pnpm e2e         # Kotlin: Gradle; TypeScript: tsc + HTTP tests; Go: generated client↔server tests
 ```
 
-The e2e build needs JDK 17+. If Gradle cannot download over IPv6 on your network, run
+The e2e build needs JDK 17+ and Go 1.27+ (with a C compiler for the Go race detector).
+The Go suite generates models and a client, then exercises both net/http and Gin servers over real HTTP.
+After `pnpm build`, run it alone with `pnpm --filter tspgen-e2e-go test`.
+If Gradle cannot download over IPv6 on your network, run
 `JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true pnpm e2e`.
 
 Design and plans live in `docs/superpowers/`.
