@@ -1,0 +1,3 @@
+<% for (const version of it.versions) { %>const <%= version.name %> = <%= JSON.stringify(version.value) %>
+
+<% } %>

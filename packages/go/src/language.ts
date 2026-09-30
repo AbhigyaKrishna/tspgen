@@ -10,7 +10,13 @@ export const goLanguage: LanguageModule<GoIR> = {
   emitter: GO_EMITTER,
   features: goFeatures,
   templates: resolve(import.meta.dirname, "../templates"),
-  transform: (api, ctx) => transformToGo(ctx.program, api, String(ctx.options.package ?? "models"), String(ctx.options.module ?? ""), resolveGoOptions(ctx.options, ctx.features)),
+  transform: (api, ctx) => transformToGo(
+    ctx.program,
+    api,
+    String(ctx.options.package ?? "models"),
+    String(ctx.options.module ?? ""),
+    resolveGoOptions(ctx.options, ctx.features),
+  ),
   format: (path, content) => {
     const normalized = content.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim() + "\n";
     return path.endsWith(".go") ? execFileSync("gofmt", { input: normalized, encoding: "utf8" }) : normalized;

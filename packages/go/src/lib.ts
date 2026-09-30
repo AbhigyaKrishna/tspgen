@@ -11,11 +11,29 @@ import { goOptionsSchemaProperties, type GoNaming, type GoOptions } from "./opti
 export const GO_EMITTER = "@abhigyakrishna/tspgen-go";
 export const goFeatures = defineFeatures({
   ...coreFeatures,
-  validation: { default: true, override: "model", description: "Generate Validate methods for constraints, literals and enum values, and validate required JSON properties when HTTP targets enable validate." },
-  defaults: { default: true, override: "model", description: "Apply declared property defaults when decoding missing JSON properties and generate model constructors that initialize them." },
-  "omit-empty": { default: true, description: "Optional model properties carry json omitempty tags. Pointer fields preserve present zero values; value fields omit zero values." },
-  "enum-unknown": { default: false, override: "declaration", description: "String enums decode unknown wire values to an UNKNOWN sentinel accepted by validation. Encoding the sentinel fails." },
-  "go-mod": { default: true, description: "Generate the models go.mod. Client/server targets have their own go-mod feature." },
+  validation: {
+    default: true,
+    override: "model",
+    description: "Generate Validate methods for constraints, literals and enum values, and validate required JSON properties when HTTP targets enable validate.",
+  },
+  defaults: {
+    default: true,
+    override: "model",
+    description: "Apply declared property defaults when decoding missing JSON properties and generate model constructors that initialize them.",
+  },
+  "omit-empty": {
+    default: true,
+    description: "Optional model properties carry json omitempty tags. Pointer fields preserve present zero values; value fields omit zero values.",
+  },
+  "enum-unknown": {
+    default: false,
+    override: "declaration",
+    description: "String enums decode unknown wire values to an UNKNOWN sentinel accepted by validation. Encoding the sentinel fails.",
+  },
+  "go-mod": {
+    default: true,
+    description: "Generate the models go.mod. Client/server targets have their own go-mod feature.",
+  },
 });
 
 export interface GoEmitterOptions extends LanguageEmitterOptions {

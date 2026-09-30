@@ -1,0 +1,50 @@
+type <%= it.name %> struct {
+	BaseURL string
+	HTTPClient *http.Client
+}
+
+type HTTPError struct {
+	StatusCode int
+	Body []byte
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
+}
+<% if (it.hasConstructor) { %>
+func New<%= it.name %>(baseURL string) *<%= it.name %> {
+	return &<%= it.name %>{BaseURL: baseURL}
+}
+<% } %>
+<% if (it.usesGenericMethods) { %>// Do sends an HTTP request and decodes its expected success body as T.
+func (c *<%= it.name %>) Do[T any](req *http.Request, successStatus int, decodeBody bool, shape ...string) (result T, err error) {
+<% } else { %>func (c *<%= it.name %>) do(req *http.Request, successStatus int, target any, shape string) (err error) {
+<% } %>	httpClient := c.HTTPClient
+	if httpClient == nil {
+<% if (it.timeout) { %>		httpClient = &http.Client{Timeout: <%= it.timeout %> * time.Millisecond}
+<% } else { %>		httpClient = http.DefaultClient
+<% } %>	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		<%= it.returnStatement %>
+	}
+	defer resp.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, <%= it.maxResponseSize %> + 1))
+	if err != nil {
+		<%= it.returnStatement %>
+	}
+	if len(payload) > <%= it.maxResponseSize %> {
+		err = fmt.Errorf("response body exceeds %d bytes", <%= it.maxResponseSize %>)
+		<%= it.returnStatement %>
+	}
+	if resp.StatusCode != successStatus {
+		err = &HTTPError{StatusCode: resp.StatusCode, Body: payload}
+		<%= it.returnStatement %>
+	}
+<% if (it.usesGenericMethods) { %>	if decodeBody {
+		err = models.DecodeJSON(payload, &result, <%= it.wire.ignoreUnknown %>, <%= it.wire.validate %>, <%= it.wire.defaults %>, shape...)
+<% } else { %>	if target != nil {
+		err = models.DecodeJSON(payload, target, <%= it.wire.ignoreUnknown %>, <%= it.wire.validate %>, <%= it.wire.defaults %>, shape)
+<% } %>	}
+	<%= it.returnStatement %>
+}

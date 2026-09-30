@@ -1,0 +1,9 @@
+<% const param = it.param; const field = `request.${param.field}`; %>	<% if (param.optional) { %>if <%= field %> != nil {<% } else { %>{<% } %>
+		raw, encodeErr := models.EncodeParameter(<%= field %>)
+		if encodeErr != nil {
+			err = encodeErr
+			<%= it.op.returnStatement %>
+		}
+<% if (param.location === "query") { %>		query.Set(<%= JSON.stringify(param.wireName) %>, raw)
+<% } else { %>		req.Header.Set(<%= JSON.stringify(param.wireName) %>, raw)
+<% } %>	}

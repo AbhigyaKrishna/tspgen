@@ -79,6 +79,35 @@ describe("Go configuration", () => {
     expect(outputs["client/go.mod"]).toContain("go 1.27");
   });
 
+  it("allows overriding client method templates with the pipeline context", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tspgen-go-templates-"));
+    try {
+      mkdirSync(join(dir, "nethttp-client"));
+      const method = readFileSync(join(import.meta.dirname, "../../go-nethttp-client/templates/nethttp-client/method.eta"), "utf8");
+      writeFileSync(join(dir, "nethttp-client/method.eta"), `// Custom <%= it.ctx.language %> method: <%= it.op.name %>\n${method}`);
+      const { outputs } = await Tester.emit("@abhigyakrishna/tspgen-go", {
+        module, "template-dir": dir,
+        targets: [{ [client]: { module: "example.com/config/client" } }],
+      }).compile(spec);
+      expect(outputs["client/client.go"]).toContain("// Custom go method: ConfigRead");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("compiles grouped Gin collection body handlers with validation disabled", async () => {
+    const { outputs } = await Tester.emit("@abhigyakrishna/tspgen-go", {
+      module,
+      targets: [{ [gin]: {
+        module: "example.com/config/server", grouping: "per-namespace", features: { validate: false },
+      } }],
+    }).compile(`@service namespace S; @post op write(@body value: int32[]): void;`);
+    const operations = outputs["server/s_operations.go"];
+    expect(operations).not.toContain('"net/http"');
+    expect(operations).not.toContain(`models "${module}"`);
+    runGo(outputs, {});
+  });
+
   it("rejects generic methods below Go 1.27 without writing partial output", async () => {
     const [{ outputs }, diagnostics] = await Tester.emit("@abhigyakrishna/tspgen-go", {
       module, "go-version": "1.26",

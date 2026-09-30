@@ -1,0 +1,50 @@
+<% if (it.handler) { %>func NewHandler(service <%= it.service %>) *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.UseEscapedPath = true
+	router.UnescapePathValues = false
+	router.HandleMethodNotAllowed = true
+	RegisterRoutes(router, service)
+	return router
+}
+
+<% } %>func escapedRoute(path string) string {
+	return (&url.URL{Path: path}).EscapedPath()
+}
+
+func pathValue(c *gin.Context, key string) (string, error) {
+	pattern := strings.Split(c.FullPath(), "/")
+	path := strings.Split(c.Request.URL.EscapedPath(), "/")
+	for i := len(pattern) - 1; i >= 0; i-- {
+		if pattern[i] == ":" + key && i < len(path) {
+			return url.PathUnescape(path[i])
+		}
+	}
+	return "", errors.New("missing path parameter")
+}
+
+func reject(c *gin.Context, status int, message string) {
+	c.Abort()
+	rejectHTTP(c.Writer, status, message)
+}
+
+func writeJSON(c *gin.Context, status int, body any) {
+	if err := writeHTTPJSON(c.Writer, status, body); err != nil {
+		_ = c.Error(err)
+		c.Abort()
+	}
+}
+
+func serviceError(c *gin.Context, err error) {
+	_ = c.Error(err)
+	c.Abort()
+	serviceHTTPError(c.Writer, err)
+}
+
+func readJSONBody(c *gin.Context, target any, optional, nullable bool, shape string) bool {
+	if !readHTTPJSON(c.Writer, c.Request, target, optional, nullable, shape) {
+		c.Abort()
+		return false
+	}
+	return true
+}

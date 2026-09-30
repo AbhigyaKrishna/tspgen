@@ -1,0 +1,2 @@
+	router.HandleFunc(<%= JSON.stringify(`${it.op.verb} ${it.op.path}`) %>, func(w http.ResponseWriter, r *http.Request) {
+<%~ include("go/server/handler-body", it) %>	})

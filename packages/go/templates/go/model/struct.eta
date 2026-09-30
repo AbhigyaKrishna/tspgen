@@ -1,0 +1,27 @@
+<% for (const line of it.docs) { %>// <%= line %>
+<% } %>type <%= it.name %><%= it.typeParameters %> struct {
+<% for (const field of it.fields) { %>
+<% for (const line of field.docs) { %>	// <%= line %>
+<% } %>	<%= field.name %> <%= field.type.text %> <%= field.tag %>
+<% } %>}
+<% if (it.defaults) { %>
+// New<%= it.name %> initializes declared property defaults.
+func New<%= it.name %><%= it.typeParameters %>() *<%= it.instance %> {
+	value := new(<%= it.instance %>)
+	if err := ApplyDefaults(value); err != nil {
+		panic(err)
+	}
+	return value
+}
+<% } %>
+<% if (it.validation) { %>
+func (value *<%= it.instance %>) Validate() error {
+	if value == nil {
+		return &ValidationError{Field: <%= JSON.stringify(it.name) %>, Message: "must not be null"}
+	}
+<% for (const field of it.fields) { %>	if err := <%= field.check %>; err != nil {
+		return err
+	}
+<% } %>	return nil
+}
+<% } %>

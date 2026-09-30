@@ -1,0 +1,13 @@
+<% const op = it.op; %>
+<% for (const line of op.docs) { %>// <%= line %>
+<% } %>func (c *<%= it.name %>) <%= op.name %>(ctx context.Context, request <%= op.request.name %>) (<% if (op.responseType) { %>result <%= op.responseType %>, <% } %>err error) {
+<%~ include("nethttp-client/validation", it) %><%~ include("nethttp-client/request", it) %>
+<% if (it.usesGenericMethods) { %>
+<% if (op.responseType) { %>	result, err = c.Do[<%= op.responseType %>](req, <%= op.status %>, true, <%= JSON.stringify(op.responseShape) %>)
+<% } else { %>	_, err = c.Do[struct{}](req, <%= op.status %>, false)
+<% } %>
+<% } else { %>	err = c.do(req, <%= op.status %>, <%= op.responseType ? "&result" : "nil" %>, <%= JSON.stringify(op.responseShape) %>)
+<% } %>
+<% if (op.errorBranches.length) { %><%~ include("nethttp-client/errors", it) %>
+<% } %>	<%= op.returnStatement %>
+}

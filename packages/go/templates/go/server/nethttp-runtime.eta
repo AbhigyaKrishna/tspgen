@@ -1,0 +1,6 @@
+<% if (it.handler) { %>func NewHandler(service <%= it.service %>) http.Handler {
+	router := http.NewServeMux()
+	RegisterRoutes(router, service)
+	return router
+}
+<% } %>
