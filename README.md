@@ -298,10 +298,14 @@ service interface per group and embed those interfaces in the root service. Type
 constants, and operation names follow the emitter's naming configuration; conflicting generated identifiers
 produce diagnostics. `scalar-style: alias` emits Go aliases for referenced user scalars, retaining their wire codecs.
 HTTP parameters always preserve optional presence, even with `optional-fields: values` for model properties.
+net/http routes match exact paths, including root and trailing-slash routes. Router conflicts are reported during
+generation, including equivalent wildcard routes and overlapping paths without an unambiguous precedence.
 
 With validation enabled, generated model `Validate` methods check bounds, lengths, patterns, collection sizes,
-literals, and enums. `models.ValidateValue` also walks nested models and generic instances. Server request
-decoding checks required properties and nullability before calling the service. Client validation is opt-in and
+literals, and enums. `models.ValidateValue` also walks nested models and generic instances. Validation
+retains the nullability of generic type arguments, including collection elements. The `integer`
+scalar rejects fractional values and quoted numbers while preserving arbitrarily large integer text.
+Server request decoding checks required properties and nullability before calling the service. Client validation is opt-in and
 checks outgoing requests and decoded responses. `features.validation: false` disables these contract checks;
 JSON syntax, scalar width, body limits, and media types are still enforced. `@meta("go", #{ features: #{ validation: false,
 defaults: false } })` can override those model features for a namespace or individual model.

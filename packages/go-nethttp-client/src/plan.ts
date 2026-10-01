@@ -1,4 +1,4 @@
-import { isDefaultStatus, type FileSpec, type TargetContext } from "@abhigyakrishna/tspgen-core";
+import { statusRank, type FileSpec, type TargetContext } from "@abhigyakrishna/tspgen-core";
 import {
   atLeastGo, checkHTTPConfiguration, goOperations, goSourceFile, httpModuleFile, httpOperationPlan,
   matchesStatus, operationImports, operationUnits, requestName, wireOptions,
@@ -48,7 +48,7 @@ function clientIdentifiers(operations: GoOperation[], options: GoClientOptions, 
 function clientOperation(op: GoOperation, ir: GoIR, ctx: TargetContext, options: GoClientOptions) {
   const plan = httpOperationPlan(op, ir, ctx, options, "client");
   const errors = [...plan.errors].sort((a, b) =>
-    Number(isDefaultStatus(a.response.statusCodes)) - Number(isDefaultStatus(b.response.statusCodes)),
+    statusRank(a.response.statusCodes) - statusRank(b.response.statusCodes),
   );
   return {
     ...plan,

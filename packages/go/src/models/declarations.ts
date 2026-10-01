@@ -11,11 +11,15 @@ function defaultJSON(field: GoField, ir: GoIR): string {
 
 function fieldTag(field: GoField, decl: Extract<GoDecl, { kind: "struct" }>, ir: GoIR): string {
   const omitEmpty = field.optional && ir.options.omitEmpty ? ",omitempty" : "";
+  const jsonName = field.wireName + (omitEmpty || (field.wireName === "-" ? "," : ""));
   const presence = field.optional ? "optional" : "required";
   const pairs = [
-    `json:${JSON.stringify(field.wireName + omitEmpty)}`,
-    `tsp:${JSON.stringify(`${presence},${nullShape(field.ref)}`)}`,
+    `json:${JSON.stringify(jsonName)}`,
+    `tsp:${JSON.stringify(`${presence},${nullShape(field.ref, ir.api)}`)}`,
   ];
+  if (field.optional && field.ref.kind === "typeParam" && ir.options.optionalFields === "pointers") {
+    pairs.push('tspoptionalpointer:"true"');
+  }
   if (!decl.validation) pairs.push('tspvalidate:"false"');
   if (decl.defaults && field.default !== undefined) pairs.push(`default:${JSON.stringify(defaultJSON(field, ir))}`);
   const tag = pairs.join(" ");
@@ -29,9 +33,10 @@ export function modelDeclaration(decl: GoDecl, ir: GoIR): GoSourceSection {
       return { template: "go/model/alias", data: { ...decl, docs } };
     case "enum": {
       const members = decl.members.map((member) => ({ ...member, name: `${decl.name}${member.name}` }));
-      const validNames = members.map((member) => member.name);
+      const cases = [...new Map(members.map((member) => [member.value, member.name])).values()];
+      const validNames = [...cases];
       if (decl.unknown) validNames.push(`${decl.name}UNKNOWN`);
-      return { template: "go/model/enum", data: { ...decl, docs, members, validNames, validation: ir.options.validation } };
+      return { template: "go/model/enum", data: { ...decl, docs, members, cases, validNames, validation: ir.options.validation } };
     }
     case "struct": {
       const parameters = decl.typeParameters;
@@ -42,7 +47,7 @@ export function modelDeclaration(decl: GoDecl, ir: GoIR): GoSourceSection {
         docs: field.docs?.split("\n") ?? [],
         tag: fieldTag(field, decl, ir),
         check: propertyCheckCall(propertyCheck(
-          field.wireName, `value.${field.name}`, field.optional, field.ref, field.constraints, "",
+          field.wireName, `value.${field.name}`, field.optional, field.ref, field.constraints, "", ir.api,
         ), ""),
       }));
       return { template: "go/model/struct", data: { ...decl, docs, typeParameters, instance, fields } };

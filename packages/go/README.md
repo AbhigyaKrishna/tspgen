@@ -9,6 +9,7 @@ TypeScript plans declarations and wire behavior; templates contain the Go source
 | Identifier conventions | `src/naming.ts` |
 | Type mappings and imports | `src/transform/type-map.ts` |
 | Model and operation transforms | `src/transform/declarations.ts`, `src/transform/operations.ts` |
+| Validation shapes and generic type arguments | `src/validation.ts`, `templates/go/runtime/shapes.eta` |
 | Model tags and declaration planning | `src/models/declarations.ts`, `src/models-target.ts` |
 | Shared requests, errors, validation, and file layout | `src/http/` |
 | Server route validation and service contracts | `src/server/routes.ts`, `src/server/operations.ts` |

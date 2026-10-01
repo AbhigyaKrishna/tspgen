@@ -46,9 +46,49 @@ func dereference(value reflect.Value) reflect.Value {
 	return value
 }
 
+type shapeVisit struct {
+	typeOf reflect.Type
+	address uintptr
+	length int
+	shape string
+}
+
 func checkShape(name, shape string, value reflect.Value) error {
+	var typeOf reflect.Type
+	if value.IsValid() {
+		typeOf = value.Type()
+	}
+	resolved, err := resolveShape(shape, nil, typeOf)
+	if err != nil {
+		return err
+	}
+	return checkShapeValue(name, resolved, value, map[shapeVisit]bool{})
+}
+
+func visitedShape(value reflect.Value, shape string, seen map[shapeVisit]bool) bool {
+	if absent(value) {
+		return false
+	}
+	if value.Kind() != reflect.Pointer && value.Kind() != reflect.Map && value.Kind() != reflect.Slice {
+		return false
+	}
+	key := shapeVisit{typeOf: value.Type(), address: uintptr(value.UnsafePointer()), shape: shape}
+	if value.Kind() != reflect.Pointer {
+		key.length = value.Len()
+	}
+	if seen[key] {
+		return true
+	}
+	seen[key] = true
+	return false
+}
+
+func checkShapeValue(name, shape string, value reflect.Value, seen map[shapeVisit]bool) error {
 	nullable := strings.HasPrefix(shape, "?")
 	shape = strings.TrimPrefix(shape, "?")
+	if visitedShape(value, shape, seen) {
+		return nil
+	}
 	value = dereference(value)
 	if absent(value) {
 		if nullable {
@@ -56,9 +96,23 @@ func checkShape(name, shape string, value reflect.Value) error {
 		}
 		return &ValidationError{Field: name, Message: "must not be null"}
 	}
+	if shape == "i" {
+		raw, err := json.Marshal(value.Interface())
+		if err != nil {
+			return err
+		}
+		return checkInteger(name, raw)
+	}
+	if strings.HasPrefix(shape, "g") && value.Kind() == reflect.Struct {
+		return checkGenericShape(name, shape, value, seen)
+	}
+	return checkCollectionShape(name, shape, value, seen)
+}
+
+func checkCollectionShape(name, shape string, value reflect.Value, seen map[shapeVisit]bool) error {
 	if strings.HasPrefix(shape, "a") && (value.Kind() == reflect.Slice || value.Kind() == reflect.Array) {
 		for i := 0; i < value.Len(); i++ {
-			if err := checkShape(fmt.Sprintf("%s[%d]", name, i), shape[1:], value.Index(i)); err != nil {
+			if err := checkShapeValue(fmt.Sprintf("%s[%d]", name, i), shape[1:], value.Index(i), seen); err != nil {
 				return err
 			}
 		}
@@ -66,9 +120,36 @@ func checkShape(name, shape string, value reflect.Value) error {
 	if strings.HasPrefix(shape, "m") && value.Kind() == reflect.Map {
 		iter := value.MapRange()
 		for iter.Next() {
-			if err := checkShape(fmt.Sprintf("%s[%v]", name, iter.Key()), shape[1:], iter.Value()); err != nil {
+			if err := checkShapeValue(fmt.Sprintf("%s[%v]", name, iter.Key()), shape[1:], iter.Value(), seen); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func checkGenericShape(name, shape string, value reflect.Value, seen map[shapeVisit]bool) error {
+	arguments, err := shapeArguments(shape)
+	if err != nil {
+		return err
+	}
+	for index := 0; index < value.NumField(); index++ {
+		field := value.Type().Field(index)
+		presence := field.Tag.Get("tsp")
+		if field.PkgPath != "" || presence == "" || field.Tag.Get("tspvalidate") == "false" {
+			continue
+		}
+		item := value.Field(index)
+		if strings.HasPrefix(presence, "optional,") && absent(item) {
+			continue
+		}
+		resolved, err := propertyShape(field, arguments)
+		if err != nil {
+			return err
+		}
+		fieldName := strings.Split(field.Tag.Get("json"), ",")[0]
+		if err := checkShapeValue(name + "." + fieldName, resolved, item, seen); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -155,6 +236,9 @@ func checkJSONShape(name, shape string, raw json.RawMessage) error {
 			return nil
 		}
 		return &ValidationError{Field: name, Message: "must not be null"}
+	}
+	if shape == "i" {
+		return checkInteger(name, raw)
 	}
 	if strings.HasPrefix(shape, "a") {
 		var items []json.RawMessage

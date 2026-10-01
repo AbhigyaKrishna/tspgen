@@ -8,15 +8,15 @@ export function parameterChecks(op: GoOperation, ir: GoIR): string[] {
   )));
 }
 
-export function bodyCheckCall(op: GoOperation): string {
+export function bodyCheckCall(op: GoOperation, ir?: GoIR): string {
   const body = op.body!;
-  return propertyCheckCall(propertyCheck("body", "request.Body", body.optional, body.type, body.constraints));
+  return propertyCheckCall(propertyCheck("body", "request.Body", body.optional, body.type, body.constraints, "models.", ir?.api));
 }
 
 export function parameterCheck(op: GoOperation, ir: GoIR): string[] {
   return parameterChecks(op, ir).map((call) => `if err := ${call}; err != nil`);
 }
 
-export function bodyCheck(op: GoOperation, _ir: GoIR): string {
-  return `if err := ${bodyCheckCall(op)}; err != nil`;
+export function bodyCheck(op: GoOperation, ir: GoIR): string {
+  return `if err := ${bodyCheckCall(op, ir)}; err != nil`;
 }

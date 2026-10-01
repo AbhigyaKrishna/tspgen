@@ -22,7 +22,7 @@ func (value *<%= it.name %>) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	switch <%= it.name %>(wire) {
-	case <%= it.members.map(member => member.name).join(", ") %>:
+	case <%= it.cases.join(", ") %>:
 		*value = <%= it.name %>(wire)
 	default:
 		*value = <%= it.name %>UNKNOWN

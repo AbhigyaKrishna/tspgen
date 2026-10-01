@@ -11,7 +11,7 @@ function parameterBinding(param: GoHTTPOperation["params"][number], route: GoSer
     case "path": return {
       ...param,
       key: route.keys.get(param.wireName),
-      raw: `r.PathValue(${name})`,
+      raw: `r.PathValue(${JSON.stringify(route.keys.get(param.wireName))})`,
       present: "true",
     };
     case "query": return {

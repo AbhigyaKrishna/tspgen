@@ -1,10 +1,14 @@
-func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool) error {
+func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool, shape string) error {
 	value = dereference(value)
 	if absent(value) {
 		return nil
 	}
 	switch value.Kind() {
 	case reflect.Struct:
+		arguments, err := shapeArguments(shape)
+		if err != nil {
+			return err
+		}
 		var fields map[string]json.RawMessage
 		if len(raw) > 0 && raw[0] == '{' {
 			if err := json.Unmarshal(raw, &fields); err != nil {
@@ -26,17 +30,21 @@ func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool
 				item, present = json.RawMessage(fallback), true
 			}
 			parts := strings.SplitN(field.Tag.Get("tsp"), ",", 2)
+			fieldShape, err := propertyShape(field, arguments)
+			if err != nil {
+				return err
+			}
 			check := validate && field.Tag.Get("tspvalidate") != "false"
 			if check && parts[0] == "required" && !present {
 				return &ValidationError{Field: name, Message: "required property is missing"}
 			}
 			if check && present {
-				if err := checkJSONShape(name, parts[1], item); err != nil {
+				if err := checkJSONShape(name, fieldShape, item); err != nil {
 					return err
 				}
 			}
 			if present {
-				if err := applyJSON(value.Field(i), bytes.TrimSpace(item), validate, defaults); err != nil {
+				if err := applyJSON(value.Field(i), bytes.TrimSpace(item), validate, defaults, fieldShape); err != nil {
 					return err
 				}
 			}
@@ -52,7 +60,7 @@ func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool
 			}
 		}
 		for i := 0; i < value.Len() && i < len(items); i++ {
-			if err := applyJSON(value.Index(i), items[i], validate, defaults); err != nil {
+			if err := applyJSON(value.Index(i), items[i], validate, defaults, collectionItemShape(shape)); err != nil {
 				return err
 			}
 		}
@@ -67,7 +75,7 @@ func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool
 		for iter.Next() {
 			item := reflect.New(iter.Value().Type()).Elem()
 			item.Set(iter.Value())
-			if err := applyJSON(item, items[fmt.Sprint(iter.Key().Interface())], validate, defaults); err != nil {
+			if err := applyJSON(item, items[fmt.Sprint(iter.Key().Interface())], validate, defaults, collectionItemShape(shape)); err != nil {
 				return err
 			}
 			value.SetMapIndex(iter.Key(), item)
@@ -77,7 +85,7 @@ func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool
 }
 
 // ApplyDefaults initializes declared defaults on a newly constructed model.
-func ApplyDefaults(input any) error { return applyJSON(reflect.ValueOf(input), nil, false, true) }
+func ApplyDefaults(input any) error { return applyJSON(reflect.ValueOf(input), nil, false, true, "_") }
 
 // DecodeJSON accepts exactly one JSON value, preserving numeric precision.
 func DecodeJSON(data []byte, target any, ignoreUnknown, validate, defaults bool, shape ...string) error {
@@ -101,7 +109,11 @@ func DecodeJSON(data []byte, target any, ignoreUnknown, validate, defaults bool,
 		}
 		return errors.New("trailing JSON value")
 	}
-	if err := applyJSON(reflect.ValueOf(target), bytes.TrimSpace(data), validate, defaults); err != nil {
+	rootShape := "_"
+	if len(shape) > 0 {
+		rootShape = shape[0]
+	}
+	if err := applyJSON(reflect.ValueOf(target), bytes.TrimSpace(data), validate, defaults, rootShape); err != nil {
 		return err
 	}
 	if validate {

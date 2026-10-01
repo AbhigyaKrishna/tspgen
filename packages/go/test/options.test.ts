@@ -1,11 +1,11 @@
 import { resolvePath } from "@typespec/compiler";
 import { createTester } from "@typespec/compiler/testing";
 import { resolve } from "node:path";
-import { dirname, join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
+import { runGo } from "./helpers.js";
 
 const Tester = createTester(resolvePath(import.meta.dirname, ".."), {
   libraries: ["@typespec/http", "@abhigyakrishna/tspgen-core", "@abhigyakrishna/tspgen-go"],
@@ -16,26 +16,6 @@ const gin = resolve(import.meta.dirname, "../../go-gin-server/dist/index.js");
 const module = "example.com/config/models";
 const configuredSpec = readFileSync(join(import.meta.dirname, "fixtures/config.tsp"), "utf8");
 
-function runGo(outputs: Record<string, string>, tests: Record<string, string>): void {
-  const dir = mkdtempSync(join(tmpdir(), "tspgen-go-options-"));
-  try {
-    for (const [path, content] of Object.entries({ ...outputs, ...tests })) {
-      const file = join(dir, path);
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, content);
-    }
-    const modules = Object.keys(outputs).filter((path) => path.endsWith("/go.mod")).map(dirname);
-    writeFileSync(join(dir, "go.work"), `go 1.27\n\nuse (\n${modules.map((path) => `./${path}`).join("\n")}\n)\n`);
-    for (const path of modules) {
-      try {
-        execFileSync("go", ["test", "./..."], { cwd: join(dir, path), env: { ...process.env, GOWORK: join(dir, "go.work"), GOTOOLCHAIN: "local" }, encoding: "utf8", stdio: "pipe", timeout: 150000 });
-      } catch (error) {
-        const failure = error as Error & { stdout?: string; stderr?: string };
-        throw new Error(`${failure.message}\n${failure.stdout ?? ""}\n${failure.stderr ?? ""}`, { cause: error });
-      }
-    }
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-}
 const spec = `
   @service namespace Config;
   scalar TraceId extends string;
