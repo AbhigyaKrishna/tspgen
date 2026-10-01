@@ -1,0 +1,39 @@
+<% for (const line of it.docs) { %>// <%= line %>
+<% } %>type <%= it.name %> <%= it.base %>
+
+const (
+<% for (const member of it.members) { %>	<%= member.name %> <%= it.name %> = <%= JSON.stringify(member.value) %>
+<% } %>
+<% if (it.unknown) { %>	<%= it.name %>UNKNOWN <%= it.name %> = "\x00tspgen.UNKNOWN"
+<% } %>)
+<% if (it.validation) { %>
+func (value <%= it.name %>) Validate() error {
+	switch value {
+	case <%= it.validNames.join(", ") %>:
+		return nil
+	}
+	return &ValidationError{Field: <%= JSON.stringify(it.name) %>, Message: "unknown enum value"}
+}
+<% } %>
+<% if (it.unknown) { %>
+func (value *<%= it.name %>) UnmarshalJSON(data []byte) error {
+	var wire string
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	switch <%= it.name %>(wire) {
+	case <%= it.cases.join(", ") %>:
+		*value = <%= it.name %>(wire)
+	default:
+		*value = <%= it.name %>UNKNOWN
+	}
+	return nil
+}
+
+func (value <%= it.name %>) MarshalJSON() ([]byte, error) {
+	if value == <%= it.name %>UNKNOWN {
+		return nil, &ValidationError{Field: <%= JSON.stringify(it.name) %>, Message: "UNKNOWN cannot be encoded"}
+	}
+	return json.Marshal(string(value))
+}
+<% } %>

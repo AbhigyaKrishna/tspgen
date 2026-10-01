@@ -1,0 +1,20 @@
+<% const param = it.param; const transport = it.transport; %>		{
+<% if (param.location === "path" && transport.framework === "gin") { %>			raw, err := pathValue(c, <%= JSON.stringify(param.key) %>)
+			if err != nil {
+				<%= transport.reject %>(<%= transport.response %>, http.StatusBadRequest, "invalid path parameter")
+				return
+			}
+			present := true
+<% } else { %>			raw := <%= param.raw %>
+			present := <%= param.present %>
+<% } %>			if present {
+				if err := models.DecodeParameter(raw, &request.<%= param.field %>); err != nil {
+					<%= transport.reject %>(<%= transport.response %>, http.StatusBadRequest, <%= JSON.stringify(`invalid ${param.location} parameter`) %>)
+					return
+				}
+<% if (param.optional) { %>			}
+<% } else { %>			} else {
+				<%= transport.reject %>(<%= transport.response %>, http.StatusBadRequest, <%= JSON.stringify(`missing ${param.location} parameter`) %>)
+				return
+			}
+<% } %>		}

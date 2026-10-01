@@ -1,0 +1,17 @@
+{
+  "name": "tspgen-e2e-go",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "tsp compile main.tsp",
+    "test": "pnpm generate && GIN_MODE=release go test -mod=readonly -race -count=1 -timeout=60s -v ./..."
+  },
+  "dependencies": {
+    "@abhigyakrishna/tspgen-go": "workspace:*",
+    "@abhigyakrishna/tspgen-go-gin-server": "workspace:*",
+    "@abhigyakrishna/tspgen-go-nethttp-client": "workspace:*",
+    "@abhigyakrishna/tspgen-go-nethttp-server": "workspace:*",
+    "@typespec/compiler": "1.16.0",
+    "@typespec/http": "1.16.0"
+  }
+}

@@ -1,0 +1,15 @@
+<% const op = it.op; %>
+<% if (it.wire.validate) { %>
+<% for (const param of op.params) { %>	if err := <%= param.check %>; err != nil {
+		<%= op.returnStatement %>
+	}
+<% } %>
+<% if (op.body) { %>	if err := <%= op.body.check %>; err != nil {
+		<%= op.returnStatement %>
+	}
+	if validationErr := models.ValidateValue(request.Body); validationErr != nil {
+		err = validationErr
+		<%= op.returnStatement %>
+	}
+<% } %>
+<% } %>

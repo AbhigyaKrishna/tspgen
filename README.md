@@ -11,6 +11,10 @@ The core is language-neutral; languages and server/client libraries plug in as s
 | `@abhigyakrishna/tspgen-kotlin-ktor-client` | Target: Ktor `HttpClient` SDK |
 | `@abhigyakrishna/tspgen-typescript` | The TypeSpec emitter for TypeScript: interfaces, literal-union enums, optional zod schemas, result/error types, `@TS.*` decorators |
 | `@abhigyakrishna/tspgen-ts-nextjs-client` | Target: Next.js client SDK — typed `fetch` client, TanStack Query hooks, Server Actions |
+| `@abhigyakrishna/tspgen-go` | Go emitter: JSON models in their own Go module (initial implementation) |
+| `@abhigyakrishna/tspgen-go-nethttp-client` | Target: Go `net/http` client in its own module (initial implementation) |
+| `@abhigyakrishna/tspgen-go-nethttp-server` | Target: Go `net/http` server in its own module (initial implementation) |
+| `@abhigyakrishna/tspgen-go-gin-server` | Target: Gin server in its own module, with service interfaces and route registration |
 
 ## Usage
 
@@ -184,6 +188,218 @@ also works on a client built with `expectSuccess = true`. An error response with
 the body text. An `application/problem+json` response throws that `ApiException` too, even at a status with a
 declared error model: a problem is never decoded as the model. `sse-max-size` (bytes, default 1 MiB) limits event lines and data.
 
+### Go
+
+The Go emitter generates three independent Go modules using explicit import paths. It defaults to Go 1.22
+for `http.ServeMux` method and path patterns. The client and server modules have local `replace` directives
+pointing to the generated models module; change those directives when publishing the modules separately.
+
+```yaml
+emit:
+  - "@abhigyakrishna/tspgen-go"
+options:
+  "@abhigyakrishna/tspgen-go":
+    module: example.com/pets/models
+    targets:
+      - "@abhigyakrishna/tspgen-go-nethttp-client":
+          module: example.com/pets/client
+      - "@abhigyakrishna/tspgen-go-nethttp-server":
+          module: example.com/pets/server
+```
+
+Generated files are under `models/`, `client/`, and `server/`, each with its own `go.mod`. The supported HTTP
+subset is one fixed-status JSON success response per operation, JSON request bodies, and scalar path, query,
+and header parameters. The client returns a typed success body or `HTTPError`; the server generates a `Service`
+interface, `RegisterRoutes`, and `NewHandler`. Unsupported shapes, including auth, streaming, multipart, multiple success
+responses, response headers, collection parameters, and non-literal unions, produce TypeSpec diagnostics.
+
+#### Configuration
+
+Models and every Go HTTP target have explicit options and feature gates, listed in the [Options reference](#options-reference).
+This expanded example shows the available settings; select either the net/http or Gin server target for each output directory.
+
+```yaml
+emit:
+  - "@abhigyakrishna/tspgen-go"
+options:
+  "@abhigyakrishna/tspgen-go":
+    module: example.com/pets/models
+    package: models
+    go-version: "1.27"
+    layout: per-type                   # single-file | per-type | per-namespace
+    naming:
+      initialisms: [ID, HTTP, URL]      # preserve these initialisms in exported names
+      enum-members: PascalCase         # PascalCase | UPPER_SNAKE
+      operation-prefix: group          # group | none
+    type-names:
+      Pets.Pet: PetModel                # qualified type id wins over an unqualified name
+    date-time: time.Time               # string | time.Time (UTC/offset timestamps only)
+    decimal: json.Number               # json.Number | string | float64
+    integer: json.Number               # json.Number | int64 (unbounded integer only)
+    scalar-style: alias                # inline | alias
+    optional-fields: pointers          # pointers | values (model properties only)
+    features:
+      header: true
+      docs: true
+      api-version: true
+      generics: true                    # generic model types; independent of generic methods
+      validation: true
+      validator: false                 # opt in to go-playground/validator/v10 struct tags
+      defaults: true
+      omit-empty: true
+      enum-unknown: false
+      go-mod: true
+    targets:
+      - "@abhigyakrishna/tspgen-go-nethttp-client":
+          module: example.com/pets/client
+          package: client
+          go-version: "1.27"           # optional: inherits models version
+          grouping: per-interface      # single-file | per-interface | per-namespace
+          client-name: Client
+          request-suffix: Request
+          errors: typed                # raw | typed
+          max-response-size: 1048576
+          timeout-ms: 0                # 0 uses http.DefaultClient
+          features:
+            go-mod: true
+            client-constructor: true
+            generic-methods: true      # opt-in, requires effective Go version >= 1.27
+            validate: false
+            ignore-unknown-keys: true
+            encode-defaults: false
+            explicit-nulls: true
+      - "@abhigyakrishna/tspgen-go-gin-server":
+          module: example.com/pets/server
+          package: server
+          go-version: "1.27"           # Gin minimum: 1.25.0; net/http minimum: 1.22
+          grouping: per-interface
+          service-name: Service
+          request-suffix: Request
+          handler-shape: request-object # request-object | params
+          errors: typed
+          max-body-size: 1048576
+          error-body: problem           # json | problem | none
+          features:
+            go-mod: true
+            handler: true              # false retains RegisterRoutes
+            call-access: false         # *gin.Context, or *http.Request for net/http
+            validate: true
+            ignore-unknown-keys: false
+            encode-defaults: false
+            explicit-nulls: true
+```
+
+The net/http server accepts the same server settings. Each target's `go-version` inherits the models version
+and applies its runtime minimum; an explicit target version below either minimum is rejected. Turning off
+`features.go-mod` lets an application manage that module's dependencies. Shared emitter options such as
+`template-dir`, `plugins`, `header-text`, `models-output-dir`, and per-target `output-dir` also apply.
+
+Model layouts and HTTP grouping organize files within one configured Go package. Grouped servers expose a
+service interface per group and embed those interfaces in the root service. Type names, field names, enum
+constants, and operation names follow the emitter's naming configuration; conflicting generated identifiers
+produce diagnostics. `scalar-style: alias` emits Go aliases for referenced user scalars, retaining their wire codecs.
+HTTP parameters always preserve optional presence, even with `optional-fields: values` for model properties.
+net/http routes match exact paths, including root and trailing-slash routes. Router conflicts are reported during
+generation, including equivalent wildcard routes and overlapping paths without an unambiguous precedence.
+
+With validation enabled, generated model `Validate` methods check bounds, lengths, patterns, collection sizes,
+literals, and enums. `models.ValidateValue` also walks nested models and generic instances. Validation
+retains the nullability of generic type arguments, including collection elements. The `integer`
+scalar rejects fractional values and quoted numbers while preserving arbitrarily large integer text.
+Server request decoding checks required properties and nullability before calling the service. Client validation is opt-in and
+checks outgoing requests and decoded responses. `features.validation: false` disables these contract checks;
+JSON syntax, scalar width, body limits, and media types are still enforced. `@meta("go", #{ features: #{ validation: false,
+defaults: false } })` can override those model features for a namespace or individual model.
+
+`features.validator: true` adds `validate` struct tags for
+[go-playground/validator/v10](https://github.com/go-playground/validator), independently of
+`features.validation`. It defaults to false and supports namespace/model overrides with
+`@meta("go", #{ features: #{ validator: true } })`. The generated module adds no dependency;
+install the validator in your application and pass generated models to your own instance:
+
+```go
+validate := validator.New(validator.WithRequiredStructEnabled())
+err := validate.Struct(pet) // pet is a generated model; import github.com/go-playground/validator/v10
+```
+
+Tags cover string lengths, collection sizes, numeric bounds representable in native Go numeric types,
+literals, enums, and nested models/collections (`dive`). Optional pointers and nullable values use
+`omitnil`; optional value fields use `omitempty`, so their zero values skip tag checks. Required pointers,
+slices and maps use `required`; required scalar fields accept zero values unless a declared constraint
+excludes them. Regex patterns, bounds on `json.Number`/string decimals, literals containing `0x2C` or
+`0x7C`, JSON property presence, and generic argument shapes still require the generated
+`Validate`/`ValidateValue` and decoding checks. HTTP targets continue to use those generated checks.
+
+Defaults initialize missing JSON properties and generated `New<Type>()` constructors. `encode-defaults: false`
+omits optional properties equal to their declared defaults; `true` includes them and unset optional properties.
+`explicit-nulls: false` omits null model properties, including required nullable properties, while preserving
+null collection elements. Value fields use Go zero values for absence; pointers retain presence of zero values.
+`enum-unknown: true` maps unknown string enum values to an `UNKNOWN` sentinel; validation accepts it, but
+serialization rejects it. Fixed-width numbers retain their widths; `json.Number` preserves numeric text,
+`decimal: string` uses JSON strings, and `decimal: float64` can lose precision.
+
+`errors: typed` adds an error type per declared error response, such as `PetsRead404Error` with a typed `Body`.
+Clients retain the underlying `HTTPError` through `Unwrap`, so `errors.As` works for both types. Servers accept
+these typed errors or `HTTPError`, including wrapped errors. `error-body` controls generated handler failures
+and sanitized internal errors: JSON `{error}`, RFC 9457 `application/problem+json`, or no body. Explicit service
+error bodies retain their JSON representation. Client response limits apply to success and error bodies;
+`timeout-ms` applies when `HTTPClient` is nil, and an application-supplied client takes precedence.
+
+#### Generic client methods (Go 1.27+)
+
+`features.generic-methods: true` generates `Client.Do[T any]`, which typed endpoint methods use to decode their
+success responses. A client targeting Go 1.26 or older rejects this option. Go 1.27 with the option disabled
+still emits the ordinary transport implementation. Generic model types remain controlled separately by the
+emitter's `features.generics`; disabling it emits concrete model instances.
+
+```go
+req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/pets/42", nil)
+pet, err := api.Do[*models.PetModel](req, http.StatusOK, true)
+```
+
+[Go 1.27](https://go.dev/doc/go1.27) allows methods to declare type parameters. Go service interfaces retain
+concrete method signatures because interface methods cannot declare type parameters.
+
+### Gin server
+
+Install `@abhigyakrishna/tspgen-go-gin-server` and select it as the server target:
+
+```yaml
+emit:
+  - "@abhigyakrishna/tspgen-go"
+options:
+  "@abhigyakrishna/tspgen-go":
+    module: example.com/pets/models
+    targets:
+      - "@abhigyakrishna/tspgen-go-nethttp-client":
+          module: example.com/pets/client
+      - "@abhigyakrishna/tspgen-go-gin-server":
+          module: example.com/pets/server
+          max-body-size: 1048576
+```
+
+The server module pins Gin v1.12.0 and requires Go 1.25 or newer. Run `go mod tidy` in the generated server
+module to resolve its dependencies. Implement the generated `Service` interface, then pass it to
+`server.NewHandler(service)` to get a Gin engine with recovery middleware. Service methods accept
+`context.Context` and typed request structs; the standard-library client interoperates with this server.
+
+For an existing Gin engine, `server.RegisterRoutes(engine.Group("/api"), service)` mounts routes on a group
+and uses its middleware. Set `engine.UseEscapedPath = true` before registering routes to match the generated
+escaped patterns. The handlers decode path values once and preserve literal `+` and `%` characters. TypeSpec path
+parameters must occupy a whole path segment; incompatible routes produce diagnostics.
+
+Handlers decode scalar path/query/header parameters and JSON bodies, accept JSON media types including
+`application/*+json`, and return 400 for malformed or trailing JSON, 415 for a non-JSON body, and 413 for a
+body exceeding `max-body-size`. Optional empty bodies are accepted. Nonnullable bodies reject JSON `null`.
+TypeSpec constraints, required properties, and nullability are checked by default; unknown model properties
+are rejected unless `features.ignore-unknown-keys` is enabled.
+
+Return `&server.HTTPError{StatusCode: 409, Body: body}` for an explicit JSON error response; wrapped errors
+are supported. Other errors and response encoding failures return a sanitized 500. Service and response
+encoding errors are also available through Gin's `Context.Errors` for application middleware. The Gin
+target supports the same HTTP subset as the Go standard-library targets. Select one server target per
+output directory, or give each target a separate `output-dir`.
+
 ## Options reference
 
 Every on/off gate lives under `features:` (per language emitter and per target); every value choice is a flat
@@ -296,6 +512,102 @@ generated by `pnpm docs:options`.
 | `features.hooks` | feature | `true` | — | hooks.ts: React context, <Service>ClientProvider, use<Service>Client and the query/mutation hooks. false keeps only the server-safe queries.ts (needs react-query). |
 | `features.validate` | feature | `true` | — | Flat style: check request bodies, query objects and constrained path parameters with zod before fetch; needs features.zod on the TypeScript emitter. |
 | `features.error-getters` | feature | `true` | — | Flat style: isUnauthorized/isForbidden/isNotFound/isConflict getters on the error class. |
+
+### `@abhigyakrishna/tspgen-go`
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `template-dir` | string | — | — | Directory with template overrides; takes precedence over plugin, target and language templates. |
+| `plugins` | string[] | — | — | Plugin modules (relative paths or package names) applied in order. |
+| `models-output-dir` | string | — | — | Output directory of the built-in models (default: emitter-output-dir). Relative to the project root; {project-root} and {emitter-output-dir} are interpolated. Targets take `output-dir` in their options. |
+| `version` | string | — | — | Version of @versioned services to generate: a version enum member's name or value (default: the latest). |
+| `header-text` | string | `Code generated by @abhigyakrishna/tspgen-go. DO NOT EDIT.` | — | Banner at the top of every generated file, without comment syntax (each line becomes a line comment; multi-line allowed). Needs features.header. |
+| `go-version` | string | `1.22` | — | Minimum Go language/toolchain version written to go.mod (1.22 or newer). Targets inherit it, subject to their runtime minimum; generic client methods require 1.27 or newer. |
+| `layout` | `single-file` \| `per-type` \| `per-namespace` | `single-file` | — | Models in one file, one file per type, or one file per TypeSpec namespace. All files belong to the configured models package. |
+| `naming` | object | — | — | Go identifier conventions. Exported identifiers use PascalCase; configured initialisms retain their uppercase spelling. |
+| `type-names` | object | `{}` | — | TypeSpec type id (e.g. Shop.Pet), or unqualified type name, to exported Go name. Qualified entries take precedence. |
+| `date-time` | `string` \| `time.Time` | `string` | — | Mapping of utcDateTime and offsetDateTime. time.Time uses Go's RFC 3339 JSON/text codecs; date, time and duration remain strings. |
+| `decimal` | `json.Number` \| `string` \| `float64` | `json.Number` | — | decimal/decimal128: exact JSON numeric text, JSON strings, or floating point (which can lose precision). |
+| `integer` | `json.Number` \| `int64` | `json.Number` | — | Unbounded integer scalar: exact JSON numeric text or signed 64-bit integers. Fixed-width scalars retain their declared width. |
+| `scalar-style` | `inline` \| `alias` | `inline` | — | User scalar declarations inline their standard Go type or generate a named Go alias with the same wire codec. |
+| `optional-fields` | `pointers` \| `values` | `pointers` | — | Optional model fields use pointers to preserve absence, or values with zero-value semantics. HTTP parameter request fields always preserve presence. |
+| `module` | string | — | — | Import path of the generated models Go module. |
+| `package` | string | `models` | — | Package name of generated models. |
+| `features.header` | feature | `true` | — | Banner comment at the top of every generated file (text: header-text). |
+| `features.docs` | feature | `true` | declaration | KDoc/JSDoc from @doc and doc comments. |
+| `features.api-version` | feature | `true` | — | Version constant (API_VERSION) for @versioned services; unversioned services never get one. |
+| `features.generics` | feature | `true` | model | Template models once as generic types (Page<T>); false: one model per instance (PagePet). |
+| `features.validation` | feature | `true` | model | Generate Validate methods for constraints, literals and enum values, and validate required JSON properties when HTTP targets enable validate. |
+| `features.validator` | feature | `false` | model | Generate go-playground/validator/v10 struct tags for supported constraints, literals, enums and nested collections. Independent of generated Validate methods; no runtime dependency is added. |
+| `features.defaults` | feature | `true` | model | Apply declared property defaults when decoding missing JSON properties and generate model constructors that initialize them. |
+| `features.omit-empty` | feature | `true` | — | Optional model properties carry json omitempty tags. Pointer fields preserve present zero values; value fields omit zero values. |
+| `features.enum-unknown` | feature | `false` | declaration | String enums decode unknown wire values to an UNKNOWN sentinel accepted by validation. Encoding the sentinel fails. |
+| `features.go-mod` | feature | `true` | — | Generate the models go.mod. Client/server targets have their own go-mod feature. |
+
+### `@abhigyakrishna/tspgen-go-nethttp-client` (target)
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `module` | string | — | — | Import path of this generated Go module; must differ from the models module. |
+| `package` | string | `client` | — | Go package name (default client or server, depending on the target). |
+| `go-version` | string | — | — | Target Go version; inherits the models version, with the target's runtime minimum applied. Explicit values must satisfy both minima. |
+| `grouping` | `single-file` \| `per-interface` \| `per-namespace` | `single-file` | — | Organize operation declarations and implementations into one file, or files per TypeSpec interface/namespace. Files stay in one Go package. |
+| `request-suffix` | string | `Request` | — | Suffix on generated operation request struct names. |
+| `errors` | `raw` \| `typed` | `raw` | — | Raw HTTPError or additional typed errors for the operations' declared error response bodies. |
+| `client-name` | string | `Client` | — | Name of the generated client struct and its constructor. |
+| `max-response-size` | integer | `1048576` | — | Maximum response body size in bytes, for both successes and errors. Larger responses fail without silently truncating the body. |
+| `timeout-ms` | integer | `0` | — | Timeout in milliseconds when no custom HTTPClient is supplied; 0 uses http.DefaultClient. |
+| `features.go-mod` | feature | `true` | — | Generate this target's go.mod with its runtime dependencies and a local models replace directive. |
+| `features.encode-defaults` | feature | `false` | — | Include optional properties equal to their declared default and unset optional properties as null in emitted JSON. |
+| `features.explicit-nulls` | feature | `true` | — | Include nullable model properties whose value is null; false omits null struct properties (including required nullable ones). |
+| `features.client-constructor` | feature | `true` | — | Generate NewClient (or New<client-name>) to construct a client with its configured defaults. |
+| `features.generic-methods` | feature | `false` | — | Generate Client.Do[T any] and call it from typed endpoint methods. Requires an effective go-version of at least 1.27. |
+| `features.validate` | feature | `false` | — | Validate request values before sending and response JSON after decoding (requires models features.validation). |
+| `features.ignore-unknown-keys` | feature | `true` | — | Accept response JSON properties the models do not declare; false rejects them. |
+
+### `@abhigyakrishna/tspgen-go-nethttp-server` (target)
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `module` | string | — | — | Import path of this generated Go module; must differ from the models module. |
+| `package` | string | `server` | — | Go package name (default client or server, depending on the target). |
+| `go-version` | string | — | — | Target Go version; inherits the models version, with the target's runtime minimum applied. Explicit values must satisfy both minima. |
+| `grouping` | `single-file` \| `per-interface` \| `per-namespace` | `single-file` | — | Organize operation declarations and implementations into one file, or files per TypeSpec interface/namespace. Files stay in one Go package. |
+| `request-suffix` | string | `Request` | — | Suffix on generated operation request struct names. |
+| `errors` | `raw` \| `typed` | `raw` | — | Raw HTTPError or additional typed errors for the operations' declared error response bodies. |
+| `service-name` | string | `Service` | — | Name of the service interface. Grouped output also generates embedded interfaces for each group. |
+| `handler-shape` | `request-object` \| `params` | `request-object` | — | Service methods receive a typed request struct or individual path/query/header/body arguments. |
+| `max-body-size` | integer | `1048576` | — | Maximum request body size in bytes; larger bodies receive HTTP 413. |
+| `error-body` | `json` \| `problem` \| `none` | `json` | — | Fallback error response: JSON {error}, RFC 9457 application/problem+json, or an empty body. Explicit service error bodies are preserved. |
+| `features.go-mod` | feature | `true` | — | Generate this target's go.mod with its runtime dependencies and a local models replace directive. |
+| `features.encode-defaults` | feature | `false` | — | Include optional properties equal to their declared default and unset optional properties as null in emitted JSON. |
+| `features.explicit-nulls` | feature | `true` | — | Include nullable model properties whose value is null; false omits null struct properties (including required nullable ones). |
+| `features.handler` | feature | `true` | — | Generate NewHandler; RegisterRoutes is always available for application-owned routers and middleware. |
+| `features.call-access` | feature | `false` | — | Pass the underlying *http.Request or *gin.Context to service methods, after context.Context. |
+| `features.validate` | feature | `true` | — | Validate decoded request bodies and parameter constraints (requires models features.validation). |
+| `features.ignore-unknown-keys` | feature | `false` | — | Accept request JSON properties the models do not declare; false rejects them. |
+
+### `@abhigyakrishna/tspgen-go-gin-server` (target)
+
+| Key | Kind | Default | `@meta` override | Description |
+|---|---|---|---|---|
+| `module` | string | — | — | Import path of this generated Go module; must differ from the models module. |
+| `package` | string | `server` | — | Go package name (default client or server, depending on the target). |
+| `go-version` | string | — | — | Target Go version; inherits the models version, with the target's runtime minimum applied. Explicit values must satisfy both minima. |
+| `grouping` | `single-file` \| `per-interface` \| `per-namespace` | `single-file` | — | Organize operation declarations and implementations into one file, or files per TypeSpec interface/namespace. Files stay in one Go package. |
+| `request-suffix` | string | `Request` | — | Suffix on generated operation request struct names. |
+| `errors` | `raw` \| `typed` | `raw` | — | Raw HTTPError or additional typed errors for the operations' declared error response bodies. |
+| `service-name` | string | `Service` | — | Name of the service interface. Grouped output also generates embedded interfaces for each group. |
+| `handler-shape` | `request-object` \| `params` | `request-object` | — | Service methods receive a typed request struct or individual path/query/header/body arguments. |
+| `max-body-size` | integer | `1048576` | — | Maximum request body size in bytes; larger bodies receive HTTP 413. |
+| `error-body` | `json` \| `problem` \| `none` | `json` | — | Fallback error response: JSON {error}, RFC 9457 application/problem+json, or an empty body. Explicit service error bodies are preserved. |
+| `features.go-mod` | feature | `true` | — | Generate this target's go.mod with its runtime dependencies and a local models replace directive. |
+| `features.encode-defaults` | feature | `false` | — | Include optional properties equal to their declared default and unset optional properties as null in emitted JSON. |
+| `features.explicit-nulls` | feature | `true` | — | Include nullable model properties whose value is null; false omits null struct properties (including required nullable ones). |
+| `features.handler` | feature | `true` | — | Generate NewHandler; RegisterRoutes is always available for application-owned routers and middleware. |
+| `features.call-access` | feature | `false` | — | Pass the underlying *http.Request or *gin.Context to service methods, after context.Context. |
+| `features.validate` | feature | `true` | — | Validate decoded request bodies and parameter constraints (requires models features.validation). |
+| `features.ignore-unknown-keys` | feature | `false` | — | Accept request JSON properties the models do not declare; false rejects them. |
 
 <!-- options:end -->
 
@@ -1123,7 +1435,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `typescript` | `values: string` | enums, string-literal unions | an identifier different from the type's own name → `export const <values> = [...] as const; export type X = (typeof <values>)[number]`; otherwise ignored with an `invalid-meta` warning |
 | `typescript:ts-nextjs-client` | `next: { revalidate?, tags? }` | operations, groups | default Next.js fetch options |
 | `typescript:ts-nextjs-client` | `staleTime: number` | GET operations, groups | default `staleTime` in `queryOptions` |
-| `kotlin` / `typescript` (or `*`) | `features: { <key>: boolean }` | namespaces, interfaces, operations, models, enums, unions, scalars | per-declaration value of a feature with an `@meta` override (`docs`, `generics`, Kotlin `enum-unknown`, TypeScript `readonly`; see Options reference); other keys, wrong types or disallowed places warn `invalid-meta` |
+| `kotlin` / `typescript` / `go` (or `*`) | `features: { <key>: boolean }` | namespaces, interfaces, operations, models, enums, unions, scalars | per-declaration value of a feature with an `@meta` override (`docs`, `generics`, Kotlin/Go `enum-unknown`, Go `validation`/`defaults`, TypeScript `readonly`; see Options reference); other keys, wrong types or disallowed places warn `invalid-meta` |
 
 Templates read any metadata with `it.h.meta(item)` / `it.h.meta(item, "ktor-server")`; plugins use
 `resolveMeta(item.meta, language, target)` from `@abhigyakrishna/tspgen-core`.
@@ -1370,10 +1682,13 @@ Known limitations:
 ```bash
 pnpm install
 pnpm test        # build all packages, run unit + emitter tests (vitest)
-pnpm e2e         # Kotlin: Gradle build + client↔server test; TypeScript: tsc --strict + stub-server tests
+pnpm e2e         # Kotlin: Gradle; TypeScript: tsc + HTTP tests; Go: generated client↔server tests
 ```
 
-The e2e build needs JDK 17+. If Gradle cannot download over IPv6 on your network, run
+The e2e build needs JDK 17+ and Go 1.27+ (with a C compiler for the Go race detector).
+The Go suite generates models and a client, then exercises both net/http and Gin servers over real HTTP.
+After `pnpm build`, run it alone with `pnpm --filter tspgen-e2e-go test`.
+If Gradle cannot download over IPv6 on your network, run
 `JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true pnpm e2e`.
 
 Design and plans live in `docs/superpowers/`.

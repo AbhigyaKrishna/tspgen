@@ -1,0 +1,106 @@
+type HTTPError struct {
+	StatusCode int
+	Body any
+}
+
+func (e *HTTPError) Error() string {
+	if e == nil {
+		return "nil HTTPError"
+	}
+	return fmt.Sprintf("HTTP %d", e.StatusCode)
+}
+
+func (e *HTTPError) HTTPStatus() int {
+	if e == nil {
+		return 500
+	}
+	return e.StatusCode
+}
+
+func (e *HTTPError) HTTPBody() any {
+	if e == nil {
+		return nil
+	}
+	return e.Body
+}
+
+func rejectHTTP(w http.ResponseWriter, status int, message string) {
+<% if (it.errorBody === "none") { %>	w.WriteHeader(status)
+<% } else { %>
+<% if (it.errorBody === "problem") { %>	body := map[string]any{"type": "about:blank", "title": http.StatusText(status), "status": status, "detail": message}
+<% } else { %>	body := map[string]string{"error": message}
+<% } %>	payload, _ := models.EncodeJSON(body, true, true)
+	w.Header().Set("Content-Type", <%= JSON.stringify(it.errorBody === "problem" ? "application/problem+json" : "application/json") %>)
+	w.WriteHeader(status)
+	_, _ = w.Write(payload)
+<% } %>}
+
+func writeHTTPJSON(w http.ResponseWriter, status int, body any) error {
+	payload, err := models.EncodeJSON(body, <%= it.wire.encodeDefaults %>, <%= it.wire.explicitNulls %>)
+	if err != nil {
+		rejectHTTP(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, err = w.Write(payload)
+	return err
+}
+
+func serviceHTTPError(w http.ResponseWriter, err error) {
+	var statusErr interface {
+		error
+		HTTPStatus() int
+		HTTPBody() any
+	}
+	if errors.As(err, &statusErr) && statusErr != nil {
+		value := reflect.ValueOf(statusErr)
+		if value.Kind() != reflect.Pointer || !value.IsNil() {
+			status := statusErr.HTTPStatus()
+			if status >= 400 && status <= 599 {
+				writeHTTPJSON(w, status, statusErr.HTTPBody())
+				return
+			}
+		}
+	}
+	rejectHTTP(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+}
+
+func readHTTPJSON(w http.ResponseWriter, r *http.Request, target any, optional, nullable bool, shape string) bool {
+	reader := r.Body
+	if reader == nil {
+		reader = http.NoBody
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, reader, <%= it.maxBodySize %>))
+	if err != nil {
+		var sizeErr *http.MaxBytesError
+		if errors.As(err, &sizeErr) {
+			rejectHTTP(w, http.StatusRequestEntityTooLarge, "request body too large")
+		} else {
+			rejectHTTP(w, http.StatusBadRequest, "invalid JSON body")
+		}
+		return false
+	}
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		if optional {
+			return true
+		}
+		rejectHTTP(w, http.StatusBadRequest, "missing JSON body")
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || (mediaType != "application/json" && !(strings.HasPrefix(mediaType, "application/") && strings.HasSuffix(mediaType, "+json"))) {
+		rejectHTTP(w, http.StatusUnsupportedMediaType, "expected JSON content type")
+		return false
+	}
+	if !nullable && bytes.Equal(body, []byte("null")) {
+		rejectHTTP(w, http.StatusBadRequest, "invalid JSON body")
+		return false
+	}
+	if err := models.DecodeJSON(body, target, <%= it.wire.ignoreUnknown %>, <%= it.wire.validate %>, <%= it.wire.defaults %>, shape); err != nil {
+		rejectHTTP(w, http.StatusBadRequest, "invalid JSON body")
+		return false
+	}
+	return true
+}

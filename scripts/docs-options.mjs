@@ -52,6 +52,10 @@ export async function optionsReference() {
   const server = (await load("kotlin-ktor-server")).default;
   const client = (await load("kotlin-ktor-client")).default;
   const next = (await load("ts-nextjs-client")).default;
+  const go = await load("go");
+  const goClient = (await load("go-nethttp-client")).default;
+  const goServer = (await load("go-nethttp-server")).default;
+  const goGinServer = (await load("go-gin-server")).default;
   const language = (lib, features, moved) => [
     ...optionRows(
       lib.emitter.options,
@@ -66,6 +70,10 @@ export async function optionsReference() {
     table("`@abhigyakrishna/tspgen-kotlin-ktor-client` (target)", target(client)),
     table("`@abhigyakrishna/tspgen-typescript`", language(typescript.$lib, typescript.typescriptFeatures, typescript.typescriptMovedOptions)),
     table("`@abhigyakrishna/tspgen-ts-nextjs-client` (target)", target(next)),
+    table("`@abhigyakrishna/tspgen-go`", language(go.$lib, go.goFeatures, {})),
+    table("`@abhigyakrishna/tspgen-go-nethttp-client` (target)", target(goClient)),
+    table("`@abhigyakrishna/tspgen-go-nethttp-server` (target)", target(goServer)),
+    table("`@abhigyakrishna/tspgen-go-gin-server` (target)", target(goGinServer)),
   ].join("\n");
 }
 

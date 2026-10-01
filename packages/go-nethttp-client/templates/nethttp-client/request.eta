@@ -1,0 +1,27 @@
+<% const op = it.op; %>	path := <%= JSON.stringify(op.path) %>
+<% for (const param of op.params.filter(param => param.location === "path")) { %>	{
+		raw, encodeErr := models.EncodeParameter(request.<%= param.field %>)
+		if encodeErr != nil {
+			err = encodeErr
+			<%= op.returnStatement %>
+		}
+		path = strings.ReplaceAll(path, <%= JSON.stringify(`{${param.wireName}}`) %>, url.PathEscape(raw))
+	}
+<% } %>	u, err := url.Parse(strings.TrimRight(c.BaseURL, "/") + path)
+	if err != nil {
+		<%= op.returnStatement %>
+	}
+	query := u.Query()
+<% for (const param of op.params.filter(param => param.location === "query")) { %><%~ include("nethttp-client/parameter", { ...it, param }) %>
+<% } %>	u.RawQuery = query.Encode()
+	var body io.Reader
+<%~ include("nethttp-client/body", it) %>	req, err := http.NewRequestWithContext(ctx, <%= JSON.stringify(op.verb) %>, u.String(), body)
+	if err != nil {
+		<%= op.returnStatement %>
+	}
+<% if (op.body) { %>	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+<% } %>
+<% for (const param of op.params.filter(param => param.location === "header")) { %><%~ include("nethttp-client/parameter", { ...it, param }) %>
+<% } %>

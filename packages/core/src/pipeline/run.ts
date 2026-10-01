@@ -1,11 +1,11 @@
 import { NoTarget, resolvePath, type Program } from "@typespec/compiler";
-import { relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mergeFeatures, type ResolvedFeatures } from "../features.js";
 import { loadSseLibraries, usesSseLibraries } from "../ir/sse.js";
 import { loadVersioning, resolveServices } from "../ir/versioning.js";
 import { errorMessage, reportDiagnostic } from "../lib.js";
 import { normalizeDir, writeOutputs, type OutputFile } from "../output/manifest.js";
+import { relativeOutputPath } from "../output/paths.js";
 import type { PluginContext, TspGenPlugin } from "../plugins/plugin.js";
 import { resolveMeta, type MetaScopes } from "../meta.js";
 import { ExtensionRegistry } from "../plugins/registry.js";
@@ -172,17 +172,12 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
   }
   const previous = await writeOutputs(program, opts.outputDir, outputs.get(opts.outputDir) ?? [], {
     owner,
-    outputDirs: others.map((dir) => relativeDir(opts.outputDir, dir)).sort(),
+    outputDirs: others.map((dir) => relativeOutputPath(opts.outputDir, dir) || ".").sort(),
   });
   for (const rel of previous.outputDirs ?? []) {
     const dir = normalizeDir(resolvePath(opts.outputDir, rel));
     if (!outputs.has(dir)) await writeOutputs(program, dir, [], { owner });
   }
-}
-
-/** `to` relative to `from`, posix separators (manifests are portable across machines). */
-function relativeDir(from: string, to: string): string {
-  return relative(from, to).split(sep).join("/") || ".";
 }
 
 function templateLayers<L>(opts: PipelineOptions<L>, plugins: TspGenPlugin<L>[]): TemplateLayer[] {

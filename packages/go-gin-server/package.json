@@ -1,0 +1,19 @@
+{
+  "name": "@abhigyakrishna/tspgen-go-gin-server",
+  "version": "0.2.1",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/AbhigyaKrishna/tspgen.git", "directory": "packages/go-gin-server" },
+  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "templates"],
+  "scripts": { "build": "tsc -p tsconfig.build.json", "typecheck": "tsc -p tsconfig.json", "prepack": "cp ../../LICENSE ." },
+  "dependencies": {
+    "@abhigyakrishna/tspgen-core": "workspace:*",
+    "@abhigyakrishna/tspgen-go": "workspace:*"
+  },
+  "peerDependencies": { "@typespec/compiler": "^1.16.0", "@typespec/http": "^1.16.0" },
+  "devDependencies": { "@typespec/compiler": "1.16.0", "@typespec/http": "1.16.0" }
+}

@@ -1,0 +1,1 @@
+<%~ include("go/file", { ...it, body: include("go/runtime-body", it) }) %>

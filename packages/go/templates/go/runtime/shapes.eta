@@ -1,0 +1,121 @@
+func shapeArguments(shape string) (map[string]string, error) {
+	shape = strings.TrimPrefix(shape, "?")
+	if !strings.HasPrefix(shape, "g") {
+		return nil, nil
+	}
+	var arguments map[string]string
+	if err := json.Unmarshal([]byte(shape[1:]), &arguments); err != nil {
+		return nil, fmt.Errorf("decode generic validation shape: %w", err)
+	}
+	return arguments, nil
+}
+
+func reflectedShape(typeOf reflect.Type) string {
+	if typeOf == nil {
+		return "?_"
+	}
+	switch typeOf.Kind() {
+	case reflect.Pointer:
+		return "?" + reflectedShape(typeOf.Elem())
+	case reflect.Interface:
+		return "?_"
+	case reflect.Slice:
+		if typeOf.Elem().Kind() == reflect.Uint8 {
+			return "_"
+		}
+		return "a" + reflectedShape(typeOf.Elem())
+	case reflect.Array:
+		return "a" + reflectedShape(typeOf.Elem())
+	case reflect.Map:
+		return "m" + reflectedShape(typeOf.Elem())
+	}
+	return "_"
+}
+
+// TypeSpec argument shapes disambiguate model pointers used as nullable and nonnullable T.
+func resolveShape(shape string, arguments map[string]string, typeOf reflect.Type) (string, error) {
+	if shape == "" {
+		return "_", nil
+	}
+	if strings.ContainsAny(shape[:1], "?am") {
+		if shape[0] != '?' {
+			for typeOf != nil && typeOf.Kind() == reflect.Pointer {
+				typeOf = typeOf.Elem()
+			}
+		}
+		if typeOf != nil && (typeOf.Kind() == reflect.Pointer || typeOf.Kind() == reflect.Array || typeOf.Kind() == reflect.Slice || typeOf.Kind() == reflect.Map) {
+			typeOf = typeOf.Elem()
+		}
+		item, err := resolveShape(shape[1:], arguments, typeOf)
+		return shape[:1] + item, err
+	}
+	if strings.HasPrefix(shape, "t") {
+		if resolved, ok := arguments[shape[1:]]; ok && resolved != shape {
+			return resolveShape(resolved, nil, typeOf)
+		}
+		if typeOf != nil {
+			return reflectedShape(typeOf), nil
+		}
+		return shape, nil
+	}
+	if strings.HasPrefix(shape, "g") {
+		return resolveGenericShape(shape, arguments)
+	}
+	return shape, nil
+}
+
+func resolveGenericShape(shape string, arguments map[string]string) (string, error) {
+	parameters, err := shapeArguments(shape)
+	if err != nil {
+		return "", err
+	}
+	for name, parameter := range parameters {
+		parameters[name], err = resolveShape(parameter, arguments, nil)
+		if err != nil {
+			return "", err
+		}
+	}
+	raw, err := json.Marshal(parameters)
+	return "g" + string(raw), err
+}
+
+func propertyShape(field reflect.StructField, arguments map[string]string) (string, error) {
+	parts := strings.SplitN(field.Tag.Get("tsp"), ",", 2)
+	typeOf := field.Type
+	if field.Tag.Get("tspoptionalpointer") == "true" {
+		typeOf = typeOf.Elem()
+	}
+	return resolveShape(parts[1], arguments, typeOf)
+}
+
+func collectionItemShape(shape string) string {
+	shape = strings.TrimPrefix(shape, "?")
+	if strings.HasPrefix(shape, "a") || strings.HasPrefix(shape, "m") {
+		return shape[1:]
+	}
+	return "_"
+}
+
+func checkInteger(name string, raw []byte) error {
+	if !json.Valid(raw) || len(raw) == 0 || (raw[0] != '-' && (raw[0] < '0' || raw[0] > '9')) {
+		return &ValidationError{Field: name, Message: "must be an integer"}
+	}
+	mantissa, exponentText, hasExponent := strings.Cut(strings.ToLower(string(raw)), "e")
+	whole, fraction, _ := strings.Cut(mantissa, ".")
+	digits := strings.TrimPrefix(whole + fraction, "-")
+	if strings.Trim(digits, "0") == "" {
+		return nil
+	}
+	trailingZeros := len(digits) - len(strings.TrimRight(digits, "0"))
+	exponent := new(big.Int)
+	if hasExponent {
+		if _, ok := exponent.SetString(exponentText, 10); !ok {
+			return &ValidationError{Field: name, Message: "must be an integer"}
+		}
+	}
+	// Compare decimal places rather than expanding arbitrarily large exponents.
+	if exponent.Cmp(big.NewInt(int64(len(fraction) - trailingZeros))) < 0 {
+		return &ValidationError{Field: name, Message: "must be an integer"}
+	}
+	return nil
+}

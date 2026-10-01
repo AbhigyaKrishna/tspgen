@@ -1,0 +1,43 @@
+// DecodeParameter decodes scalar HTTP text without interpreting strings as JSON.
+func DecodeParameter(raw string, target any) error {
+	value := reflect.ValueOf(target)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return errors.New("parameter target must be a nonnil pointer")
+	}
+	value = value.Elem()
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			value.Set(reflect.New(value.Type().Elem()))
+		}
+		value = value.Elem()
+	}
+	if value.CanAddr() {
+		if decoder, ok := value.Addr().Interface().(encoding.TextUnmarshaler); ok {
+			return decoder.UnmarshalText([]byte(raw))
+		}
+	}
+	if value.Kind() == reflect.String && value.Type() != reflect.TypeOf(json.Number("")) {
+		value.SetString(raw)
+		return nil
+	}
+	if strings.TrimSpace(raw) == "null" {
+		return errors.New("parameter must not be null")
+	}
+	if value.Type() == reflect.TypeOf(json.Number("")) && strings.HasPrefix(strings.TrimSpace(raw), "\"") {
+		return errors.New("invalid number")
+	}
+	return json.Unmarshal([]byte(raw), target)
+}
+
+// EncodeParameter uses text codecs (including time.Time) or scalar formatting.
+func EncodeParameter(input any) (string, error) {
+	value := dereference(reflect.ValueOf(input))
+	if absent(value) {
+		return "", errors.New("parameter must not be null")
+	}
+	if encoder, ok := value.Interface().(encoding.TextMarshaler); ok {
+		raw, err := encoder.MarshalText()
+		return string(raw), err
+	}
+	return fmt.Sprint(value.Interface()), nil
+}

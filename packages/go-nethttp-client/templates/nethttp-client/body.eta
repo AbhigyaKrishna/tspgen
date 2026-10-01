@@ -1,0 +1,12 @@
+<% const op = it.op; %>
+<% if (op.body) { %>
+<% if (op.body.optional) { %>	if request.Body != nil {
+<% } %>	payload, marshalErr := models.EncodeJSON(request.Body, <%= it.wire.encodeDefaults %>, <%= it.wire.explicitNulls %>)
+	if marshalErr != nil {
+		err = marshalErr
+		<%= op.returnStatement %>
+	}
+	body = bytes.NewReader(payload)
+<% if (op.body.optional) { %>	}
+<% } %>
+<% } %>

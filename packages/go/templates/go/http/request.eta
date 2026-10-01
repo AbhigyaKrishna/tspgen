@@ -1,0 +1,3 @@
+type <%= it.request.name %> struct {
+<% for (const field of it.request.fields) { %>	<%= field.name %> <%= field.type %>
+<% } %>}
