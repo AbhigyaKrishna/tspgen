@@ -1,6 +1,7 @@
 import type { GoDecl, GoField, GoIR } from "../transform.js";
 import type { GoSourceSection } from "../source.js";
 import { nullShape, propertyCheck, propertyCheckCall } from "../validation.js";
+import { validatorTag } from "./validator.js";
 
 function defaultJSON(field: GoField, ir: GoIR): string {
   const ref = field.ref.kind === "nullable" ? field.ref.of : field.ref;
@@ -21,6 +22,8 @@ function fieldTag(field: GoField, decl: Extract<GoDecl, { kind: "struct" }>, ir:
     pairs.push('tspoptionalpointer:"true"');
   }
   if (!decl.validation) pairs.push('tspvalidate:"false"');
+  const validationTag = decl.validator ? validatorTag(field, ir) : "";
+  if (validationTag) pairs.push(`validate:${JSON.stringify(validationTag)}`);
   if (decl.defaults && field.default !== undefined) pairs.push(`default:${JSON.stringify(defaultJSON(field, ir))}`);
   const tag = pairs.join(" ");
   return tag.includes("`") ? JSON.stringify(tag) : `\`${tag}\``;

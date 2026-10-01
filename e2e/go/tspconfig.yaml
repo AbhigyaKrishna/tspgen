@@ -8,6 +8,8 @@ options:
     layout: per-type
     date-time: time.Time
     decimal: string
+    features:
+      validator: true
     naming:
       initialisms: [ID]
     targets:

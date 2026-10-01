@@ -21,6 +21,7 @@ export interface GoOptions {
   optionalFields: "pointers" | "values";
   omitEmpty: boolean;
   validation: boolean;
+  validator: boolean;
   defaults: boolean;
   enumUnknown: boolean;
   features?: ResolvedFeatures<string>;
@@ -95,6 +96,7 @@ export function resolveGoOptions(options: Record<string, unknown>, features?: Re
     optionalFields: (options["optional-fields"] as GoOptions["optionalFields"]) ?? "pointers",
     omitEmpty: features?.values["omit-empty"] !== false,
     validation: features?.values.validation !== false,
+    validator: features?.values.validator === true,
     defaults: features?.values.defaults !== false,
     enumUnknown: features?.values["enum-unknown"] === true,
     ...(features ? { features } : {}),

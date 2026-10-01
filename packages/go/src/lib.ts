@@ -16,6 +16,11 @@ export const goFeatures = defineFeatures({
     override: "model",
     description: "Generate Validate methods for constraints, literals and enum values, and validate required JSON properties when HTTP targets enable validate.",
   },
+  validator: {
+    default: false,
+    override: "model",
+    description: "Generate go-playground/validator/v10 struct tags for supported constraints, literals, enums and nested collections. Independent of generated Validate methods; no runtime dependency is added.",
+  },
   defaults: {
     default: true,
     override: "model",

@@ -11,6 +11,7 @@ TypeScript plans declarations and wire behavior; templates contain the Go source
 | Model and operation transforms | `src/transform/declarations.ts`, `src/transform/operations.ts` |
 | Validation shapes and generic type arguments | `src/validation.ts`, `templates/go/runtime/shapes.eta` |
 | Model tags and declaration planning | `src/models/declarations.ts`, `src/models-target.ts` |
+| Opt-in go-playground validator tags | `src/models/validator.ts` |
 | Shared requests, errors, validation, and file layout | `src/http/` |
 | Server route validation and service contracts | `src/server/routes.ts`, `src/server/operations.ts` |
 | Server transport APIs and file planning | `src/server/transport.ts`, `src/server/plan.ts` |

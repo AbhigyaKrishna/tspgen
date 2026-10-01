@@ -31,6 +31,7 @@ export interface GoStruct extends GoDeclaration {
   fields: GoField[];
   typeParameters: string[];
   validation: boolean;
+  validator: boolean;
   defaults: boolean;
 }
 

@@ -87,6 +87,7 @@ function modelDeclaration(model: ModelIR, api: ApiIR, program: Program, options:
   const name = goTypeName(model, options);
   const meta = resolveMeta(declarationScopes(model.decorators, model.namespaceDecorators), "go");
   const validation = options.features?.at("validation", meta, "model") ?? options.validation;
+  const validator = options.features?.at("validator", meta, "model") ?? options.validator;
   const defaults = options.features?.at("defaults", meta, "model") ?? options.defaults;
   if (model.discriminator) unsupported(program, model.id, "discriminated models are not supported yet");
   if (model.additionalProperties) unsupported(program, model.id, "additional properties are not supported yet");
@@ -95,7 +96,7 @@ function modelDeclaration(model: ModelIR, api: ApiIR, program: Program, options:
   return {
     kind: "struct", id: model.id, name, namespace: model.namespace.join("."), fields,
     typeParameters: model.typeParameters?.map((parameter) => goName(parameter, options.naming)) ?? [],
-    validation, defaults,
+    validation, validator, defaults,
     ...(model.docs ? { docs: model.docs } : {}),
   };
 }
