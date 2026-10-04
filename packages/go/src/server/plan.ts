@@ -4,13 +4,14 @@ import { httpModuleFile } from "../http/files.js";
 import { wireOptions, type GoServerOptions, type GoWireOptions } from "../options.js";
 import { goSourceFile, type GoSourceSection } from "../source.js";
 import { goOperations, type GoIR } from "../transform.js";
+import { referencesModels } from "../http/operations.js";
 import { serverOperationPlan, type GoServerOperation } from "./operations.js";
 import { serverRoutes } from "./routes.js";
 import { serverTransport, type GoServerFramework, type GoServerTransport } from "./transport.js";
 
 const DEFAULT_MAX_BODY_SIZE = 1024 * 1024;
 const RUNTIME_NAMES = [
-  "HTTPError", "NewHandler", "RegisterRoutes", "rejectHTTP", "writeHTTPJSON", "serviceHTTPError",
+  "HTTPError", "NewHandler", "RegisterRoutes", "rejectHTTP", "writeHTTPJSON", "isNil", "serviceHTTPError",
   "readHTTPJSON", "escapedRoute", "pathValue", "reject", "writeJSON", "serviceError", "readJSONBody",
 ];
 
@@ -19,18 +20,16 @@ function serverConfiguration(ir: GoIR, ctx: TargetContext, options: GoServerOpti
   const version = checkHTTPConfiguration(ir, ctx, options, packageName, transport.minimumVersion);
   if (options.module === "github.com/gin-gonic/gin") throw new Error("The server module must differ from the Gin module.");
   const service = options["service-name"] ?? "Service";
-  if (service !== "Service" && ["HTTPError", "NewHandler", "RegisterRoutes"].includes(service)) {
-    throw new Error(`service-name ${service} conflicts with server runtime.`);
-  }
   return { packageName, version, service, wire: wireOptions(ctx, ir) };
 }
 
 function reserveServerIdentifiers(plans: GoServerOperation[], units: OperationUnit[], service: string): void {
-  const reserved = new Set([service, ...RUNTIME_NAMES]);
+  const reserved = new Set(RUNTIME_NAMES);
   const reserve = (name: string) => {
     if (reserved.has(name)) throw new Error(`Generated Go server identifier ${name} conflicts with another declaration.`);
     reserved.add(name);
   };
+  reserve(service);
   for (const plan of plans) {
     reserve(plan.request.name);
     for (const error of plan.errors) reserve(error.name);
@@ -70,11 +69,8 @@ function serverOperationImports(plans: GoServerOperation[], context: ServerFileC
   const { ir, transport, wire } = context;
   const errors = plans.flatMap((op) => op.errors);
   const usesHTTP = transport.framework === "nethttp" || plans.some((op) => op.params.length || (op.body && wire.validate));
-  const usesModels = plans.some((op) =>
-    op.params.length || (op.body && wire.validate) || op.responseType?.includes("models.")
-    || op.request.fields.some((field) => field.type.includes("models."))
-    || op.errors.some((error) => error.bodyType?.includes("models.")),
-  );
+  // Parameters decode, and validated bodies are checked, through the models runtime.
+  const usesModels = plans.some((op) => op.params.length || (op.body && wire.validate) || referencesModels(op));
   return [
     ...(usesHTTP ? ["net/http"] : []),
     ...(transport.framework === "gin" ? ["github.com/gin-gonic/gin"] : []),

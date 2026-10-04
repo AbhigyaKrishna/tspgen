@@ -1,5 +1,5 @@
 import { defineFeatures, type TargetContext } from "@abhigyakrishna/tspgen-core";
-import { atLeastGo, goVersionSchema } from "../version.js";
+import { atLeastGo, goVersionSchema, supportedGoVersion } from "../version.js";
 import type { GoIR } from "../transform/model.js";
 
 export interface GoHTTPOptions {
@@ -181,8 +181,7 @@ export const goServerOptionsSchema = {
 export function effectiveGoVersion(irVersion: string, options: GoHTTPOptions, minimum: string): string {
   const requiredVersion = atLeastGo(irVersion, minimum) ? irVersion : minimum;
   const version = options["go-version"] ?? requiredVersion;
-  const validVersion = /^1\.[0-9]+(?:\.[0-9]+)?$/.test(version);
-  if (!validVersion || !atLeastGo(version, minimum) || !atLeastGo(version, irVersion)) {
+  if (!supportedGoVersion(version, minimum, irVersion)) {
     throw new Error(`go-version ${version} must be at least Go ${requiredVersion}.`);
   }
   return version;

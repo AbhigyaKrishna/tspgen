@@ -8,7 +8,7 @@ func (e *<%= error.name %>) HTTPStatus() int {
 	if e.StatusCode != 0 {
 		return e.StatusCode
 	}
-	return <%= error.fixedStatus %>
+	return <%= error.fallbackStatus %>
 }
 
 func (e *<%= error.name %>) HTTPBody() any {

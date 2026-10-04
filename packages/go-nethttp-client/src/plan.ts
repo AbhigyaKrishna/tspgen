@@ -1,7 +1,7 @@
 import { statusRank, type FileSpec, type TargetContext } from "@abhigyakrishna/tspgen-core";
 import {
   atLeastGo, checkHTTPConfiguration, goOperations, goSourceFile, httpModuleFile, httpOperationPlan,
-  matchesStatus, operationImports, operationUnits, requestName, wireOptions,
+  matchesStatus, MINIMUM_GO_VERSION, operationImports, operationUnits, referencesModels, requestName, wireOptions,
   type GoClientOptions, type GoIR, type GoOperation, type GoSourceSection,
 } from "@abhigyakrishna/tspgen-go";
 
@@ -11,14 +11,13 @@ type ReserveName = (identifier: string) => void;
 
 function clientConfiguration(ir: GoIR, ctx: TargetContext, options: GoClientOptions) {
   const packageName = options.package ?? "client";
-  const version = checkHTTPConfiguration(ir, ctx, options, packageName, "1.22");
+  const version = checkHTTPConfiguration(ir, ctx, options, packageName, MINIMUM_GO_VERSION);
   const name = options["client-name"] ?? "Client";
   const usesGenericMethods = ctx.features.values["generic-methods"] === true;
   const hasConstructor = ctx.features.values["client-constructor"] === true;
   if (usesGenericMethods && !atLeastGo(version, "1.27")) {
     throw new Error("features.generic-methods requires Go 1.27 or newer; set go-version to at least 1.27.");
   }
-  if (name === "HTTPError") throw new Error("client-name conflicts with HTTPError.");
   return {
     packageName, version, name, usesGenericMethods, hasConstructor,
     wire: wireOptions(ctx, ir),
@@ -31,12 +30,13 @@ function clientConfiguration(ir: GoIR, ctx: TargetContext, options: GoClientOpti
 type ClientConfiguration = ReturnType<typeof clientConfiguration>;
 
 function clientIdentifiers(operations: GoOperation[], options: GoClientOptions, config: ClientConfiguration): ReserveName {
-  const reserved = new Set([config.name, "HTTPError"]);
-  if (config.hasConstructor) reserved.add(`New${config.name}`);
+  const reserved = new Set(["HTTPError"]);
   const reserve: ReserveName = (identifier) => {
     if (reserved.has(identifier)) throw new Error(`Generated Go client identifier ${identifier} conflicts with another declaration.`);
     reserved.add(identifier);
   };
+  reserve(config.name);
+  if (config.hasConstructor) reserve(`New${config.name}`);
   const runtimeMembers = ["BaseURL", "HTTPClient", ...(config.usesGenericMethods ? ["Do"] : [])];
   for (const op of operations) {
     if (runtimeMembers.includes(op.name)) throw new Error(`Operation ${op.name} conflicts with the client runtime.`);
@@ -74,8 +74,13 @@ function clientOperationSection(operations: GoOperation[], context: ClientFileCo
     template: "nethttp-client/operations",
     data: { operations: plans, errors, name: config.name, usesGenericMethods: config.usesGenericMethods, wire: config.wire },
   };
+  // Parameters and bodies encode, and error bodies decode, through the models runtime.
+  const usesModels = plans.some((op) =>
+    op.params.length || op.body || op.errors.some((error) => error.bodyType) || referencesModels(op),
+  );
   const imports = [
-    ...(operations.length ? ["context", "io", "net/url", "strings", "net/http", ir.module] : []),
+    ...(operations.length ? ["context", "io", "net/url", "strings", "net/http"] : []),
+    ...(usesModels ? [ir.module] : []),
     ...(operations.some((op) => op.body) ? ["bytes"] : []),
     ...(errors.length ? ["fmt", "errors"] : []),
     ...operationImports(operations, ir),

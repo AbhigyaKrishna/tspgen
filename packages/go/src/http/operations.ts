@@ -46,3 +46,9 @@ export function httpOperationPlan(op: GoOperation, ir: GoIR, ctx: TargetContext,
 }
 
 export type GoHTTPOperation = ReturnType<typeof httpOperationPlan>;
+
+/** Whether the operation's declarations mention a type from the models package. */
+export function referencesModels(op: GoHTTPOperation): boolean {
+  const types = [op.responseType, ...op.request.fields.map((field) => field.type), ...op.errors.map((error) => error.bodyType)];
+  return types.some((type) => type?.includes("models."));
+}

@@ -36,6 +36,25 @@ interface TypeContext {
   options: GoOptions;
 }
 
+const typeIndexes = new WeakMap<ApiIR, Map<string, TypeIR>>();
+
+/** Declared types by id, built once per API. */
+export function typeIndex(api: ApiIR): Map<string, TypeIR> {
+  let index = typeIndexes.get(api);
+  if (!index) {
+    index = new Map(api.types.map((type) => [type.id, type]));
+    typeIndexes.set(api, index);
+  }
+  return index;
+}
+
+/** Unions of string or numeric literals generate Go enums; other unions are unsupported. */
+export function isLiteralUnion(type: TypeIR): boolean {
+  return type.kind === "union" && type.variants.every((variant) =>
+    variant.type.kind === "literal" && typeof variant.type.value !== "boolean",
+  );
+}
+
 export function pointer(type: GoType): GoType {
   if (type.pointer || type.text === "any") return type;
   return { ...type, text: `*${type.text}`, pointer: true };
@@ -60,7 +79,7 @@ export function goType(
   where = "type",
   options: GoOptions = resolveGoOptions({}),
 ): GoType {
-  return resolveType(ref, { types: new Map(api.types.map((type) => [type.id, type])), qualifier, program, where, options });
+  return resolveType(ref, { types: typeIndex(api), qualifier, program, where, options });
 }
 
 function resolveType(ref: TypeRef, ctx: TypeContext): GoType {
@@ -89,9 +108,7 @@ function resolveType(ref: TypeRef, ctx: TypeContext): GoType {
 function namedType(ref: Extract<TypeRef, { kind: "named" }>, ctx: TypeContext): GoType {
   const decl = ctx.types.get(ref.id);
   if (!decl) return unsupported(ctx.program, ctx.where, `unknown named type ${ref.id}`);
-  if (decl.kind === "union" && !decl.variants.every((variant) =>
-    variant.type.kind === "literal" && typeof variant.type.value !== "boolean",
-  )) {
+  if (decl.kind === "union" && !isLiteralUnion(decl)) {
     return unsupported(ctx.program, ctx.where, "unions are not supported yet");
   }
   const args = ref.args?.map((arg) => resolveType(arg, ctx)) ?? [];

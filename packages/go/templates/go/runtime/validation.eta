@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -187,7 +188,7 @@ func CheckProperty(name string, input any, optional bool, shape string, c Proper
 			return fail("too long")
 		}
 		if c.Pattern != "" {
-			matched, err := regexp.MatchString(c.Pattern, value.String())
+			matched, err := matchPattern(c.Pattern, value.String())
 			if err != nil {
 				return err
 			}
@@ -225,6 +226,21 @@ func CheckProperty(name string, input any, optional bool, shape string, c Proper
 		}
 	}
 	return nil
+}
+
+var compiledPatterns sync.Map
+
+// matchPattern compiles each declared pattern once; TypeSpec patterns must also be valid RE2 syntax.
+func matchPattern(pattern, value string) (bool, error) {
+	if compiled, ok := compiledPatterns.Load(pattern); ok {
+		return compiled.(*regexp.Regexp).MatchString(value), nil
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return false, fmt.Errorf("pattern %q is not a valid Go regular expression: %w", pattern, err)
+	}
+	compiledPatterns.Store(pattern, compiled)
+	return compiled.MatchString(value), nil
 }
 
 func checkJSONShape(name, shape string, raw json.RawMessage) error {

@@ -1,3 +1,5 @@
+import { MINIMUM_GO_VERSION } from "../version.js";
+
 export type GoServerFramework = "nethttp" | "gin";
 
 /** Only the router and response APIs differ; binding and service contracts are shared. */
@@ -24,7 +26,7 @@ export interface GoServerTransport {
 const transports: Record<GoServerFramework, GoServerTransport> = {
   nethttp: {
     framework: "nethttp",
-    minimumVersion: "1.22",
+    minimumVersion: MINIMUM_GO_VERSION,
     routerType: "*http.ServeMux",
     callType: "*http.Request",
     request: "r",

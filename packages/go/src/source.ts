@@ -1,5 +1,4 @@
-import { TemplateEngine, type FileSpec } from "@abhigyakrishna/tspgen-core";
-import { resolve } from "node:path";
+import type { FileSpec } from "@abhigyakrishna/tspgen-core";
 import type { GoIR } from "./transform.js";
 
 export interface GoSourceSection {
@@ -24,13 +23,4 @@ export function goSourceFile(
       sections,
     },
   };
-}
-
-// Compatibility for the public helpers that return standalone declaration strings.
-const declarationEngine = new TemplateEngine([
-  { name: "go", dir: resolve(import.meta.dirname, "../templates") },
-]);
-
-export function renderGoDeclaration(template: string, data: Record<string, unknown>): string {
-  return declarationEngine.render(template, data).trim();
 }

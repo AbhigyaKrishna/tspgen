@@ -47,20 +47,27 @@ func writeHTTPJSON(w http.ResponseWriter, status int, body any) error {
 	return err
 }
 
+func isNil(value any) bool {
+	reflected := reflect.ValueOf(value)
+	return value == nil || (reflected.Kind() == reflect.Pointer && reflected.IsNil())
+}
+
 func serviceHTTPError(w http.ResponseWriter, err error) {
 	var statusErr interface {
 		error
 		HTTPStatus() int
 		HTTPBody() any
 	}
-	if errors.As(err, &statusErr) && statusErr != nil {
-		value := reflect.ValueOf(statusErr)
-		if value.Kind() != reflect.Pointer || !value.IsNil() {
-			status := statusErr.HTTPStatus()
-			if status >= 400 && status <= 599 {
-				writeHTTPJSON(w, status, statusErr.HTTPBody())
-				return
+	if errors.As(err, &statusErr) && !isNil(statusErr) {
+		status := statusErr.HTTPStatus()
+		if status >= 400 && status <= 599 {
+			// Errors without a body get the configured fallback body rather than JSON null.
+			if body := statusErr.HTTPBody(); !isNil(body) {
+				writeHTTPJSON(w, status, body)
+			} else {
+				rejectHTTP(w, status, http.StatusText(status))
 			}
+			return
 		}
 	}
 	rejectHTTP(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))

@@ -4,10 +4,11 @@ import {
 } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
 import { reportDiagnostic } from "../lib.js";
-import { goName, validModule, validPackage } from "../naming.js";
-import { atLeastGo, resolveGoOptions, type GoOptions } from "../options.js";
+import { goName, validJSONTagName, validModule, validPackage } from "../naming.js";
+import { resolveGoOptions, type GoOptions } from "../options.js";
+import { MINIMUM_GO_VERSION, supportedGoVersion } from "../version.js";
 import type { GoDecl, GoEnum, GoField, GoIR, GoStruct } from "./model.js";
-import { goType, goTypeName, pointer } from "./type-map.js";
+import { goType, goTypeName, isLiteralUnion, pointer, typeIndex } from "./type-map.js";
 import { unsupported } from "./diagnostics.js";
 
 const MODEL_RUNTIME_NAMES = [
@@ -45,8 +46,8 @@ function modelAncestors(model: ModelIR, types: Map<string, TypeIR>): ModelIR[] {
 
 function modelField(property: PropertyIR, api: ApiIR, program: Program, owner: string, options: GoOptions): GoField {
   const id = `${owner}.${property.name}`;
-  if (!property.wireName || property.wireName.includes(",")) {
-    unsupported(program, id, "JSON field names cannot be represented in a Go struct tag");
+  if (!validJSONTagName(property.wireName)) {
+    unsupported(program, id, `encoding/json cannot use ${JSON.stringify(property.wireName)} as a struct tag name`);
   }
   const resolvedType = goType(property.type, api, "", program, id, options);
   const preservesAbsence = property.optional && options.optionalFields === "pointers";
@@ -63,9 +64,8 @@ function modelField(property: PropertyIR, api: ApiIR, program: Program, owner: s
 }
 
 function modelFields(model: ModelIR, api: ApiIR, program: Program, options: GoOptions, validation: boolean): GoField[] {
-  const types = new Map(api.types.map((type) => [type.id, type]));
   const properties = new Map<string, PropertyIR>();
-  for (const ancestor of modelAncestors(model, types)) {
+  for (const ancestor of modelAncestors(model, typeIndex(api))) {
     for (const property of ancestor.properties) properties.set(property.name, property);
   }
   const fields = [...properties.values()].map((property) => modelField(property, api, program, model.id, options));
@@ -158,8 +158,8 @@ function validateModelsConfiguration(program: Program, packageName: string, modu
   if (!validModule(module)) {
     reportDiagnostic(program, { code: "invalid-module", format: { name: module }, target: NoTarget });
   }
-  if (!/^1\.[0-9]+(?:\.[0-9]+)?$/.test(options.goVersion) || !atLeastGo(options.goVersion, "1.22")) {
-    unsupported(program, "go-version", "Go 1.22 or newer is required");
+  if (!supportedGoVersion(options.goVersion, MINIMUM_GO_VERSION)) {
+    unsupported(program, "go-version", `Go ${MINIMUM_GO_VERSION} or newer is required`);
   }
 }
 
@@ -177,9 +177,7 @@ export function transformToGo(
     reserve(goTypeName(source, options), source.id);
     if (source.kind === "model") {
       declarations.push(modelDeclaration(source, api, program, options, reserve));
-    } else if (source.kind === "enum" || source.variants.every((variant) =>
-      variant.type.kind === "literal" && typeof variant.type.value !== "boolean",
-    )) {
+    } else if (source.kind === "enum" || isLiteralUnion(source)) {
       declarations.push(enumDeclaration(source, program, options, reserve));
     } else {
       unsupported(program, source.id, "unions are not supported yet");

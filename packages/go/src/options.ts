@@ -1,7 +1,7 @@
 import type { ResolvedFeatures } from "@abhigyakrishna/tspgen-core";
-import { goVersionSchema } from "./version.js";
+import { goVersionSchema, MINIMUM_GO_VERSION } from "./version.js";
 
-export { atLeastGo, goVersionSchema } from "./version.js";
+export { atLeastGo, goVersionSchema, MINIMUM_GO_VERSION } from "./version.js";
 
 export interface GoNaming {
   initialisms?: string[];
@@ -85,7 +85,7 @@ export const goOptionsSchemaProperties = {
 
 export function resolveGoOptions(options: Record<string, unknown>, features?: ResolvedFeatures<string>): GoOptions {
   return {
-    goVersion: String(options["go-version"] ?? "1.22"),
+    goVersion: String(options["go-version"] ?? MINIMUM_GO_VERSION),
     layout: (options.layout as GoOptions["layout"]) ?? "single-file",
     naming: (options.naming as GoNaming) ?? {},
     typeNames: (options["type-names"] as Record<string, string>) ?? {},

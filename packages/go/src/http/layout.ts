@@ -1,4 +1,4 @@
-import { ensureRelativePrefix, relativeOutputPath, type FileSpec, type TargetContext } from "@abhigyakrishna/tspgen-core";
+import { ensureRelativePrefix, relativeOutputPath, type TargetContext } from "@abhigyakrishna/tspgen-core";
 import { NoTarget } from "@typespec/compiler";
 import { resolve } from "node:path";
 import { reportDiagnostic } from "../lib.js";
@@ -15,12 +15,6 @@ export function operationImports(operations: GoOperation[], ir: GoIR): string[] 
     return refs.map((ref) => typeUse(ref, ir));
   });
   return [...new Set(types.flatMap((type) => type.imports ?? []))];
-}
-
-export function goFile(path: string, body: string, imports: string[], ir: GoIR, packageName: string): FileSpec {
-  const names = [...new Set(imports)].sort();
-  const header = names.length ? `import (\n${names.map((name) => `\t${name === ir.module ? "models " : ""}${JSON.stringify(name)}`).join("\n")}\n)\n\n` : "";
-  return { path, template: "go/file", data: { package: packageName, body: header + body } };
 }
 
 export interface OperationUnit {

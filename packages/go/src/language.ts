@@ -19,6 +19,16 @@ export const goLanguage: LanguageModule<GoIR> = {
   ),
   format: (path, content) => {
     const normalized = content.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim() + "\n";
-    return path.endsWith(".go") ? execFileSync("gofmt", { input: normalized, encoding: "utf8" }) : normalized;
+    return path.endsWith(".go") ? gofmt(path, normalized) : normalized;
   },
 };
+
+function gofmt(path: string, source: string): string {
+  try {
+    return execFileSync("gofmt", { input: source, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { stderr?: string };
+    if (failure.code === "ENOENT") throw new Error("gofmt was not found on PATH; the Go emitter requires a Go toolchain.", { cause: error });
+    throw new Error(`gofmt rejected generated ${path}:\n${failure.stderr ?? failure.message}`, { cause: error });
+  }
+}

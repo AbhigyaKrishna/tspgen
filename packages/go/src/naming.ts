@@ -15,7 +15,8 @@ export function goName(name: string, naming: GoNaming = {}): string {
     result = (result.match(/[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[0-9]+|_+/g) ?? [result])
       .map((word) => initials.has(word.toUpperCase()) ? word.toUpperCase() : word).join("");
   }
-  return /^[A-Za-z_]/.test(result) ? result : `X${result}`;
+  // Exported identifiers must start with an uppercase letter (this also avoids the blank identifier "_").
+  return /^[A-Z]/.test(result) ? result : `X${result}`;
 }
 
 export function validPackage(name: string): boolean {
@@ -35,4 +36,31 @@ export function localModuleVersion(path: string): string {
 
 export function fileName(name: string): string {
   return constantCase(name).toLowerCase();
+}
+
+// go/build treats *_test, *_GOOS and *_GOARCH file names as test-only or platform-constrained.
+const GO_FILE_CONSTRAINTS = new Set([
+  "test",
+  "aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "js", "linux", "nacl", "netbsd",
+  "openbsd", "plan9", "solaris", "wasip1", "windows", "zos",
+  "386", "amd64", "amd64p32", "arm", "armbe", "arm64", "arm64be", "loong64", "mips", "mipsle", "mips64", "mips64le",
+  "mips64p32", "mips64p32le", "ppc", "ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64", "wasm",
+]);
+
+/**
+ * A source file stem for a generated declaration group that every build includes. Stems that the Go toolchain
+ * would constrain, or that collide with the given generated files, get a `_types` suffix.
+ */
+export function sourceFileName(name: string, reserved: readonly string[] = []): string {
+  const stem = fileName(name) || "types";
+  const suffix = stem.includes("_") ? stem.slice(stem.lastIndexOf("_") + 1) : undefined;
+  const constrained = suffix !== undefined && GO_FILE_CONSTRAINTS.has(suffix);
+  return constrained || reserved.includes(stem) ? `${stem}_types` : stem;
+}
+
+// encoding/json silently ignores tag names with other characters and falls back to the Go field name.
+const JSON_TAG_PUNCTUATION = "!#$%&()*+-./:;<=>?@[]^_{|}~ ";
+
+export function validJSONTagName(name: string): boolean {
+  return name.length > 0 && [...name].every((char) => JSON_TAG_PUNCTUATION.includes(char) || /^[\p{L}\p{Nd}]$/u.test(char));
 }

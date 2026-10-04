@@ -2,7 +2,6 @@ import type { GoHTTPOptions } from "./options.js";
 import { goName } from "../naming.js";
 import { typeUse } from "../transform/type-map.js";
 import type { GoIR, GoOperation, GoType } from "../transform/model.js";
-import { renderGoDeclaration } from "../source.js";
 
 export function optionalType(type: GoType, optional: boolean): string {
   return optional && !type.pointer && type.text !== "any" ? `*${type.text}` : type.text;
@@ -28,8 +27,4 @@ export function requestPlan(op: GoOperation, ir: GoIR, options: GoHTTPOptions): 
   }));
   if (op.body) fields.push({ name: "Body", type: optionalType(typeUse(op.body.type, ir), op.body.optional) });
   return { name: requestName(op, options), fields };
-}
-
-export function requestDeclaration(op: GoOperation, ir: GoIR, options: GoHTTPOptions): string {
-  return renderGoDeclaration("go/http/request", { request: requestPlan(op, ir, options) });
 }

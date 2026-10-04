@@ -1,9 +1,11 @@
 import { apiVersionConstants, type FileSpec, type Target } from "@abhigyakrishna/tspgen-core";
-import { fileName, goOperations, type GoDecl, type GoIR } from "./transform.js";
+import { sourceFileName } from "./naming.js";
+import { goOperations, type GoDecl, type GoIR } from "./transform.js";
 import { modelDeclaration, modelImports } from "./models/declarations.js";
 import { goSourceFile } from "./source.js";
 
-export { constraintsLiteral, nullShape } from "./validation.js";
+/** File stems of the models package's own generated files. */
+const RUNTIME_FILES = ["runtime", "api_version"];
 
 function modelFile(
   ir: GoIR,
@@ -22,6 +24,7 @@ export const goModelsTarget: Target<GoIR> = {
   language: "go",
   files: (ir, ctx): FileSpec[] => {
     if (ctx.program.hasError()) {
+      // Report operation diagnostics too, so one failed run surfaces every unsupported shape.
       goOperations(ctx.program, ir);
       throw new Error("Cannot generate Go models; see the reported diagnostics.");
     }
@@ -42,9 +45,7 @@ export const goModelsTarget: Target<GoIR> = {
     const groups = new Map<string, GoDecl[]>();
     for (const decl of ir.declarations) {
       const groupName = ir.options.layout === "per-type" ? decl.name : decl.namespace || "global";
-      let name = fileName(groupName);
-      if (name === "runtime" || name === "api_version") name += "_types";
-      const path = `models/${name}.go`;
+      const path = `models/${sourceFileName(groupName, RUNTIME_FILES)}.go`;
       const declarations = groups.get(path) ?? [];
       declarations.push(decl);
       groups.set(path, declarations);

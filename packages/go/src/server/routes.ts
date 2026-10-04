@@ -70,9 +70,10 @@ function unmatchedPathParameter(op: GoOperation, keys: Map<string, string>): str
   return undefined;
 }
 
+/** Routes for every operation; unroutable operations are diagnosed so planning stops before rendering. */
 export function serverRoutes(operations: GoOperation[], ctx: TargetContext, framework: GoServerFramework): GoServerRoute[] {
   const seen = new Set<string>();
-  const routes: GoServerRoute[] = [];
+  const accepted: GoServerRoute[] = [];
   return operations.map((op) => {
     const pattern = routePattern(op.path, framework);
     let reason = pattern.reason ?? unmatchedPathParameter(op, pattern.keys);
@@ -81,13 +82,14 @@ export function serverRoutes(operations: GoOperation[], ctx: TargetContext, fram
     seen.add(key);
     const route = { op, path: pattern.path, keys: pattern.keys };
     if (!reason && framework === "nethttp") {
-      const conflict = routes.find((previous) => netHTTPConflict(previous, route));
+      const conflict = accepted.find((previous) => netHTTPConflict(previous, route));
       if (conflict) reason = `HTTP route ${key} conflicts with ${conflict.op.verb} ${conflict.path}`;
     }
     if (reason) {
       reportDiagnostic(ctx.program, { code: "unsupported-operation", format: { id: op.id, reason }, target: NoTarget });
+    } else {
+      accepted.push(route);
     }
-    if (!reason) routes.push(route);
     return route;
   });
 }

@@ -1,4 +1,5 @@
 import type { ApiIR, ConstraintsIR, TypeRef } from "@abhigyakrishna/tspgen-core";
+import { typeIndex } from "./transform/type-map.js";
 
 /** Compact recursive nullability description consumed by the generated runtime. */
 export function nullShape(ref: TypeRef, api?: ApiIR): string {
@@ -10,7 +11,7 @@ export function nullShape(ref: TypeRef, api?: ApiIR): string {
     case "unknown": return "?_";
     case "scalar": return ref.name === "integer" ? "i" : "_";
     case "named": {
-      const model = api?.types.find((type) => type.id === ref.id);
+      const model = api && typeIndex(api).get(ref.id);
       const args = ref.args;
       if (model?.kind !== "model" || !model.typeParameters?.length || !args) return "_";
       const argumentsByName = Object.fromEntries(model.typeParameters.map((name, index) => [

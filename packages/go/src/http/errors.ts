@@ -1,7 +1,6 @@
 import { isDefaultStatus, isFixedStatus, type ResponseIR, type TargetContext, type TypeRef } from "@abhigyakrishna/tspgen-core";
 import { goType, typeUse } from "../transform/type-map.js";
 import type { GoIR, GoOperation } from "../transform/model.js";
-import { renderGoDeclaration } from "../source.js";
 
 export interface TypedHTTPError {
   name: string;
@@ -26,18 +25,20 @@ export function typedErrors(op: GoOperation, ir: GoIR, ctx: TargetContext): Type
   });
 }
 
+/** The status a typed error reports when its StatusCode is unset: the declared code, or the start of its range. */
+function fallbackStatus(code: ResponseIR["statusCodes"]): number {
+  if (isFixedStatus(code)) return code;
+  if (isDefaultStatus(code)) return 500;
+  return code.start;
+}
+
 export function typedErrorPlan(error: TypedHTTPError, ir: GoIR, role: "client" | "server") {
-  const status = error.response.statusCodes;
   return {
     name: error.name,
-    fixedStatus: isFixedStatus(status) ? status : 500,
+    fallbackStatus: fallbackStatus(error.response.statusCodes),
     bodyType: error.body ? typeUse(error.body, ir).text : undefined,
     client: role === "client",
   };
-}
-
-export function typedErrorDeclaration(error: TypedHTTPError, ir: GoIR, client: boolean): string {
-  return renderGoDeclaration("go/http/error", { error: typedErrorPlan(error, ir, client ? "client" : "server") });
 }
 
 export function matchesStatus(error: TypedHTTPError, field: string): string {

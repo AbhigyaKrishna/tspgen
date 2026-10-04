@@ -85,5 +85,8 @@ function unsupportedOperation(op: OperationIR): string | undefined {
   if (op.params.some((param) => param.type.kind === "scalar" && param.type.name === "bytes")) {
     return "byte parameters are not supported yet";
   }
+  if (op.params.some((param) => param.location === "path" && !op.path.includes(`{${param.wireName}}`))) {
+    return "path parameters must appear as simple {name} placeholders in the route";
+  }
   return undefined;
 }
