@@ -15,6 +15,8 @@ type unionVariant struct {
 	Kind    string   // untagged dispatch by first JSON byte: { [ " 0 t, or * for any
 	Literal string   // JSON text a literal variant must equal
 	Shape   string
+	Text    int      // parameter text rank by TypeSpec scalar: 1 exact Members, 2 boolean, 3 integer, 4 float/decimal, 5 other non-string Go type, 6 string; 0 none
+	Members []string // exact texts for rank 1
 }
 
 type unionInfo struct {
@@ -394,7 +396,11 @@ func encodeUnion(value reflect.Value, info *unionInfo, raw json.RawMessage, enco
 }
 
 // checkUnknownKeys enforces ignore-unknown-keys=false where custom codecs bypass DisallowUnknownFields.
+// Structs with additional properties accept every key.
 func checkUnknownKeys(value reflect.Value, fields map[string]json.RawMessage) error {
+	if additionalField(value.Type()) >= 0 {
+		return nil
+	}
 	known := map[string]bool{}
 	for i := 0; i < value.NumField(); i++ {
 		field := value.Type().Field(i)
@@ -402,18 +408,10 @@ func checkUnknownKeys(value reflect.Value, fields map[string]json.RawMessage) er
 			known[strings.Split(field.Tag.Get("json"), ",")[0]] = true
 		}
 	}
-	tagged, isTagged := taggedModel(nil), false
-	if value.CanInterface() {
-		tagged, isTagged = value.Interface().(taggedModel)
-		if !isTagged && value.CanAddr() {
-			tagged, isTagged = value.Addr().Interface().(taggedModel)
-		}
+	for _, tag := range modelTags(value) {
+		known[tag.Property] = true
 	}
-	if isTagged {
-		for _, tag := range tagged.unionTags() {
-			known[tag.Property] = true
-		}
-	} else if len(known) == 0 {
+	if len(known) == 0 {
 		return nil
 	}
 	for name := range fields {
@@ -432,4 +430,67 @@ func checkUnknownKeys(value reflect.Value, fields map[string]json.RawMessage) er
 		}
 	}
 	return nil
+}
+
+// unmarshalUnionText sets the most specific variant that parses raw: exact members, bool, integer, float, other, string.
+func unmarshalUnionText(target jsonUnion, raw string) error {
+	info := target.unionInfo()
+	value := reflect.ValueOf(target).Elem()
+	value.Set(reflect.Zero(value.Type()))
+	for rank := 1; rank <= 6; rank++ {
+		for _, variant := range info.Variants {
+			if variant.Text != rank || (rank == 1 && !containsString(variant.Members, raw)) || !exactText(rank, raw) {
+				continue
+			}
+			field := value.FieldByName(variant.Field)
+			candidate := reflect.New(field.Type())
+			if DecodeParameter(raw, candidate.Interface()) != nil {
+				continue
+			}
+			field.Set(candidate.Elem())
+			return nil
+		}
+	}
+	quoted, _ := json.Marshal(raw)
+	return unknownVariant(value, info, quoted, "matches no variant")
+}
+
+// exactText reports whether raw is the exact text form of ranks 2-4: no padding, a JSON number, integral for rank 3.
+func exactText(rank int, raw string) bool {
+	switch rank {
+	case 2:
+		return raw == "true" || raw == "false"
+	case 3, 4:
+		if raw == "" || (raw[0] != '-' && (raw[0] < '0' || raw[0] > '9')) || strings.TrimSpace(raw) != raw || !json.Valid([]byte(raw)) {
+			return false
+		}
+		return rank == 4 || checkInteger("", []byte(raw)) == nil
+	}
+	return true
+}
+
+// marshalUnionText writes the set variant as parameter text.
+func marshalUnionText(input jsonUnion) ([]byte, error) {
+	info := input.unionInfo()
+	value := dereference(reflect.ValueOf(input))
+	variant, field, err := selectedVariant(value, info)
+	if err != nil {
+		return nil, err
+	}
+	if variant == nil {
+		if info.Unknown {
+			// A captured JSON string writes its text; other captured JSON writes itself.
+			raw := value.FieldByName("Unknown").Bytes()
+			var text string
+			if json.Unmarshal(raw, &text) == nil {
+				return []byte(text), nil
+			}
+			if len(raw) > 0 {
+				return append([]byte(nil), raw...), nil
+			}
+		}
+		return nil, &ValidationError{Field: info.Name, Message: "no variant is set"}
+	}
+	text, err := EncodeParameter(field.Interface())
+	return []byte(text), err
 }

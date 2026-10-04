@@ -1,7 +1,7 @@
 import type { GoDecl, GoField, GoIR } from "../transform.js";
 import type { GoSourceSection } from "../source.js";
 import { nullShape, propertyCheck, propertyCheckCall } from "../validation.js";
-import { validatorTag } from "./validator.js";
+import { additionalValidatorTag, validatorTag } from "./validator.js";
 
 function defaultJSON(field: GoField, ir: GoIR): string {
   const ref = field.ref.kind === "nullable" ? field.ref.of : field.ref;
@@ -25,8 +25,20 @@ function fieldTag(field: GoField, decl: Extract<GoDecl, { kind: "struct" }>, ir:
   const validationTag = decl.validator ? validatorTag(field, ir) : "";
   if (validationTag) pairs.push(`validate:${JSON.stringify(validationTag)}`);
   if (decl.defaults && field.default !== undefined) pairs.push(`default:${JSON.stringify(defaultJSON(field, ir))}`);
+  return structTag(pairs);
+}
+
+function structTag(pairs: string[]): string {
   const tag = pairs.join(" ");
   return tag.includes("`") ? JSON.stringify(tag) : `\`${tag}\``;
+}
+
+function additionalTag(decl: Extract<GoDecl, { kind: "struct" }>, ir: GoIR): string {
+  const ref = decl.additional!.ref;
+  const pairs = ['json:"-"', `tsp:${JSON.stringify(`additional,${nullShape(ref, ir.api)}`)}`];
+  if (!decl.validation) pairs.push('tspvalidate:"false"');
+  if (decl.validator) pairs.push(`validate:${JSON.stringify(additionalValidatorTag(ref, ir))}`);
+  return structTag(pairs);
 }
 
 const goString = (value: string) => JSON.stringify(value);
@@ -34,7 +46,8 @@ const goStrings = (values: string[]) => `[]string{${values.map(goString).join(",
 
 function unionInfoFields(decl: Extract<GoDecl, { kind: "union" }>): string {
   const variants = decl.variants.map((variant) => `{Field: ${goString(variant.name)}, Values: ${goStrings(variant.values)}, `
-    + `Kind: ${goString(variant.kind)}, Literal: ${goString(variant.literal ?? "")}, Shape: ${goString(variant.shape)}}`);
+    + `Kind: ${goString(variant.kind)}, Literal: ${goString(variant.literal ?? "")}, Shape: ${goString(variant.shape)}, `
+    + `Text: ${variant.text}, Members: ${goStrings(variant.members)}}`);
   const discriminator = decl.discriminator;
   return [
     `Name: ${goString(decl.name)}`,
@@ -55,10 +68,16 @@ export function modelDeclaration(decl: GoDecl, ir: GoIR): GoSourceSection {
       return { template: "go/model/alias", data: { ...decl, docs } };
     case "enum": {
       const members = decl.members.map((member) => ({ ...member, name: `${decl.name}${member.name}` }));
-      const cases = [...new Map(members.map((member) => [member.value, member.name])).values()];
+      const unique = [...new Map(members.map((member) => [member.value, member.name])).entries()];
+      const cases = unique.map(([, name]) => name);
+      // Parameters use the canonical member text, matching union `Members`.
+      const texts = unique.map(([value, name]) => ({ name, text: goString(String(value)) }));
       const validNames = [...cases];
       if (decl.unknown) validNames.push(`${decl.name}UNKNOWN`);
-      return { template: "go/model/enum", data: { ...decl, docs, members, cases, validNames, validation: ir.options.validation && !decl.open } };
+      return {
+        template: "go/model/enum",
+        data: { ...decl, docs, members, cases, texts, validNames, validation: ir.options.validation && !decl.open },
+      };
     }
     case "struct": {
       const parameters = decl.typeParameters;
@@ -73,7 +92,15 @@ export function modelDeclaration(decl: GoDecl, ir: GoIR): GoSourceSection {
         ), ""),
       }));
       const tags = decl.tags.map((tag) => `{Property: ${goString(tag.property)}, Values: ${goStrings(tag.values)}}`).join(", ");
-      return { template: "go/model/struct", data: { ...decl, docs, typeParameters, instance, fields, tagsLiteral: tags } };
+      const additional = decl.additional ? {
+        text: decl.additional.type.text,
+        tag: additionalTag(decl, ir),
+        check: propertyCheckCall(propertyCheck(
+          "additionalProperties", "value.AdditionalProperties", true, decl.additional.ref, undefined, "", ir.api,
+        ), ""),
+      } : undefined;
+      const tagsRef = decl.tags.length ? `unionTags${decl.name}` : "nil";
+      return { template: "go/model/struct", data: { ...decl, docs, typeParameters, instance, fields, tagsLiteral: tags, additional, tagsRef } };
     }
     case "union": {
       const variants = decl.variants.map((variant) => ({ ...variant, docs: variant.docs?.split("\n") ?? [] }));
@@ -85,7 +112,7 @@ export function modelDeclaration(decl: GoDecl, ir: GoIR): GoSourceSection {
 export function modelImports(decl: GoDecl): string[] {
   switch (decl.kind) {
     case "alias": return decl.type.imports ?? [];
-    case "struct": return decl.fields.flatMap((field) => field.type.imports ?? []);
+    case "struct": return [...decl.fields.flatMap((field) => field.type.imports ?? []), ...(decl.additional?.type.imports ?? [])];
     case "enum": return decl.unknown ? ["encoding/json"] : [];
     case "union": return [
       ...decl.variants.flatMap((variant) => variant.type.imports ?? []),

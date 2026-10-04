@@ -33,6 +33,8 @@ model Binding {
 model Toy { kind: string; @minLength(2) label: string; }
 model Ball extends Toy { kind: "ball"; bounce?: int32 = 3; }
 model Kite extends Toy { kind: "kite"; length: float64; }
+model Tags { pet: string; ...Record<string>; }
+union Sort { newest: "newest", limit: int32 }
 
 @route("/pets")
 interface Pets {
@@ -54,4 +56,9 @@ interface Pets {
 @route("/toys")
 interface Toys {
   @post echo(@body toy: Toy): Toy;
+}
+
+@route("/tags")
+interface Tagging {
+  @post echo(@body tags: Tags, @query sort?: Sort): Tags;
 }

@@ -18,6 +18,10 @@ func (<%= it.name %>) unionInfo() *unionInfo { return unionInfo<%= it.name %> }
 func (value <%= it.name %>) MarshalJSON() ([]byte, error) { return marshalUnion(value) }
 
 func (value *<%= it.name %>) UnmarshalJSON(data []byte) error { return unmarshalUnion(value, data) }
-<% if (it.validation) { %>
+<% if (it.text) { %>
+func (value <%= it.name %>) MarshalText() ([]byte, error) { return marshalUnionText(value) }
+
+func (value *<%= it.name %>) UnmarshalText(data []byte) error { return unmarshalUnionText(value, string(data)) }
+<% } %><% if (it.validation) { %>
 func (value *<%= it.name %>) Validate() error { return validateUnion(value) }
 <% } %>

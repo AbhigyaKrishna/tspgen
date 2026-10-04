@@ -6,6 +6,8 @@ enum State { active, spaced: "a b", punctuation: "a,b|c`d", empty: "" }
 enum Ratio { first: 1.5, second: 2.5 }
 model Child { @minLength(2) name: Label; }
 model Box<T> { value: T; }
+model Extras { ...Record<Child>; }
+model States { ...Record<State>; }
 @meta("go", #{ features: #{ validator: false } })
 model Plain { @minLength(2) name: string; }
 model Payload {
@@ -30,5 +32,7 @@ model Payload {
   @minValue(100) number: numeric;
   @minValue(100) decimal: decimal;
   @pattern("^a") pattern: string;
+  extras: Extras;
+  states: States;
 }
 @post op write(@body payload: Payload): Payload;

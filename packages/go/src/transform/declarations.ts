@@ -45,6 +45,14 @@ function modelAncestors(model: ModelIR, types: Map<string, TypeIR>): ModelIR[] {
   return ancestors;
 }
 
+/** The `AdditionalProperties` map for the nearest model in the chain that has additional properties. */
+function additionalField(model: ModelIR, api: ApiIR, program: Program, options: GoOptions): GoStruct["additional"] {
+  const source = modelAncestors(model, typeIndex(api)).reverse().find((item) => item.additionalProperties);
+  if (!source?.additionalProperties) return undefined;
+  const ref: TypeRef = { kind: "map", of: source.additionalProperties };
+  return { type: goType(ref, api, "", program, `${model.id} additional properties`, options), ref };
+}
+
 function modelField(property: PropertyIR, api: ApiIR, program: Program, owner: string, options: GoOptions): GoField {
   const id = `${owner}.${property.name}`;
   if (!validJSONTagName(property.wireName)) {
@@ -66,6 +74,7 @@ function modelField(property: PropertyIR, api: ApiIR, program: Program, owner: s
 
 function modelFields(
   model: ModelIR, api: ApiIR, program: Program, options: GoOptions, validation: boolean, tags: GoUnionTag[],
+  additional: boolean,
 ): GoField[] {
   const properties = new Map<string, PropertyIR>();
   for (const ancestor of modelAncestors(model, typeIndex(api))) {
@@ -77,7 +86,8 @@ function modelFields(
     .map((property) => modelField(property, api, program, model.id, options));
   const owners = new Map<string, string>();
   if (validation) owners.set("Validate", `${model.id} validation method`);
-  if (tags.length) for (const method of ["MarshalJSON", "UnmarshalJSON"]) owners.set(method, `${model.id} tagged codec`);
+  if (tags.length || additional) for (const method of ["MarshalJSON", "UnmarshalJSON"]) owners.set(method, `${model.id} JSON codec`);
+  if (additional) owners.set("AdditionalProperties", `${model.id} additional properties`);
   for (const field of fields) {
     const first = owners.get(field.name);
     const owner = `${model.id}.${field.wireName}`;
@@ -98,11 +108,12 @@ function modelDeclaration(
   const validation = options.features?.at("validation", meta, "model") ?? options.validation;
   const validator = options.features?.at("validator", meta, "model") ?? options.validator;
   const defaults = options.features?.at("defaults", meta, "model") ?? options.defaults;
-  if (model.additionalProperties) unsupported(program, model.id, "additional properties are not supported yet");
-  const fields = modelFields(model, api, program, options, validation, tags);
+  const additional = additionalField(model, api, program, options);
+  const fields = modelFields(model, api, program, options, validation, tags, additional !== undefined);
   if (defaults) reserve(`New${name}`, `${model.id} constructor`);
   return {
     kind: "struct", id: model.id, name, namespace: model.namespace.join("."), fields, tags,
+    ...(additional ? { additional } : {}),
     typeParameters: model.typeParameters?.map((parameter) => goName(parameter, options.naming)) ?? [],
     validation, validator, defaults,
     ...(model.docs ? { docs: model.docs } : {}),
@@ -186,6 +197,8 @@ export function transformToGo(
   for (const source of api.types) {
     // @events unions only type SSE streams, which Go targets reject as operations.
     if (source.kind === "union" && source.events) continue;
+    // A std `Record<T>` base only contributes its map: derived structs flatten it into `AdditionalProperties`.
+    if (source.kind === "model" && source.namespace.join(".") === "TypeSpec" && source.id.startsWith("Record<")) continue;
     reserve(goTypeName(source, options), source.id);
     if (source.kind === "model" && isDiscriminated(source)) {
       declarations.push(unionDeclaration(source, api, program, options, reserve));

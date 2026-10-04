@@ -76,3 +76,8 @@ export function validatorTag(field: GoField, ir: GoIR): string {
   const skipAbsent = field.type.pointer || field.type.text === "any" ? "omitnil" : "omitempty";
   return [skipAbsent, ...valueTags(ref, field.constraints ?? {}, ir)].join(",");
 }
+
+/** Additional properties may be absent or empty; present entries get the declared map value tags. */
+export function additionalValidatorTag(ref: TypeRef, ir: GoIR): string {
+  return ["omitempty", ...valueTags(ref, {}, ir)].join(",");
+}

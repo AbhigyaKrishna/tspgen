@@ -23,6 +23,7 @@ describe("Go validator struct tags", () => {
       module, "optional-fields": optionalFields, "scalar-style": "alias", features: { validator: true },
     }).compile(fixture("validator.tsp"));
     expect(outputs["models/models.go"]).toContain('validate:"min=2,max=4"');
+    expect(outputs["models/models.go"]).toContain('AdditionalProperties map[string]*Child `json:"-" tsp:"additional,m_" validate:"omitempty,dive,required"`');
     const tests = fixture("validator_test.go");
     runGo({
       ...outputs,

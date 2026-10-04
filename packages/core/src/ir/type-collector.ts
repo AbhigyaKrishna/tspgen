@@ -350,14 +350,16 @@ export class TypeCollector {
 
   /**
    * A template is generic unless it needs per-instance models: a base model or discriminator, HTTP
-   * metadata, `...T` spreads (instance and declaration properties differ) or a @friendlyName.
-   * Decorators do not run on declarations, so those are found among the declaration's applications.
+   * metadata, `...T` spreads (instance and declaration properties differ), a `Record` spread of a type
+   * parameter (the declaration has no indexer yet) or a @friendlyName. Decorators do not run on
+   * declarations, so those are found among the declaration's applications.
    */
   private expressible(instance: Model, declaration: Model): boolean {
     if (declaration.baseModel || getDiscriminator(this.program, instance)) return false;
     if (applies(declaration, "discriminator") || applies(declaration, "friendlyName")) return false;
     if (getFriendlyName(this.program, instance)) return false;
     if (this.isHttpEnvelope(declaration) || this.isHttpEnvelope(instance)) return false;
+    if (instance.indexer && !declaration.indexer) return false;
     const names = (m: Model) => [...m.properties.keys()].join("\0");
     return names(instance) === names(declaration);
   }
@@ -814,7 +816,15 @@ function literalValues(type: Type): (string | number | boolean)[] {
 function templateArgsName(type: Model | Union | Enum): string {
   const args = (type as { templateMapper?: { args: readonly unknown[] } }).templateMapper?.args ?? [];
   return args
-    .map((a) => (a && typeof a === "object" && "name" in a && typeof a.name === "string" ? pascal(a.name) : ""))
+    .map((a) => {
+      if (!a || typeof a !== "object" || !("name" in a) || typeof a.name !== "string") return "";
+      // Nested instances contribute their own arguments, so Maybe<Maybe<int32>> and Maybe<Maybe<string>> differ.
+      const nested =
+        "kind" in a && (a.kind === "Model" || a.kind === "Union" || a.kind === "Enum")
+          ? templateArgsName(a as Model | Union | Enum)
+          : "";
+      return pascal(a.name) + nested;
+    })
     .join("");
 }
 

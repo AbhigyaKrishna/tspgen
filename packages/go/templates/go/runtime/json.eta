@@ -23,6 +23,9 @@ func applyJSON(value reflect.Value, raw json.RawMessage, strict, validate, defau
 			if field.PkgPath != "" || field.Tag.Get("tsp") == "" {
 				continue
 			}
+			if strings.HasPrefix(field.Tag.Get("tsp"), "additional,") {
+				continue
+			}
 			name := strings.Split(field.Tag.Get("json"), ",")[0]
 			item, present := fields[name]
 			fallback := field.Tag.Get("default")
@@ -50,6 +53,11 @@ func applyJSON(value reflect.Value, raw json.RawMessage, strict, validate, defau
 				if err := applyJSON(value.Field(i), bytes.TrimSpace(item), strict, validate, defaults, fieldShape); err != nil {
 					return err
 				}
+			}
+		}
+		if index := additionalField(value.Type()); index >= 0 && fields != nil {
+			if err := applyAdditional(value, index, fields, strict, validate, defaults, arguments); err != nil {
+				return err
 			}
 		}
 		if strict && fields != nil {
@@ -152,6 +160,9 @@ func encodeValue(value reflect.Value, raw json.RawMessage, encodeDefaults, expli
 			if field.PkgPath != "" || field.Tag.Get("tsp") == "" {
 				continue
 			}
+			if strings.HasPrefix(field.Tag.Get("tsp"), "additional,") {
+				continue
+			}
 			name := strings.Split(field.Tag.Get("json"), ",")[0]
 			item, present := fields[name]
 			if !present && encodeDefaults {
@@ -174,6 +185,11 @@ func encodeValue(value reflect.Value, raw json.RawMessage, encodeDefaults, expli
 				return nil, err
 			}
 			fields[name] = encoded
+		}
+		if index := additionalField(value.Type()); index >= 0 {
+			if err := encodeAdditional(value, index, fields, encodeDefaults, explicitNulls); err != nil {
+				return nil, err
+			}
 		}
 		return json.Marshal(fields)
 	case reflect.Slice, reflect.Array:

@@ -133,6 +133,20 @@ func samplePet(id int64) *models.Pet {
 	}
 }
 
+func (*petService) TaggingEcho(_ context.Context, sort *models.Sort, tags *models.Tags) (*models.Tags, error) {
+	if sort != nil {
+		text, err := sort.MarshalText()
+		if err != nil {
+			return nil, err
+		}
+		if tags.AdditionalProperties == nil {
+			tags.AdditionalProperties = map[string]string{}
+		}
+		tags.AdditionalProperties["sort"] = string(text)
+	}
+	return tags, nil
+}
+
 func (*petService) ToysEcho(_ context.Context, toy *models.Toy) (*models.Toy, error) {
 	return toy, nil
 }

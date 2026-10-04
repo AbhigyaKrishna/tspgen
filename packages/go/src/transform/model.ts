@@ -38,6 +38,8 @@ export interface GoStruct extends GoDeclaration {
   kind: "struct";
   fields: GoField[];
   tags: GoUnionTag[];
+  /** The map holding JSON properties the model does not declare (`...Record<T>`, `extends Record<T>`). */
+  additional?: { type: GoType; ref: TypeRef };
   typeParameters: string[];
   validation: boolean;
   validator: boolean;
@@ -66,6 +68,13 @@ export interface GoUnionVariant {
   kind: string;
   literal?: string;
   shape: string;
+  /**
+   * Parameter text rank by TypeSpec scalar: 0 none (bytes, unknown), 1 exact (`members`), 2 boolean, 3 integer family,
+   * 4 float/decimal family, 5 other scalar with a non-string Go type, 6 string-typed (incl. open enums).
+   */
+  text: number;
+  /** Exact texts for rank 1 (literal text or enum member values). */
+  members: string[];
   docs?: string;
 }
 
@@ -75,6 +84,8 @@ export interface GoUnion extends GoDeclaration {
   discriminator?: { property: string; envelope: "none" | "object"; envelopeProperty: string };
   unknown: boolean;
   validation: boolean;
+  /** Every variant has a text rank, so the union implements MarshalText/UnmarshalText. */
+  text: boolean;
 }
 
 export type GoDecl = GoStruct | GoEnum | GoAlias | GoUnion;

@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -141,7 +142,8 @@ func checkGenericShape(name, shape string, value reflect.Value, seen map[shapeVi
 			continue
 		}
 		item := value.Field(index)
-		if strings.HasPrefix(presence, "optional,") && absent(item) {
+		additional := strings.HasPrefix(presence, "additional,")
+		if (additional || strings.HasPrefix(presence, "optional,")) && absent(item) {
 			continue
 		}
 		resolved, err := propertyShape(field, arguments)
@@ -149,6 +151,9 @@ func checkGenericShape(name, shape string, value reflect.Value, seen map[shapeVi
 			return err
 		}
 		fieldName := strings.Split(field.Tag.Get("json"), ",")[0]
+		if additional {
+			fieldName = "additionalProperties"
+		}
 		if err := checkShapeValue(name + "." + fieldName, resolved, item, seen); err != nil {
 			return err
 		}

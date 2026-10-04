@@ -23,3 +23,23 @@ func TestDiscriminatedRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestAdditionalPropertiesAndUnionQuery(t *testing.T) {
+	for _, transport := range transports {
+		t.Run(transport.name, func(t *testing.T) {
+			host, api := startServer(t, transport)
+			limit := int32(3)
+			tags, err := api.TaggingEcho(t.Context(), client.TaggingEchoRequest{
+				Body:      &models.Tags{Pet: "rex", AdditionalProperties: map[string]string{"color": "brown"}},
+				QuerySort: models.NewSortLimit(&limit),
+			})
+			if err != nil || tags.Pet != "rex" || tags.AdditionalProperties["color"] != "brown" || tags.AdditionalProperties["sort"] != "3" {
+				t.Fatalf("tags: %+v %v", tags, err)
+			}
+			response, body := sendRequest(t, host, http.MethodPost, "/tags?sort=oldest", "application/json", `{"pet":"rex"}`)
+			assertProblem(t, response, body, http.StatusBadRequest)
+			response, body = sendRequest(t, host, http.MethodPost, "/tags", "application/json", `{"pet":"rex","color":7}`)
+			assertProblem(t, response, body, http.StatusBadRequest)
+		})
+	}
+}

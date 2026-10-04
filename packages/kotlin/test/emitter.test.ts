@@ -322,6 +322,20 @@ data class Page<T>(
     expect(outputs["models/com/acme/models/PagePet.kt"]).toContain("data class PagePet(\n    val items: List<Pet>,\n)");
   });
 
+  it("names nested template instances from every argument level with features.generics false", async () => {
+    const { outputs } = await emitter({ features: { generics: false } }).compile(`
+      @service namespace S;
+      model Page<T> { items: T[] }
+      model Box<T> { value: T }
+      model Pet { id: int64 }
+      model Tag { id: int64 }
+      model Holder { boxes: Page<Box<Pet>>; pets: Page<Pet[]>; tags: Page<Tag[]> }
+    `);
+    expect(outputs["models/com/acme/models/PageBoxPet.kt"]).toContain("data class PageBoxPet(\n    val items: List<BoxPet>,\n)");
+    expect(outputs["models/com/acme/models/PageArrayPet.kt"]).toContain("val items: List<List<Pet>>,");
+    expect(outputs["models/com/acme/models/PageArrayTag.kt"]).toContain("val items: List<List<Tag>>,");
+  });
+
   it("emits enums", async () => {
     const { outputs } = await emitter().compile(petSpec);
     expect(outputs["models/com/acme/models/Color.kt"]).toBe(`${HEADER}

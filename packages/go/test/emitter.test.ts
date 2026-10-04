@@ -35,8 +35,8 @@ describe("Go standard-library targets", () => {
       targets: [{ [clientTarget]: { module: modules.client } }],
     }).compileAndDiagnose(`
       @service namespace S;
-      model Pet { id: int32 }
-      model Box { id: int32; ...Record<string>; }
+      model Pet { id: int32; box: Box; }
+      model Box { @encode(string) id: int64; }
       @route("/things") op read(): Pet | { @statusCode _: 201; @body pet: Pet };
     `);
     const codes = diagnostics.map((d) => d.code);

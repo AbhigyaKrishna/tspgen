@@ -18,6 +18,7 @@ TypeScript plans declarations and wire behavior; templates contain the Go source
 | Model and server source | `templates/go/model/`, `templates/go/server/` |
 | JSON, validation, and parameter runtime | `templates/go/runtime/` |
 | net/http client planning and source | `../go-nethttp-client/src/plan.ts`, `../go-nethttp-client/templates/nethttp-client/` |
+| Additional properties (object codec, walker hooks) | `src/transform/declarations.ts`, `templates/go/model/struct.eta`, `templates/go/runtime/objects.eta` |
 | Unions and `@discriminator` hierarchies (variant structs, variant discriminator codecs) | `src/transform/unions.ts`, `templates/go/model/union.eta`, `templates/go/runtime/unions.eta` |
 
 Unions generate variant-pointer structs (`Pet{Cat *Cat; Dog *Dog}`, referenced as `*Pet`). Discriminated variants
@@ -26,6 +27,15 @@ discriminator field and write/check it in their own JSON methods. Untagged union
 (no unknown keys, required properties present), then matches with their required properties, then any variant that
 decodes unless `features.enum-unknown` keeps unmatched payloads in `Unknown`. The JSON walkers recurse into the set
 variant, so defaults, validation, `encode-defaults`, `explicit-nulls` and `ignore-unknown-keys` apply inside unions.
+
+Structs with additional properties carry `AdditionalProperties map[string]T` (tag `tsp:"additional,<shape>"`). Their
+`MarshalJSON`/`UnmarshalJSON` (shared with tagged variant models) call `marshalObject`/`unmarshalObject`; the walkers
+skip the field in the property loop and handle it with `applyAdditional`/`encodeAdditional`, and `checkUnknownKeys`
+accepts every key. Unions whose variants all have a text rank (`unionVariant.Text`, from `textRank` in
+`src/transform/unions.ts`) also get `MarshalText`/`UnmarshalText`, which is all `EncodeParameter`/`DecodeParameter`
+need to use them as HTTP parameters. Generated enums instead implement unexported `decodeParameter`/`encodeParameter`
+hooks that `DecodeParameter`/`EncodeParameter` check before `TextUnmarshaler`/`TextMarshaler` (an `UnmarshalText` would
+change `encoding/json` decoding); closed enums accept only a member's exact value text, open enums any text.
 
 For an HTTP target, reuse `httpOperationPlan` for request fields, wire types, validation calls, and declared
 errors. Keep router-specific APIs in the transport description and templates. `goSourceFile` composes

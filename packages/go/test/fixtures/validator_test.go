@@ -17,7 +17,8 @@ func validPayload(t *testing.T) *models.Payload {
   "nullableChildren":[null], "nested":[[{"name":"ok"}]],
   "child":{"name":"ok"}, "plain":{"name":""}, "box":{"value":{"name":"ok"}},
   "state":"a,b|c\u0060d", "ratio":1.5, "literal":"a,b|c\u0060d",
-  "literalBool":false, "literalNumber":0, "number":1, "decimal":1, "pattern":"bad"
+  "literalBool":false, "literalNumber":0, "number":1, "decimal":1, "pattern":"bad",
+  "extras":{"a":{"name":"ok"}}, "states":{"a":"active"}
  }`), &payload)
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +55,9 @@ func TestValidatorTags(t *testing.T) {
 		{"invalid literal", func(p *models.Payload) { p.Literal = "wrong" }},
 		{"invalid bool literal", func(p *models.Payload) { p.LiteralBool = true }},
 		{"invalid number literal", func(p *models.Payload) { p.LiteralNumber = 1 }},
+		{"invalid additional value", func(p *models.Payload) { p.Extras.AdditionalProperties["a"].Name = "x" }},
+		{"nil additional value", func(p *models.Payload) { p.Extras.AdditionalProperties["a"] = nil }},
+		{"invalid additional enum", func(p *models.Payload) { p.States.AdditionalProperties["a"] = "wrong" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -70,6 +74,11 @@ func TestValidatorTags(t *testing.T) {
 		if err := validate.Struct(payload); err != nil {
 			t.Fatal(err)
 		}
+	}
+	empty := validPayload(t)
+	empty.Extras.AdditionalProperties, empty.States.AdditionalProperties = nil, map[string]models.State{}
+	if err := validate.Struct(empty); err != nil {
+		t.Fatal(err)
 	}
 	for _, field := range []string{"optional", "nullable"} {
 		t.Run(field, func(t *testing.T) {

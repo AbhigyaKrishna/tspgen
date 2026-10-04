@@ -1,3 +1,7 @@
+// Generated enums implement these so parameters check membership without changing their JSON codecs.
+type parameterDecoder interface{ decodeParameter(raw string) error }
+type parameterEncoder interface{ encodeParameter() (string, error) }
+
 // DecodeParameter decodes scalar HTTP text without interpreting strings as JSON.
 func DecodeParameter(raw string, target any) error {
 	value := reflect.ValueOf(target)
@@ -12,6 +16,9 @@ func DecodeParameter(raw string, target any) error {
 		value = value.Elem()
 	}
 	if value.CanAddr() {
+		if decoder, ok := value.Addr().Interface().(parameterDecoder); ok {
+			return decoder.decodeParameter(raw)
+		}
 		if decoder, ok := value.Addr().Interface().(encoding.TextUnmarshaler); ok {
 			return decoder.UnmarshalText([]byte(raw))
 		}
@@ -34,6 +41,9 @@ func EncodeParameter(input any) (string, error) {
 	value := dereference(reflect.ValueOf(input))
 	if absent(value) {
 		return "", errors.New("parameter must not be null")
+	}
+	if encoder, ok := value.Interface().(parameterEncoder); ok {
+		return encoder.encodeParameter()
 	}
 	if encoder, ok := value.Interface().(encoding.TextMarshaler); ok {
 		raw, err := encoder.MarshalText()

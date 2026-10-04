@@ -3,6 +3,8 @@
 <% for (const field of it.fields) { %>
 <% for (const line of field.docs) { %>	// <%= line %>
 <% } %>	<%= field.name %> <%= field.type.text %> <%= field.tag %>
+<% } %><% if (it.additional) { %>	// AdditionalProperties holds JSON properties the model does not declare.
+	AdditionalProperties <%= it.additional.text %> <%= it.additional.tag %>
 <% } %>}
 <% if (it.defaults) { %>
 // New<%= it.name %> initializes declared property defaults.
@@ -22,6 +24,9 @@ func (value *<%= it.instance %>) Validate() error {
 <% for (const field of it.fields) { %>	if err := <%= field.check %>; err != nil {
 		return err
 	}
+<% } %><% if (it.additional) { %>	if err := <%= it.additional.check %>; err != nil {
+		return err
+	}
 <% } %>	return nil
 }
 <% } %>
@@ -29,14 +34,15 @@ func (value *<%= it.instance %>) Validate() error {
 var unionTags<%= it.name %> = []unionTag{<%= it.tagsLiteral %>}
 
 func (<%= it.instance %>) unionTags() []unionTag { return unionTags<%= it.name %> }
-
+<% } %>
+<% if (it.tags.length || it.additional) { %>
 func (value <%= it.instance %>) MarshalJSON() ([]byte, error) {
 	type plain <%= it.instance %>
-	return marshalTagged(plain(value), unionTags<%= it.name %>)
+	return marshalObject(plain(value), <%= it.tagsRef %>, <%= it.additional ? "value.AdditionalProperties" : "nil" %>)
 }
 
 func (value *<%= it.instance %>) UnmarshalJSON(data []byte) error {
 	type plain <%= it.instance %>
-	return unmarshalTagged(data, (*plain)(value), unionTags<%= it.name %>)
+	return unmarshalObject(data, (*plain)(value), <%= it.tagsRef %>, <%= it.additional ? "&value.AdditionalProperties" : "nil" %>)
 }
 <% } %>

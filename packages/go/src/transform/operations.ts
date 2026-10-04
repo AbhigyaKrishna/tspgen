@@ -38,7 +38,7 @@ export function goOperations(program: Program, ir: GoIR): GoOperation[] {
       } else {
         names.set(name, op.id);
       }
-      const reason = unsupportedOperation(op);
+      const reason = unsupportedOperation(op, ir);
       if (reason) {
         reportDiagnostic(program, { code: "unsupported-operation", format: { id: op.id, reason }, target: NoTarget });
         continue;
@@ -61,7 +61,13 @@ export function goOperations(program: Program, ir: GoIR): GoOperation[] {
   return result;
 }
 
-function unsupportedOperation(op: OperationIR): string | undefined {
+/** Enums, and unions whose variants all have a text form, decode from parameter text. */
+function textParameter(id: string, ir: GoIR): boolean {
+  const decl = ir.declarations.find((item) => item.id === id);
+  return decl?.kind === "enum" || (decl?.kind === "union" && decl.text);
+}
+
+function unsupportedOperation(op: OperationIR, ir: GoIR): string | undefined {
   if (op.auth && op.auth.options.some((option) => option.length > 0)) return "authentication is not supported yet";
   const success = op.responses.filter((response) => !response.isError);
   if (success.length !== 1 || !isFixedStatus(success[0].statusCodes)) {
@@ -79,8 +85,11 @@ function unsupportedOperation(op: OperationIR): string | undefined {
   )) {
     return "cookies, collection parameters, and files are not supported yet";
   }
-  if (op.params.some((param) => ["named", "nullable", "unknown"].includes(param.type.kind))) {
+  if (op.params.some((param) => ["nullable", "unknown"].includes(param.type.kind))) {
     return "only scalar path, query, and header parameters are supported";
+  }
+  if (op.params.some((param) => param.type.kind === "named" && !textParameter(param.type.id, ir))) {
+    return "parameters must be scalars, enums, or unions of scalar, literal, or enum variants";
   }
   if (op.params.some((param) => param.type.kind === "scalar" && param.type.name === "bytes")) {
     return "byte parameters are not supported yet";

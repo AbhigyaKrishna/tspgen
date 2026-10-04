@@ -283,6 +283,25 @@ describe("type IR", () => {
     ]);
   });
 
+  it("keeps templates per-instance when they spread a Record of a type parameter", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      model Bag<T> { v: T; ...Record<T>; }
+      model Tagged<T> { v: T; ...Record<string>; }
+      model Use { b: Bag<string>; t: Tagged<int32> }
+    `);
+    expect(ir.types.some((t) => t.name === "Bag")).toBe(false);
+    expect(ir.types.find((t) => t.name === "BagString")).toMatchObject({
+      kind: "model",
+      additionalProperties: { kind: "scalar", name: "string" },
+    });
+    expect(ir.types.find((t) => t.name === "Tagged")).toMatchObject({
+      kind: "model",
+      typeParameters: ["T"],
+      additionalProperties: { kind: "scalar", name: "string" },
+    });
+  });
+
   it("keeps templates per-instance when a type parameter appears where no generic class can hold it", async () => {
     const ir = await build(`
       @service namespace Pets;
@@ -414,5 +433,23 @@ describe("type IR", () => {
     if (m.kind !== "model") throw new Error("expected model");
     expect(m.decorators).toEqual({ "Acme.tag": [["x"]] });
     expect(m.properties[0].decorators["Acme.tag"]).toHaveLength(2);
+  });
+
+  it("names nested template instances from every argument level", async () => {
+    const ir = await build(
+      `
+      @service namespace S;
+      union Maybe<T> { v: T, n: null }
+      model Box<T> { item: T }
+      model Holder { a: Maybe<Maybe<int32>>; b: Maybe<Maybe<string>>; c: Box<Box<int32>>; d: Box<Record<string>>; }
+      @route("/x") op read(): Holder;
+    `,
+      { generics: false },
+    );
+    expect(find(ir, "S.Maybe<S.Maybe<int32>>").name).toBe("MaybeMaybeInt32");
+    expect(find(ir, "S.Maybe<S.Maybe<string>>").name).toBe("MaybeMaybeString");
+    expect(find(ir, "S.Box<S.Box<int32>>").name).toBe("BoxBoxInt32");
+    expect(find(ir, "S.Box<int32>").name).toBe("BoxInt32");
+    expect(find(ir, "S.Box<Record<string>>").name).toBe("BoxRecordString");
   });
 });

@@ -37,3 +37,26 @@ func (value <%= it.name %>) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(value))
 }
 <% } %>
+
+func (value *<%= it.name %>) decodeParameter(raw string) error {
+	switch raw {
+<% for (const member of it.texts) { %>	case <%= member.text %>:
+		*value = <%= member.name %>
+<% } %>	default:
+<% if (it.open) { %>		*value = <%= it.name %>(raw)
+<% } else if (it.unknown) { %>		*value = <%= it.name %>UNKNOWN
+<% } else { %>		return &ValidationError{Field: <%= JSON.stringify(it.name) %>, Message: "unknown enum value"}
+<% } %>	}
+	return nil
+}
+
+func (value <%= it.name %>) encodeParameter() (string, error) {
+	switch value {
+<% for (const member of it.texts) { %>	case <%= member.name %>:
+		return <%= member.text %>, nil
+<% } %><% if (it.unknown) { %>	case <%= it.name %>UNKNOWN:
+		return "", &ValidationError{Field: <%= JSON.stringify(it.name) %>, Message: "UNKNOWN cannot be encoded"}
+<% } %>	}
+<% if (it.base === "string") { %>	return string(value), nil
+<% } else { %>	return EncodeParameter(<%= it.base %>(value))
+<% } %>}

@@ -83,10 +83,11 @@ elsewhere (other TypeScript targets: see `TargetContext.modelsOutputDir`).
 **Generics.** A template model is generated once as a generic class and every use passes its arguments:
 `model Page<T> { items: T[]; total: int64 }` → `data class Page<T>(val items: List<T>, val total: Long)` and
 `Page<Pet>` at each use (TypeScript: `interface Page<T>`, with zod a `PageSchema(itemSchema)` function). A
-template that needs per-instance models — a base model or `@discriminator`, HTTP metadata, `...T` spreads,
+template that needs per-instance models — a base model or `@discriminator`, HTTP metadata, `...T` spreads, a `Record` spread of a type parameter (`...Record<T>`),
 `@friendlyName`, or a type parameter inside an inline model or union (`meta: { first: T }`, `T | string`) —
 still gets one model per instance (`PagePet`), as does a template used directly as a variant of a
 discriminated union, and everything with `features.generics: false` (per template: `@meta("kotlin", #{ features: #{ generics: false } })`).
+Per-instance names join every argument level: `Page<Box<Cat>>` → `PageBoxCat`, `Maybe<Maybe<int32>>` → `MaybeMaybeInt32`.
 
 **Date and time.** With `date-time: java.time` (the default) `utcDateTime`, `offsetDateTime`, `plainDate`,
 `plainTime` and `duration` map to `java.time.Instant`, `OffsetDateTime`, `LocalDate`, `LocalTime` and
@@ -208,10 +209,21 @@ options:
 ```
 
 Generated files are under `models/`, `client/`, and `server/`, each with its own `go.mod`. The supported HTTP
-subset is one fixed-status JSON success response per operation, JSON request bodies, and scalar path, query,
-and header parameters. The client returns a typed success body or `HTTPError`; the server generates a `Service`
+subset is one fixed-status JSON success response per operation, JSON request bodies, and scalar, enum, and scalar-union path,
+query, and header parameters. The client returns a typed success body or `HTTPError`; the server generates a `Service`
 interface, `RegisterRoutes`, and `NewHandler`. Unsupported shapes, including auth, streaming, multipart, multiple success
-responses, response headers, collection parameters, union-typed parameters, and nested discriminated models, produce TypeSpec diagnostics.
+responses, response headers, collection and model parameters, and nested discriminated models, produce TypeSpec diagnostics.
+
+Models with additional properties (`...Record<T>`, `extends Record<T>`, `is Record<T>`) get an
+`AdditionalProperties map[string]T` field. Unknown JSON keys land there, it is written after the declared properties,
+and defaults, validation and strict-key checks apply to its values. Unions of scalars, literals and enums implement
+`encoding.TextMarshaler`, so they can be path, query or header parameters. Text resolves to the most specific variant:
+exact literal or enum value, then boolean, integer, float, other scalars, and finally string. Ranks follow the TypeSpec
+scalar (an `integer` variant only takes integral text), and integer, float and boolean variants need their exact text
+(no surrounding whitespace). Discriminated unions and unions with `bytes`, `unknown`, nullable, model, collection or
+(non-enum) union variants get no text codec and cannot be parameters. Closed enum parameters accept only a member's
+exact value text (`1`, not `01` or `+1`): unknown values get 400, or map to `UNKNOWN` with `features.enum-unknown`;
+`UNKNOWN` cannot be sent. Open enums (literals widened by `string`) accept any text.
 
 #### Configuration
 
@@ -388,7 +400,7 @@ and uses its middleware. Set `engine.UseEscapedPath = true` before registering r
 escaped patterns. The handlers decode path values once and preserve literal `+` and `%` characters. TypeSpec path
 parameters must occupy a whole path segment; incompatible routes produce diagnostics.
 
-Handlers decode scalar path/query/header parameters and JSON bodies, accept JSON media types including
+Handlers decode scalar, enum and scalar-union path/query/header parameters and JSON bodies, accept JSON media types including
 `application/*+json`, and return 400 for malformed or trailing JSON, 415 for a non-JSON body, and 413 for a
 body exceeding `max-body-size`. Optional empty bodies are accepted. Nonnullable bodies reject JSON `null`.
 TypeSpec constraints, required properties, and nullability are checked by default; unknown model properties

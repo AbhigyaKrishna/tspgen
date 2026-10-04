@@ -9,7 +9,7 @@ import type { GoOptions } from "../options.js";
 import { nullShape } from "../validation.js";
 import { unsupported } from "./diagnostics.js";
 import type { GoUnion, GoUnionTag, GoUnionVariant } from "./model.js";
-import { goType, goTypeName, pointer, typeIndex } from "./type-map.js";
+import { goType, goTypeName, isEnumUnion, pointer, typeIndex } from "./type-map.js";
 
 type ReserveName = (name: string, owner: string) => void;
 type Discriminated = ModelIR & { discriminator: NonNullable<ModelIR["discriminator"]> };
@@ -22,7 +22,7 @@ export function isDiscriminated(model: ModelIR): model is Discriminated {
 }
 
 /** Members every union struct declares besides its variant fields. */
-const UNION_MEMBERS = ["MarshalJSON", "UnmarshalJSON", "Validate"];
+const UNION_MEMBERS = ["MarshalJSON", "UnmarshalJSON", "MarshalText", "UnmarshalText", "Validate"];
 
 /** Discriminator values per derived model, in mapping order. */
 function hierarchyValues(model: Discriminated): Map<string, string[]> {
@@ -99,6 +99,34 @@ function jsonKind(ref: TypeRef, api: ApiIR, options: GoOptions): string {
   }
 }
 
+/** Parameter text rank and exact texts (see `GoUnionVariant.text`); rank 0 cannot be a parameter. */
+function textRank(ref: TypeRef, api: ApiIR, options: GoOptions): { text: number; members: string[] } {
+  switch (ref.kind) {
+    case "literal": return { text: 1, members: [String(ref.value)] };
+    case "scalar": {
+      // Rank by the TypeSpec std root: `integer` stays an integer as `json.Number`, decimal a number as a string.
+      if (ref.name === "bytes") return { text: 0, members: [] };
+      if (ref.name === "boolean") return { text: 2, members: [] };
+      if (/^(?:integer|safeint|u?int(?:8|16|32|64))$/.test(ref.name)) return { text: 3, members: [] };
+      if (/^(?:float(?:32|64)?|decimal(?:128)?|numeric)$/.test(ref.name)) return { text: 4, members: [] };
+      const text = goType({ ...ref, custom: undefined }, api, "", undefined, "", options).text;
+      if (text === "[]byte" || text === "any") return { text: 0, members: [] };
+      return { text: text === "string" ? 6 : 5, members: [] };
+    }
+    case "named": {
+      const decl = typeIndex(api).get(ref.id);
+      if (decl?.kind === "enum") return { text: 1, members: decl.members.map((member) => String(member.value)) };
+      if (decl && isEnumUnion(decl) && decl.kind === "union") {
+        // Open enums (literals widened by string) accept any text.
+        if (decl.variants.some((variant) => variant.type.kind === "scalar")) return { text: 6, members: [] };
+        return { text: 1, members: decl.variants.flatMap((variant) => variant.type.kind === "literal" ? [String(variant.type.value)] : []) };
+      }
+      return { text: 0, members: [] };
+    }
+    default: return { text: 0, members: [] };
+  }
+}
+
 function variantName(ref: TypeRef, api: ApiIR, options: GoOptions): string {
   switch (ref.kind) {
     case "named": {
@@ -128,6 +156,7 @@ function unionVariant(
     name, values,
     type: nilable ? resolved : pointer(resolved),
     kind: jsonKind(ref, api, options),
+    ...textRank(ref, api, options),
     ...(ref.kind === "literal" ? { literal: JSON.stringify(ref.value) } : {}),
     shape: nullShape(ref, api),
     ...(docs ? { docs } : {}),
@@ -184,6 +213,7 @@ export function unionDeclaration(
     : source.discriminator;
   return {
     kind: "union", id: source.id, name, namespace: source.namespace.join("."), variants, unknown, validation,
+    text: !discriminator && variants.length > 0 && variants.every((variant) => variant.text > 0),
     ...(discriminator ? { discriminator } : {}),
     ...(source.docs ? { docs: source.docs } : {}),
   };
