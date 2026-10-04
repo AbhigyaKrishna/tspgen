@@ -196,7 +196,8 @@ export interface GoWireOptions {
 }
 
 export function wireOptions(ctx: TargetContext, ir: GoIR): GoWireOptions {
-  const hasValidation = ir.options.validation || ir.declarations.some((decl) => decl.kind === "struct" && decl.validation);
+  const hasValidation = ir.options.validation
+    || ir.declarations.some((decl) => (decl.kind === "struct" || decl.kind === "union") && decl.validation);
   const hasDefaults = ir.options.defaults || ir.declarations.some((decl) => decl.kind === "struct" && decl.defaults);
   return {
     ignoreUnknown: ctx.features.values["ignore-unknown-keys"] === true,

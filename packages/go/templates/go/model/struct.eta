@@ -25,3 +25,18 @@ func (value *<%= it.instance %>) Validate() error {
 <% } %>	return nil
 }
 <% } %>
+<% if (it.tags.length) { %>
+var unionTags<%= it.name %> = []unionTag{<%= it.tagsLiteral %>}
+
+func (<%= it.instance %>) unionTags() []unionTag { return unionTags<%= it.name %> }
+
+func (value <%= it.instance %>) MarshalJSON() ([]byte, error) {
+	type plain <%= it.instance %>
+	return marshalTagged(plain(value), unionTags<%= it.name %>)
+}
+
+func (value *<%= it.instance %>) UnmarshalJSON(data []byte) error {
+	type plain <%= it.instance %>
+	return unmarshalTagged(data, (*plain)(value), unionTags<%= it.name %>)
+}
+<% } %>

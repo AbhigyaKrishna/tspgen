@@ -48,11 +48,20 @@ export function typeIndex(api: ApiIR): Map<string, TypeIR> {
   return index;
 }
 
-/** Unions of string or numeric literals generate Go enums; other unions are unsupported. */
-export function isLiteralUnion(type: TypeIR): boolean {
-  return type.kind === "union" && type.variants.every((variant) =>
-    variant.type.kind === "literal" && typeof variant.type.value !== "boolean",
-  );
+/**
+ * Unions of literals of one primitive type generate Go enums, as do string literals widened by `string`
+ * (open enums). Other unions generate variant structs.
+ */
+export function isEnumUnion(type: TypeIR): boolean {
+  if (type.kind !== "union" || type.discriminator || !type.variants.length) return false;
+  const values = type.variants.flatMap((variant) => variant.type.kind === "literal" ? [variant.type.value] : []);
+  if (!values.length || values.some((value) => typeof value === "boolean" || typeof value !== typeof values[0])) {
+    return false;
+  }
+  return type.variants.every((variant) => variant.type.kind === "literal" || (
+    typeof values[0] === "string" && variant.type.kind === "scalar" && variant.type.name === "string"
+    && !variant.type.custom && !variant.type.encoding
+  ));
 }
 
 export function pointer(type: GoType): GoType {
@@ -108,15 +117,16 @@ function resolveType(ref: TypeRef, ctx: TypeContext): GoType {
 function namedType(ref: Extract<TypeRef, { kind: "named" }>, ctx: TypeContext): GoType {
   const decl = ctx.types.get(ref.id);
   if (!decl) return unsupported(ctx.program, ctx.where, `unknown named type ${ref.id}`);
-  if (decl.kind === "union" && !isLiteralUnion(decl)) {
-    return unsupported(ctx.program, ctx.where, "unions are not supported yet");
+  if (decl.kind === "union" && decl.events) {
+    return unsupported(ctx.program, ctx.where, "event stream unions are only supported as SSE responses");
   }
   const args = ref.args?.map((arg) => resolveType(arg, ctx)) ?? [];
   const parameters = args.length ? `[${args.map((arg) => arg.text).join(", ")}]` : "";
   const name = `${ctx.qualifier}${goTypeName(decl, ctx.options)}${parameters}`;
+  const reference = decl.kind === "model" || (decl.kind === "union" && !isEnumUnion(decl));
   return {
-    text: decl.kind === "model" ? `*${name}` : name,
-    pointer: decl.kind === "model",
+    text: reference ? `*${name}` : name,
+    pointer: reference,
     imports: [...new Set(args.flatMap((arg) => arg.imports ?? []))],
   };
 }

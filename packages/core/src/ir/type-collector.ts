@@ -2,6 +2,7 @@ import {
   getDiscriminatedUnion,
   getDiscriminator,
   getEncode,
+  getEntityName,
   getFriendlyName,
   getMaxItems,
   getMaxLength,
@@ -16,10 +17,12 @@ import {
   isNullType,
   isRecordModelType,
   isTemplateDeclaration,
+  isTemplateInstance,
   navigateTypesInNamespace,
   NoTarget,
   resolveEncodedName,
   serializeValueAsJson,
+  type Entity,
   type Enum,
   type Model,
   type ModelProperty,
@@ -499,7 +502,7 @@ export class TypeCollector {
       const friendly = getFriendlyName(this.program, type);
       const name = friendly ?? type.name + templateArgsName(type);
       const namespace = type.namespace ? splitNamespace(getNamespaceFullName(type.namespace)) : [];
-      return { id: getTypeName(type), name, namespace };
+      return { id: typeId(type), name, namespace };
     }
     const base = pascal(hint);
     let name = base;
@@ -742,11 +745,11 @@ function defaultEventContentType(type: Type): string {
 function shape(type: Type): string {
   switch (type.kind) {
     case "Model":
-      return [...type.properties.values()].map((p) => `${p.name}${p.optional ? "?" : ""}:${getTypeName(p.type)}`).join(",");
+      return [...type.properties.values()].map((p) => `${p.name}${p.optional ? "?" : ""}:${typeId(p.type)}`).join(",");
     case "Enum":
       return [...type.members.values()].map((m) => `${m.name}=${m.value ?? ""}`).join(",");
     case "Union":
-      return [...type.variants.values()].map((v) => `${String(v.name)}:${getTypeName(v.type)}`).join(",");
+      return [...type.variants.values()].map((v) => `${String(v.name)}:${typeId(v.type)}`).join(",");
     default:
       return "";
   }
@@ -813,6 +816,41 @@ function templateArgsName(type: Model | Union | Enum): string {
   return args
     .map((a) => (a && typeof a === "object" && "name" in a && typeof a.name === "string" ? pascal(a.name) : ""))
     .join("");
+}
+
+/**
+ * `getTypeName`, except that template instances of unions keep their arguments (`S.Maybe<int32>`) — the compiler
+ * prints a union instance as its bare name, so instances would share an id — including when nested in another
+ * instance's arguments (`S.Maybe<S.Maybe<int32>>`, `S.Maybe<S.Box<S.Maybe<int32>>>`). Values print as in
+ * `getEntityName`. Ids of everything else (non-template types, model instances without union-instance arguments)
+ * are exactly `getTypeName`'s.
+ */
+function typeId(entity: Entity): string {
+  if (!isType(entity)) return getEntityName(entity);
+  switch (entity.kind) {
+    case "Union":
+      if (entity.name && isTemplateInstance(entity)) return `${getTypeName(entity)}${templateArgsId(entity.templateMapper.args)}`;
+      if (!entity.name && entity.expression) return [...entity.variants.values()].map((v) => typeId(v.type)).join(" | ");
+      return getTypeName(entity);
+    case "Model":
+      if (isArrayModelType(entity) && entity.name === "Array") return `${typeId(entity.indexer.value)}[]`;
+      if (entity.name && isTemplateInstance(entity)) {
+        // The compiler prints `<name><args>` with args via `getEntityName`: swap that suffix for recursive ids.
+        const args = entity.templateMapper.args;
+        const name = getTypeName(entity);
+        const suffix = `<${args.map((a) => getEntityName(a)).join(", ")}>`;
+        if (name.endsWith(suffix)) return name.slice(0, -suffix.length) + templateArgsId(args);
+      }
+      return getTypeName(entity);
+    case "Tuple":
+      return `[${entity.values.map(typeId).join(", ")}]`;
+    default:
+      return getTypeName(entity);
+  }
+}
+
+function templateArgsId(args: readonly Entity[]): string {
+  return args.length ? `<${args.map(typeId).join(", ")}>` : "";
 }
 
 export function splitNamespace(fullName: string): string[] {

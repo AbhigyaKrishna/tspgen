@@ -29,6 +29,11 @@ model Binding {
   message: string;
 }
 
+@discriminator("kind")
+model Toy { kind: string; @minLength(2) label: string; }
+model Ball extends Toy { kind: "ball"; bounce?: int32 = 3; }
+model Kite extends Toy { kind: "kite"; length: float64; }
+
 @route("/pets")
 interface Pets {
   @get list(@minValue(1) @query limit?: int32): Page<Pet>;
@@ -44,4 +49,9 @@ interface Pets {
 
   @post @route("/labels") labels(@body labels: string[]): string[];
   @get @route("/failure") fail(): Pet;
+}
+
+@route("/toys")
+interface Toys {
+  @post echo(@body toy: Toy): Toy;
 }

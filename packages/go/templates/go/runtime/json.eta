@@ -1,7 +1,10 @@
-func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool, shape string) error {
+func applyJSON(value reflect.Value, raw json.RawMessage, strict, validate, defaults bool, shape string) error {
 	value = dereference(value)
 	if absent(value) {
 		return nil
+	}
+	if info, ok := asUnion(value); ok {
+		return applyUnion(value, info, raw, strict, validate, defaults)
 	}
 	switch value.Kind() {
 	case reflect.Struct:
@@ -44,9 +47,14 @@ func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool
 				}
 			}
 			if present {
-				if err := applyJSON(value.Field(i), bytes.TrimSpace(item), validate, defaults, fieldShape); err != nil {
+				if err := applyJSON(value.Field(i), bytes.TrimSpace(item), strict, validate, defaults, fieldShape); err != nil {
 					return err
 				}
+			}
+		}
+		if strict && fields != nil {
+			if err := checkUnknownKeys(value, fields); err != nil {
+				return err
 			}
 		}
 	case reflect.Slice, reflect.Array:
@@ -60,7 +68,7 @@ func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool
 			}
 		}
 		for i := 0; i < value.Len() && i < len(items); i++ {
-			if err := applyJSON(value.Index(i), items[i], validate, defaults, collectionItemShape(shape)); err != nil {
+			if err := applyJSON(value.Index(i), items[i], strict, validate, defaults, collectionItemShape(shape)); err != nil {
 				return err
 			}
 		}
@@ -75,7 +83,7 @@ func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool
 		for iter.Next() {
 			item := reflect.New(iter.Value().Type()).Elem()
 			item.Set(iter.Value())
-			if err := applyJSON(item, items[fmt.Sprint(iter.Key().Interface())], validate, defaults, collectionItemShape(shape)); err != nil {
+			if err := applyJSON(item, items[fmt.Sprint(iter.Key().Interface())], strict, validate, defaults, collectionItemShape(shape)); err != nil {
 				return err
 			}
 			value.SetMapIndex(iter.Key(), item)
@@ -85,7 +93,7 @@ func applyJSON(value reflect.Value, raw json.RawMessage, validate, defaults bool
 }
 
 // ApplyDefaults initializes declared defaults on a newly constructed model.
-func ApplyDefaults(input any) error { return applyJSON(reflect.ValueOf(input), nil, false, true, "_") }
+func ApplyDefaults(input any) error { return applyJSON(reflect.ValueOf(input), nil, false, false, true, "_") }
 
 // DecodeJSON accepts exactly one JSON value, preserving numeric precision.
 func DecodeJSON(data []byte, target any, ignoreUnknown, validate, defaults bool, shape ...string) error {
@@ -113,7 +121,7 @@ func DecodeJSON(data []byte, target any, ignoreUnknown, validate, defaults bool,
 	if len(shape) > 0 {
 		rootShape = shape[0]
 	}
-	if err := applyJSON(reflect.ValueOf(target), bytes.TrimSpace(data), validate, defaults, rootShape); err != nil {
+	if err := applyJSON(reflect.ValueOf(target), bytes.TrimSpace(data), !ignoreUnknown, validate, defaults, rootShape); err != nil {
 		return err
 	}
 	if validate {
@@ -126,6 +134,9 @@ func encodeValue(value reflect.Value, raw json.RawMessage, encodeDefaults, expli
 	value = dereference(value)
 	if absent(value) {
 		return raw, nil
+	}
+	if info, ok := asUnion(value); ok {
+		return encodeUnion(value, info, raw, encodeDefaults, explicitNulls)
 	}
 	switch value.Kind() {
 	case reflect.Struct:

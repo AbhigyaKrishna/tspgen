@@ -18,6 +18,14 @@ TypeScript plans declarations and wire behavior; templates contain the Go source
 | Model and server source | `templates/go/model/`, `templates/go/server/` |
 | JSON, validation, and parameter runtime | `templates/go/runtime/` |
 | net/http client planning and source | `../go-nethttp-client/src/plan.ts`, `../go-nethttp-client/templates/nethttp-client/` |
+| Unions and `@discriminator` hierarchies (variant structs, variant discriminator codecs) | `src/transform/unions.ts`, `templates/go/model/union.eta`, `templates/go/runtime/unions.eta` |
+
+Unions generate variant-pointer structs (`Pet{Cat *Cat; Dog *Dog}`, referenced as `*Pet`). Discriminated variants
+dispatch on the discriminator; discriminated variant models (envelope `none` and `@discriminator` hierarchies) drop the
+discriminator field and write/check it in their own JSON methods. Untagged unions try variants of the matching JSON kind in declaration order: exact matches
+(no unknown keys, required properties present), then matches with their required properties, then any variant that
+decodes unless `features.enum-unknown` keeps unmatched payloads in `Unknown`. The JSON walkers recurse into the set
+variant, so defaults, validation, `encode-defaults`, `explicit-nulls` and `ignore-unknown-keys` apply inside unions.
 
 For an HTTP target, reuse `httpOperationPlan` for request fields, wire types, validation calls, and declared
 errors. Keep router-specific APIs in the transport description and templates. `goSourceFile` composes

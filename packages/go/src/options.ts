@@ -49,7 +49,8 @@ export const goOptionsSchemaProperties = {
     type: "object",
     additionalProperties: { type: "string", pattern: "^[A-Z][A-Za-z0-9_]*$" },
     default: {},
-    description: "TypeSpec type id (e.g. Shop.Pet), or unqualified type name, to exported Go name. Qualified entries take precedence.",
+    description:
+      "TypeSpec type id (e.g. Shop.Pet, or Shop.Maybe<int32> for a generic union instance), or unqualified type name, to exported Go name. Qualified entries take precedence.",
   },
   "date-time": {
     type: "string",

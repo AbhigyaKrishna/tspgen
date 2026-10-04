@@ -52,7 +52,7 @@ function valueTags(ref: TypeRef, constraints: ConstraintsIR, ir: GoIR): string[]
     tags.push(...equalityTags([ref.value]));
   } else if (ref.kind === "named") {
     const declaration = ir.declarations.find((decl) => decl.id === ref.id);
-    if (declaration?.kind === "enum") {
+    if (declaration?.kind === "enum" && !declaration.open) {
       const values = declaration.members.map((member) => member.value);
       if (declaration.unknown) values.push("\u0000tspgen.UNKNOWN");
       tags.push(...equalityTags(values));

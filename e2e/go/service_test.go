@@ -132,3 +132,7 @@ func samplePet(id int64) *models.Pet {
 		BornAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}
 }
+
+func (*petService) ToysEcho(_ context.Context, toy *models.Toy) (*models.Toy, error) {
+	return toy, nil
+}

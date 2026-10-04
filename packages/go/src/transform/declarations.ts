@@ -7,9 +7,10 @@ import { reportDiagnostic } from "../lib.js";
 import { goName, validJSONTagName, validModule, validPackage } from "../naming.js";
 import { resolveGoOptions, type GoOptions } from "../options.js";
 import { MINIMUM_GO_VERSION, supportedGoVersion } from "../version.js";
-import type { GoDecl, GoEnum, GoField, GoIR, GoStruct } from "./model.js";
-import { goType, goTypeName, isLiteralUnion, pointer, typeIndex } from "./type-map.js";
+import type { GoDecl, GoEnum, GoField, GoIR, GoStruct, GoUnionTag } from "./model.js";
+import { goType, goTypeName, isEnumUnion, pointer, typeIndex } from "./type-map.js";
 import { unsupported } from "./diagnostics.js";
+import { discriminatorTags, isDiscriminated, unionDeclaration } from "./unions.js";
 
 const MODEL_RUNTIME_NAMES = [
   "ValidationError", "PropertyConstraints", "DecodeJSON", "EncodeJSON", "DecodeParameter",
@@ -63,14 +64,20 @@ function modelField(property: PropertyIR, api: ApiIR, program: Program, owner: s
   };
 }
 
-function modelFields(model: ModelIR, api: ApiIR, program: Program, options: GoOptions, validation: boolean): GoField[] {
+function modelFields(
+  model: ModelIR, api: ApiIR, program: Program, options: GoOptions, validation: boolean, tags: GoUnionTag[],
+): GoField[] {
   const properties = new Map<string, PropertyIR>();
   for (const ancestor of modelAncestors(model, typeIndex(api))) {
     for (const property of ancestor.properties) properties.set(property.name, property);
   }
-  const fields = [...properties.values()].map((property) => modelField(property, api, program, model.id, options));
+  // Discriminators are written by the tagged codec, not stored.
+  const fields = [...properties.values()]
+    .filter((property) => !tags.some((tag) => tag.name === property.name || tag.property === property.wireName))
+    .map((property) => modelField(property, api, program, model.id, options));
   const owners = new Map<string, string>();
   if (validation) owners.set("Validate", `${model.id} validation method`);
+  if (tags.length) for (const method of ["MarshalJSON", "UnmarshalJSON"]) owners.set(method, `${model.id} tagged codec`);
   for (const field of fields) {
     const first = owners.get(field.name);
     const owner = `${model.id}.${field.wireName}`;
@@ -83,18 +90,19 @@ function modelFields(model: ModelIR, api: ApiIR, program: Program, options: GoOp
   return fields;
 }
 
-function modelDeclaration(model: ModelIR, api: ApiIR, program: Program, options: GoOptions, reserve: ReserveName): GoStruct {
+function modelDeclaration(
+  model: ModelIR, api: ApiIR, program: Program, options: GoOptions, reserve: ReserveName, tags: GoUnionTag[],
+): GoStruct {
   const name = goTypeName(model, options);
   const meta = resolveMeta(declarationScopes(model.decorators, model.namespaceDecorators), "go");
   const validation = options.features?.at("validation", meta, "model") ?? options.validation;
   const validator = options.features?.at("validator", meta, "model") ?? options.validator;
   const defaults = options.features?.at("defaults", meta, "model") ?? options.defaults;
-  if (model.discriminator) unsupported(program, model.id, "discriminated models are not supported yet");
   if (model.additionalProperties) unsupported(program, model.id, "additional properties are not supported yet");
-  const fields = modelFields(model, api, program, options, validation);
+  const fields = modelFields(model, api, program, options, validation, tags);
   if (defaults) reserve(`New${name}`, `${model.id} constructor`);
   return {
-    kind: "struct", id: model.id, name, namespace: model.namespace.join("."), fields,
+    kind: "struct", id: model.id, name, namespace: model.namespace.join("."), fields, tags,
     typeParameters: model.typeParameters?.map((parameter) => goName(parameter, options.naming)) ?? [],
     validation, validator, defaults,
     ...(model.docs ? { docs: model.docs } : {}),
@@ -105,7 +113,7 @@ function enumMembers(source: EnumSource, options: GoOptions): GoEnum["members"] 
   if (source.kind === "enum") {
     return source.members.map((member) => ({ name: goName(member.name, options.naming), value: member.value }));
   }
-  return source.variants.map((variant, index) => ({
+  return source.variants.filter((variant) => variant.type.kind === "literal").map((variant, index) => ({
     name: goName(variant.name ?? String(index), options.naming),
     value: (variant.type as Extract<TypeRef, { kind: "literal" }>).value as string | number,
   }));
@@ -129,10 +137,11 @@ function enumDeclaration(source: EnumSource, program: Program, options: GoOption
   }
   const base = enumBase(members);
   const meta = resolveMeta(declarationScopes(source.decorators, source.namespaceDecorators), "go");
-  const unknown = base === "string" && (options.features?.at("enum-unknown", meta, source.kind) ?? options.enumUnknown);
+  const open = source.kind === "union" && source.variants.some((variant) => variant.type.kind === "scalar");
+  const unknown = !open && base === "string" && (options.features?.at("enum-unknown", meta, source.kind) ?? options.enumUnknown);
   if (unknown) reserve(`${name}UNKNOWN`, `${source.id} unknown sentinel`);
   return {
-    kind: "enum", id: source.id, name, namespace: source.namespace.join("."), base, members, unknown,
+    kind: "enum", id: source.id, name, namespace: source.namespace.join("."), base, members, open, unknown,
     ...(source.docs ? { docs: source.docs } : {}),
   };
 }
@@ -173,14 +182,19 @@ export function transformToGo(
   validateModelsConfiguration(program, packageName, module, options);
   const reserve = declarationNames(program);
   const declarations: GoDecl[] = [];
+  const tags = discriminatorTags(api, program);
   for (const source of api.types) {
+    // @events unions only type SSE streams, which Go targets reject as operations.
+    if (source.kind === "union" && source.events) continue;
     reserve(goTypeName(source, options), source.id);
-    if (source.kind === "model") {
-      declarations.push(modelDeclaration(source, api, program, options, reserve));
-    } else if (source.kind === "enum" || isLiteralUnion(source)) {
+    if (source.kind === "model" && isDiscriminated(source)) {
+      declarations.push(unionDeclaration(source, api, program, options, reserve));
+    } else if (source.kind === "model") {
+      declarations.push(modelDeclaration(source, api, program, options, reserve, tags.get(source.id) ?? []));
+    } else if (source.kind === "enum" || isEnumUnion(source)) {
       declarations.push(enumDeclaration(source, program, options, reserve));
     } else {
-      unsupported(program, source.id, "unions are not supported yet");
+      declarations.push(unionDeclaration(source, api, program, options, reserve));
     }
   }
   declarations.push(...scalarAliases(api, program, options, reserve));

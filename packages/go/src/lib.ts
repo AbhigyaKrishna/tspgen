@@ -33,7 +33,7 @@ export const goFeatures = defineFeatures({
   "enum-unknown": {
     default: false,
     override: "declaration",
-    description: "String enums decode unknown wire values to an UNKNOWN sentinel accepted by validation. Encoding the sentinel fails.",
+    description: "String enums decode unknown wire values to an UNKNOWN sentinel accepted by validation (encoding it fails). Unions keep payloads matching no variant in an Unknown field, re-encoded unchanged and rejected by validation.",
   },
   "go-mod": {
     default: true,
