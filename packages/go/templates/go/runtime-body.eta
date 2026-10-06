@@ -1,0 +1,6 @@
+<%~ include("go/runtime/validation", it) %>
+<%~ include("go/runtime/shapes", it) %>
+<%~ include("go/runtime/json", it) %>
+<%~ include("go/runtime/unions", it) %>
+<%~ include("go/runtime/objects", it) %>
+<%~ include("go/runtime/parameters", it) %>

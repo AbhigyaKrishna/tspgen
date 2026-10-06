@@ -1,0 +1,10 @@
+module <%= it.module %>
+
+go <%= it.goVersion ?? "1.25.0" %>
+
+require (
+	github.com/gin-gonic/gin v1.12.0
+	<%= it.modelsModule %> <%= it.modelsVersion %>
+)
+
+replace <%= it.modelsModule %> => <%= it.modelsDir %>

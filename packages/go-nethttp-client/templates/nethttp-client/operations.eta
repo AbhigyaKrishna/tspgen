@@ -1,0 +1,9 @@
+<% for (const op of it.operations) { %><%~ include("go/http/request", { ...it, request: op.request }) %>
+
+<% } %>
+<% for (const error of it.errors) { %><%~ include("go/http/error", { ...it, error }) %>
+
+<% } %>
+<% for (const op of it.operations) { %><%~ include("nethttp-client/method", { ...it, op }) %>
+
+<% } %>

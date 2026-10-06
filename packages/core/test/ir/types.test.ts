@@ -283,6 +283,25 @@ describe("type IR", () => {
     ]);
   });
 
+  it("keeps templates per-instance when they spread a Record of a type parameter", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      model Bag<T> { v: T; ...Record<T>; }
+      model Tagged<T> { v: T; ...Record<string>; }
+      model Use { b: Bag<string>; t: Tagged<int32> }
+    `);
+    expect(ir.types.some((t) => t.name === "Bag")).toBe(false);
+    expect(ir.types.find((t) => t.name === "BagString")).toMatchObject({
+      kind: "model",
+      additionalProperties: { kind: "scalar", name: "string" },
+    });
+    expect(ir.types.find((t) => t.name === "Tagged")).toMatchObject({
+      kind: "model",
+      typeParameters: ["T"],
+      additionalProperties: { kind: "scalar", name: "string" },
+    });
+  });
+
   it("keeps templates per-instance when a type parameter appears where no generic class can hold it", async () => {
     const ir = await build(`
       @service namespace Pets;
@@ -336,6 +355,69 @@ describe("type IR", () => {
     expect(ir.types.some((t) => t.kind === "model" && t.typeParameters)).toBe(false);
   });
 
+  it("keeps generic union instances apart, also when nested in template arguments", async () => {
+    const ir = await build(`
+      @service namespace S;
+      union Maybe<T> { T, string }
+      union Plain { int32, string }
+      model Box<T> { v: T }
+      model Holder {
+        a: Maybe<Maybe<int32>>;
+        b: Maybe<Maybe<boolean>>;
+        c: Maybe<Box<Maybe<int32>>>;
+        d: Maybe<Box<Maybe<boolean>>>;
+        p: Plain;
+      }
+    `);
+    expect(ir.types.map((t) => t.id).filter((id) => id.startsWith("S.Maybe") || id.startsWith("S.Box"))).toEqual(
+      expect.arrayContaining([
+        "S.Maybe<int32>",
+        "S.Maybe<boolean>",
+        "S.Maybe<S.Maybe<int32>>",
+        "S.Maybe<S.Maybe<boolean>>",
+        "S.Maybe<S.Box<S.Maybe<int32>>>",
+        "S.Maybe<S.Box<S.Maybe<boolean>>>",
+      ]),
+    );
+    const variants = (id: string) => {
+      const union = find(ir, id);
+      if (union.kind !== "union") throw new Error("expected union");
+      return union.variants.map((v) => v.type);
+    };
+    expect(variants("S.Maybe<S.Maybe<int32>>")[0]).toEqual({ kind: "named", id: "S.Maybe<int32>" });
+    expect(variants("S.Maybe<S.Maybe<boolean>>")[0]).toEqual({ kind: "named", id: "S.Maybe<boolean>" });
+    expect(variants("S.Maybe<int32>")[0]).toEqual({ kind: "scalar", name: "int32" });
+    expect(variants("S.Maybe<boolean>")[0]).toEqual({ kind: "scalar", name: "boolean" });
+    expect(JSON.stringify(variants("S.Maybe<S.Box<S.Maybe<boolean>>>")[0])).toContain("S.Maybe<boolean>");
+    expect(JSON.stringify(variants("S.Maybe<S.Box<S.Maybe<int32>>>")[0])).toContain("S.Maybe<int32>");
+    const holder = find(ir, "S.Holder");
+    if (holder.kind !== "model") throw new Error("expected model");
+    expect(holder.properties.map((p) => p.type)).toEqual([
+      { kind: "named", id: "S.Maybe<S.Maybe<int32>>" },
+      { kind: "named", id: "S.Maybe<S.Maybe<boolean>>" },
+      { kind: "named", id: "S.Maybe<S.Box<S.Maybe<int32>>>" },
+      { kind: "named", id: "S.Maybe<S.Box<S.Maybe<boolean>>>" },
+      { kind: "named", id: "S.Plain" },
+    ]);
+    expect(find(ir, "S.Plain")).toMatchObject({ kind: "union", name: "Plain" });
+
+    const perInstance = await build(
+      `
+      @service namespace S;
+      union Maybe<T> { T, string }
+      model Box<T> { v: T }
+      model Holder { c: Box<Maybe<int32>>; d: Box<Maybe<boolean>>; }
+    `,
+      { generics: false },
+    );
+    expect(find(perInstance, "S.Box<S.Maybe<int32>>")).toMatchObject({
+      properties: [{ type: { kind: "named", id: "S.Maybe<int32>" } }],
+    });
+    expect(find(perInstance, "S.Box<S.Maybe<boolean>>")).toMatchObject({
+      properties: [{ type: { kind: "named", id: "S.Maybe<boolean>" } }],
+    });
+  });
+
   it("captures custom decorator applications as plain data", async () => {
     const tester = Tester.files({
       "acme.js": mockFile.js({ $decorators: { Acme: { tag: () => {} } } }),
@@ -351,5 +433,23 @@ describe("type IR", () => {
     if (m.kind !== "model") throw new Error("expected model");
     expect(m.decorators).toEqual({ "Acme.tag": [["x"]] });
     expect(m.properties[0].decorators["Acme.tag"]).toHaveLength(2);
+  });
+
+  it("names nested template instances from every argument level", async () => {
+    const ir = await build(
+      `
+      @service namespace S;
+      union Maybe<T> { v: T, n: null }
+      model Box<T> { item: T }
+      model Holder { a: Maybe<Maybe<int32>>; b: Maybe<Maybe<string>>; c: Box<Box<int32>>; d: Box<Record<string>>; }
+      @route("/x") op read(): Holder;
+    `,
+      { generics: false },
+    );
+    expect(find(ir, "S.Maybe<S.Maybe<int32>>").name).toBe("MaybeMaybeInt32");
+    expect(find(ir, "S.Maybe<S.Maybe<string>>").name).toBe("MaybeMaybeString");
+    expect(find(ir, "S.Box<S.Box<int32>>").name).toBe("BoxBoxInt32");
+    expect(find(ir, "S.Box<int32>").name).toBe("BoxInt32");
+    expect(find(ir, "S.Box<Record<string>>").name).toBe("BoxRecordString");
   });
 });

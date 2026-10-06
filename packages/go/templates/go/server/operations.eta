@@ -1,0 +1,13 @@
+<% for (const op of it.operations) { %><%~ include("go/http/request", { ...it, request: op.request }) %>
+
+<% } %>
+<% for (const error of it.errors) { %><%~ include("go/http/error", { ...it, error }) %>
+
+<% } %>type <%= it.service %> interface {
+<% for (const op of it.operations) { %>	<%= op.name %>(<%= op.parameters.map(param => `${param.name} ${param.type}`).join(", ") %>) (<% if (op.responseType) { %><%= op.responseType %>, <% } %>error)
+<% } %>}
+
+<% if (it.transport.framework === "gin") { %>// Configure the engine with UseEscapedPath = true before mounting these routes.
+<% } %>func <%= it.register %>(router <%= it.transport.routerType %>, service <%= it.service %>) {
+<% for (const op of it.operations) { %><%~ include(it.transport.handlerTemplate, { ...it, op }) %>
+<% } %>}

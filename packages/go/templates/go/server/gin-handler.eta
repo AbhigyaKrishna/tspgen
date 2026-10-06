@@ -1,0 +1,2 @@
+	router.Handle(<%= JSON.stringify(it.op.verb) %>, escapedRoute(<%= JSON.stringify(it.op.path) %>), func(c *gin.Context) {
+<%~ include("go/server/handler-body", it) %>	})

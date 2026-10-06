@@ -1,0 +1,27 @@
+<% for (const line of it.docs) { %>// <%= line %>
+<% } %>type <%= it.name %> struct {
+<% for (const variant of it.variants) { %><% for (const line of variant.docs) { %>	// <%= line %>
+<% } %>	<%= variant.name %> <%= variant.type.text %>
+<% } %>
+<% if (it.unknown) { %>	// Unknown holds a payload that matches no declared variant; it is re-encoded unchanged.
+	Unknown json.RawMessage
+<% } %>}
+
+var unionInfo<%= it.name %> = &unionInfo{<%= it.info %>}
+<% for (const variant of it.variants) { %>
+func New<%= it.name %><%= variant.name %>(value <%= variant.type.text %>) *<%= it.name %> {
+	return &<%= it.name %>{<%= variant.name %>: value}
+}
+<% } %>
+func (<%= it.name %>) unionInfo() *unionInfo { return unionInfo<%= it.name %> }
+
+func (value <%= it.name %>) MarshalJSON() ([]byte, error) { return marshalUnion(value) }
+
+func (value *<%= it.name %>) UnmarshalJSON(data []byte) error { return unmarshalUnion(value, data) }
+<% if (it.text) { %>
+func (value <%= it.name %>) MarshalText() ([]byte, error) { return marshalUnionText(value) }
+
+func (value *<%= it.name %>) UnmarshalText(data []byte) error { return unmarshalUnionText(value, string(data)) }
+<% } %><% if (it.validation) { %>
+func (value *<%= it.name %>) Validate() error { return validateUnion(value) }
+<% } %>

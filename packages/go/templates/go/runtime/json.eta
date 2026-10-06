@@ -1,0 +1,240 @@
+func applyJSON(value reflect.Value, raw json.RawMessage, strict, validate, defaults bool, shape string) error {
+	value = dereference(value)
+	if absent(value) {
+		return nil
+	}
+	if info, ok := asUnion(value); ok {
+		return applyUnion(value, info, raw, strict, validate, defaults)
+	}
+	switch value.Kind() {
+	case reflect.Struct:
+		arguments, err := shapeArguments(shape)
+		if err != nil {
+			return err
+		}
+		var fields map[string]json.RawMessage
+		if len(raw) > 0 && raw[0] == '{' {
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				return err
+			}
+		}
+		for i := 0; i < value.NumField(); i++ {
+			field := value.Type().Field(i)
+			if field.PkgPath != "" || field.Tag.Get("tsp") == "" {
+				continue
+			}
+			if strings.HasPrefix(field.Tag.Get("tsp"), "additional,") {
+				continue
+			}
+			name := strings.Split(field.Tag.Get("json"), ",")[0]
+			item, present := fields[name]
+			fallback := field.Tag.Get("default")
+			if !present && defaults && fallback != "" && value.Field(i).CanAddr() {
+				if err := json.Unmarshal([]byte(fallback), value.Field(i).Addr().Interface()); err != nil {
+					return err
+				}
+				item, present = json.RawMessage(fallback), true
+			}
+			parts := strings.SplitN(field.Tag.Get("tsp"), ",", 2)
+			fieldShape, err := propertyShape(field, arguments)
+			if err != nil {
+				return err
+			}
+			check := validate && field.Tag.Get("tspvalidate") != "false"
+			if check && parts[0] == "required" && !present {
+				return &ValidationError{Field: name, Message: "required property is missing"}
+			}
+			if check && present {
+				if err := checkJSONShape(name, fieldShape, item); err != nil {
+					return err
+				}
+			}
+			if present {
+				if err := applyJSON(value.Field(i), bytes.TrimSpace(item), strict, validate, defaults, fieldShape); err != nil {
+					return err
+				}
+			}
+		}
+		if index := additionalField(value.Type()); index >= 0 && fields != nil {
+			if err := applyAdditional(value, index, fields, strict, validate, defaults, arguments); err != nil {
+				return err
+			}
+		}
+		if strict && fields != nil {
+			if err := checkUnknownKeys(value, fields); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		var items []json.RawMessage
+		if len(raw) > 0 && raw[0] != '[' {
+			return nil
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &items); err != nil {
+				return err
+			}
+		}
+		for i := 0; i < value.Len() && i < len(items); i++ {
+			if err := applyJSON(value.Index(i), items[i], strict, validate, defaults, collectionItemShape(shape)); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		var items map[string]json.RawMessage
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &items); err != nil {
+				return err
+			}
+		}
+		iter := value.MapRange()
+		for iter.Next() {
+			item := reflect.New(iter.Value().Type()).Elem()
+			item.Set(iter.Value())
+			if err := applyJSON(item, items[fmt.Sprint(iter.Key().Interface())], strict, validate, defaults, collectionItemShape(shape)); err != nil {
+				return err
+			}
+			value.SetMapIndex(iter.Key(), item)
+		}
+	}
+	return nil
+}
+
+// ApplyDefaults initializes declared defaults on a newly constructed model.
+func ApplyDefaults(input any) error { return applyJSON(reflect.ValueOf(input), nil, false, false, true, "_") }
+
+// DecodeJSON accepts exactly one JSON value, preserving numeric precision.
+func DecodeJSON(data []byte, target any, ignoreUnknown, validate, defaults bool, shape ...string) error {
+	if validate && len(shape) > 0 {
+		if err := checkJSONShape("body", shape[0], data); err != nil {
+			return err
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if !ignoreUnknown {
+		decoder.DisallowUnknownFields()
+	}
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return errors.New("trailing JSON value")
+	}
+	rootShape := "_"
+	if len(shape) > 0 {
+		rootShape = shape[0]
+	}
+	if err := applyJSON(reflect.ValueOf(target), bytes.TrimSpace(data), !ignoreUnknown, validate, defaults, rootShape); err != nil {
+		return err
+	}
+	if validate {
+		return ValidateValue(target)
+	}
+	return nil
+}
+
+func encodeValue(value reflect.Value, raw json.RawMessage, encodeDefaults, explicitNulls bool) (json.RawMessage, error) {
+	value = dereference(value)
+	if absent(value) {
+		return raw, nil
+	}
+	if info, ok := asUnion(value); ok {
+		return encodeUnion(value, info, raw, encodeDefaults, explicitNulls)
+	}
+	switch value.Kind() {
+	case reflect.Struct:
+		if len(raw) == 0 || raw[0] != '{' {
+			return raw, nil
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, err
+		}
+		for i := 0; i < value.NumField(); i++ {
+			field := value.Type().Field(i)
+			if field.PkgPath != "" || field.Tag.Get("tsp") == "" {
+				continue
+			}
+			if strings.HasPrefix(field.Tag.Get("tsp"), "additional,") {
+				continue
+			}
+			name := strings.Split(field.Tag.Get("json"), ",")[0]
+			item, present := fields[name]
+			if !present && encodeDefaults {
+				var err error
+				item, err = json.Marshal(value.Field(i).Interface())
+				if err != nil {
+					return nil, err
+				}
+				present = true
+			}
+			if !present {
+				continue
+			}
+			if (!explicitNulls && bytes.Equal(item, []byte("null"))) || (!encodeDefaults && strings.HasPrefix(field.Tag.Get("tsp"), "optional,") && field.Tag.Get("default") != "" && bytes.Equal(item, []byte(field.Tag.Get("default")))) {
+				delete(fields, name)
+				continue
+			}
+			encoded, err := encodeValue(value.Field(i), item, encodeDefaults, explicitNulls)
+			if err != nil {
+				return nil, err
+			}
+			fields[name] = encoded
+		}
+		if index := additionalField(value.Type()); index >= 0 {
+			if err := encodeAdditional(value, index, fields, encodeDefaults, explicitNulls); err != nil {
+				return nil, err
+			}
+		}
+		return json.Marshal(fields)
+	case reflect.Slice, reflect.Array:
+		if len(raw) == 0 || raw[0] != '[' {
+			return raw, nil
+		}
+		var items []json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return nil, err
+		}
+		for i := range items {
+			encoded, err := encodeValue(value.Index(i), items[i], encodeDefaults, explicitNulls)
+			if err != nil {
+				return nil, err
+			}
+			items[i] = encoded
+		}
+		return json.Marshal(items)
+	case reflect.Map:
+		if len(raw) == 0 || raw[0] != '{' {
+			return raw, nil
+		}
+		var items map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return nil, err
+		}
+		iter := value.MapRange()
+		for iter.Next() {
+			name := fmt.Sprint(iter.Key().Interface())
+			encoded, err := encodeValue(iter.Value(), items[name], encodeDefaults, explicitNulls)
+			if err != nil {
+				return nil, err
+			}
+			items[name] = encoded
+		}
+		return json.Marshal(items)
+	}
+	return raw, nil
+}
+
+// EncodeJSON applies target JSON policies to generated model properties.
+func EncodeJSON(input any, encodeDefaults, explicitNulls bool) ([]byte, error) {
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	return encodeValue(reflect.ValueOf(input), raw, encodeDefaults, explicitNulls)
+}

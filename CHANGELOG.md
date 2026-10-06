@@ -3,6 +3,18 @@
 All packages (`@abhigyakrishna/tspgen-core`, `-kotlin`, `-kotlin-ktor-server`, `-kotlin-ktor-client`,
 `-typescript`, `-ts-nextjs-client`) are released together with the same version.
 
+## Unreleased
+
+### Changed
+
+- **Breaking** — Core: per-instance names of nested template instances (`features.generics: false`, or templates that
+  cannot be generic) now include every argument level: `Page<Box<Cat>>` → `PageBoxCat` (was `PageBox`),
+  `Page<Pet[]>` → `PageArrayPet`, `Box<Record<string>>` → `BoxRecordString`. This fixes collisions such as
+  `Page<Pet[]>` and `Page<Tag[]>` both being named `PageArray`; generated class names and files change accordingly.
+- **Breaking** — Core: templates spreading a `Record<T>` of a type parameter (`model Bag<T> { ...Record<T> }`) are
+  generated per instance (`Bag<string>` → `BagString`) instead of as one generic model, so each instance keeps its
+  additional properties.
+
 ## 0.2.1 — 2026-09-28
 
 ### Added

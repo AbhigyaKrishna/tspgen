@@ -1,0 +1,28 @@
+<% const op = it.op; const transport = it.transport; %>
+<% if (op.declaresRequest) { %>		var request <%= op.request.name %>
+<% } %>
+<% for (const param of op.params) { %><%~ include("go/server/parameter", { ...it, param }) %>
+<% } %>
+<% for (const param of op.params) { %>
+<% if (it.wire.validate || param.literal) { %>		if err := <%= param.check %>; err != nil {
+			<%= transport.reject %>(<%= transport.response %>, http.StatusBadRequest, <%= JSON.stringify(`invalid ${param.location} parameter`) %>)
+			return
+		}
+<% } %>
+<% } %>
+<% if (op.body) { %>		if !<%= transport.readJSON %>(<%= transport.readJSONArguments.join(", ") %>, &request.Body, <%= op.body.optional %>, <%= op.body.nullable %>, <%= JSON.stringify(op.body.shape) %>) {
+			return
+		}
+<% if (it.wire.validate) { %>		if err := <%= op.body.check %>; err != nil {
+			<%= transport.reject %>(<%= transport.response %>, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+<% } %>
+<% } %>		<%= op.responseType ? "result, err" : "err" %> := service.<%= op.name %>(<%= op.arguments.join(", ") %>)
+		if err != nil {
+			<%= transport.serviceError %>(<%= transport.response %>, err)
+			return
+		}
+<% if (op.responseType) { %>		<%= transport.writeJSON %>(<%= transport.response %>, <%= op.status %>, result)
+<% } else { %>		<%= transport.response %>.<%= transport.statusMethod %>(<%= op.status %>)
+<% } %>

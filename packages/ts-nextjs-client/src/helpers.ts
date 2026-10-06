@@ -1,4 +1,4 @@
-import type { StatusCodes } from "@abhigyakrishna/tspgen-core";
+import { isDefaultStatus, isFixedStatus, statusRank, type StatusCodes } from "@abhigyakrishna/tspgen-core";
 import { propertyKey, type TsGroup, type TsHeader, type TsOperation, type TsParam, type TsPart, type TsResultVariant, type TsTypeUse } from "@abhigyakrishna/tspgen-typescript";
 import { memberType } from "./auth.js";
 import { names } from "./names.js";
@@ -112,8 +112,8 @@ function paramsCodec(op: TsOperation): boolean {
 }
 
 function statusCondition(codes: StatusCodes): string {
-  if (codes === "default") return "res.ok";
-  if (typeof codes === "number") return `res.status === ${codes}`;
+  if (isDefaultStatus(codes)) return "res.ok";
+  if (isFixedStatus(codes)) return `res.status === ${codes}`;
   return `res.status >= ${codes.start} && res.status <= ${codes.end}`;
 }
 
@@ -127,8 +127,8 @@ function variantExpr(v: TsResultVariant, zod: boolean): string {
 }
 
 function errorKey(codes: StatusCodes): string {
-  if (codes === "default") return "default";
-  return typeof codes === "number" ? String(codes) : str(`${Math.floor(codes.start / 100)}XX`);
+  if (isDefaultStatus(codes)) return "default";
+  return isFixedStatus(codes) ? String(codes) : str(`${Math.floor(codes.start / 100)}XX`);
 }
 
 /** Flat style: `{ kind?: Kind; limit?: number }`, the type of a method's query object (and of `<Op>Vars.query`). */
@@ -222,9 +222,8 @@ export const nextjsHelpers = {
   },
 
   errorFactories(op: TsOperation): string[] {
-    const rank = (c: StatusCodes) => (c === "default" ? 2 : typeof c === "number" ? 0 : 1);
     return [...op.errors]
-      .sort((a, b) => rank(a.statusCodes) - rank(b.statusCodes))
+      .sort((a, b) => statusRank(a.statusCodes) - statusRank(b.statusCodes))
       .map((e) => {
         const key = errorKey(e.statusCodes);
         if (!e.body) return `${key}: (status, body) => new HttpError(status, body)`;

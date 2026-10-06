@@ -1,6 +1,7 @@
 export { $lib, reportDiagnostic, createDiagnostic, errorMessage } from "./lib.js";
-export { apiVersionConstants, pascal, type ApiVersionConstant } from "./naming.js";
+export { apiVersionConstants, constantCase, pascal, type ApiVersionConstant } from "./naming.js";
 export * from "./ir/types.js";
+export { isDefaultStatus, isFixedStatus, statusRank } from "./http.js";
 export { buildApiIR, type BuildOptions } from "./ir/build.js";
 export {
   loadVersioning,
@@ -20,6 +21,7 @@ export { loadPlugins } from "./plugins/load.js";
 export { loadModuleDefault } from "./loader.js";
 export type { FileSpec, LanguageContext, LanguageModule, Target, TargetContext } from "./targets/target.js";
 export { MANIFEST_FILE, normalizeDir, writeOutputs, type OutputFile } from "./output/manifest.js";
+export { ensureRelativePrefix, relativeOutputPath } from "./output/paths.js";
 export { runPipeline, type PipelineOptions, type PipelineTarget } from "./pipeline/run.js";
 export { coreEmitterOptionsSchemaProperties, coreMovedOptions, type CoreEmitterOptions } from "./options.js";
 export { validateOptions } from "./options-validate.js";

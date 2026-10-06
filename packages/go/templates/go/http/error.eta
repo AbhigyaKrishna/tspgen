@@ -1,0 +1,28 @@
+<% const error = it.error; %>type <%= error.name %> struct {
+	StatusCode int
+<% if (error.bodyType) { %>	Body <%= error.bodyType %>
+<% } %><% if (error.client) { %>	Cause *HTTPError
+<% } %>}
+
+func (e *<%= error.name %>) HTTPStatus() int {
+	if e.StatusCode != 0 {
+		return e.StatusCode
+	}
+	return <%= error.fallbackStatus %>
+}
+
+func (e *<%= error.name %>) HTTPBody() any {
+	return <%= error.bodyType ? "e.Body" : "nil" %>
+}
+
+func (e *<%= error.name %>) Error() string {
+	return fmt.Sprintf("HTTP %d", e.HTTPStatus())
+}
+<% if (error.client) { %>
+func (e *<%= error.name %>) Unwrap() error {
+	if e.Cause == nil {
+		return nil
+	}
+	return e.Cause
+}
+<% } %>

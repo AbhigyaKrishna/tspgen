@@ -1,0 +1,40 @@
+emit:
+  - "@abhigyakrishna/tspgen-go"
+options:
+  "@abhigyakrishna/tspgen-go":
+    emitter-output-dir: "{project-root}/generated"
+    module: example.com/petstore/models/v2
+    go-version: "1.27"
+    layout: per-type
+    date-time: time.Time
+    decimal: string
+    features:
+      validator: true
+    naming:
+      initialisms: [ID]
+    targets:
+      - "@abhigyakrishna/tspgen-go-nethttp-client":
+          module: example.com/petstore/client
+          grouping: per-interface
+          errors: typed
+          max-response-size: 512
+          features:
+            generic-methods: true
+            validate: true
+            ignore-unknown-keys: false
+      - "@abhigyakrishna/tspgen-go-nethttp-server":
+          output-dir: "{project-root}/generated/nethttp"
+          module: example.com/petstore/nethttp
+          grouping: per-interface
+          handler-shape: params
+          errors: typed
+          max-body-size: 512
+          error-body: problem
+      - "@abhigyakrishna/tspgen-go-gin-server":
+          output-dir: "{project-root}/generated/gin"
+          module: example.com/petstore/gin
+          grouping: per-namespace
+          handler-shape: params
+          errors: typed
+          max-body-size: 512
+          error-body: problem

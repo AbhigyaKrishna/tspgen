@@ -22,6 +22,7 @@ import {
   type HttpService,
 } from "@typespec/http";
 import { reportDiagnostic } from "../lib.js";
+import { isDefaultStatus, isFixedStatus } from "../http.js";
 import { pascal } from "../naming.js";
 import { collectDecorators, enclosingNamespaceDecorators } from "./decorators.js";
 import { docInfo } from "./docs.js";
@@ -446,7 +447,7 @@ function buildResponses(
   const statusCodes: StatusCodes =
     typeof codes === "number" ? codes : codes === "*" ? "default" : { start: codes.start, end: codes.end };
   const suffix =
-    typeof statusCodes === "number" ? String(statusCodes) : statusCodes === "default" ? "Default" : String(statusCodes.start);
+    isFixedStatus(statusCodes) ? String(statusCodes) : isDefaultStatus(statusCodes) ? "Default" : String(statusCodes.start);
   const isError = isErrorModel(program, response.type);
   return response.responses.map((content) => {
     const ir: ResponseIR = {

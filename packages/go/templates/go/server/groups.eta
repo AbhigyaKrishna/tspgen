@@ -1,0 +1,7 @@
+type <%= it.service %> interface {
+<% for (const group of it.groups) { %>	<%= group.service %>
+<% } %>}
+
+func RegisterRoutes(router <%= it.transport.routerType %>, service <%= it.service %>) {
+<% for (const group of it.groups) { %>	<%= group.register %>(router, service)
+<% } %>}

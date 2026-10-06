@@ -1,0 +1,163 @@
+// additionalField is the index of a struct's AdditionalProperties field, or -1.
+func additionalField(typeOf reflect.Type) int {
+	for i := 0; i < typeOf.NumField(); i++ {
+		if strings.HasPrefix(typeOf.Field(i).Tag.Get("tsp"), "additional,") {
+			return i
+		}
+	}
+	return -1
+}
+
+// declaredKey reports whether name is a declared JSON property or discriminator, matched case-insensitively like encoding/json.
+func declaredKey(typeOf reflect.Type, tags []unionTag, name string) bool {
+	for i := 0; i < typeOf.NumField(); i++ {
+		field := typeOf.Field(i)
+		tsp := field.Tag.Get("tsp")
+		if field.PkgPath != "" || tsp == "" || strings.HasPrefix(tsp, "additional,") {
+			continue
+		}
+		if strings.EqualFold(strings.Split(field.Tag.Get("json"), ",")[0], name) {
+			return true
+		}
+	}
+	for _, tag := range tags {
+		if strings.EqualFold(tag.Property, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// modelTags are the discriminator tags a variant model writes, if any.
+func modelTags(value reflect.Value) []unionTag {
+	if !value.CanInterface() {
+		return nil
+	}
+	if tagged, ok := value.Interface().(taggedModel); ok {
+		return tagged.unionTags()
+	}
+	if value.CanAddr() {
+		if tagged, ok := value.Addr().Interface().(taggedModel); ok {
+			return tagged.unionTags()
+		}
+	}
+	return nil
+}
+
+// extraFields keeps the members of fields that are neither declared properties nor discriminators.
+func extraFields(typeOf reflect.Type, tags []unionTag, fields map[string]json.RawMessage) map[string]json.RawMessage {
+	extra := map[string]json.RawMessage{}
+	for name, raw := range fields {
+		if !declaredKey(typeOf, tags, name) {
+			extra[name] = raw
+		}
+	}
+	return extra
+}
+
+// marshalObject writes discriminators, declared properties, then additional properties in key order.
+// Additional keys that collide with a declared property or discriminator are skipped.
+func marshalObject(value any, tags []unionTag, extra any) ([]byte, error) {
+	raw, err := marshalTagged(value, tags)
+	if err != nil || extra == nil || len(raw) < 2 || raw[0] != '{' {
+		return raw, err
+	}
+	entries := reflect.ValueOf(extra)
+	if entries.Len() == 0 {
+		return raw, nil
+	}
+	keys := make([]string, 0, entries.Len())
+	for _, key := range entries.MapKeys() {
+		if !declaredKey(reflect.TypeOf(value), tags, key.String()) {
+			keys = append(keys, key.String())
+		}
+	}
+	sort.Strings(keys)
+	body := raw[:len(raw)-1]
+	out := bytes.NewBuffer(append([]byte(nil), body...))
+	comma := len(bytes.TrimSpace(body[1:])) > 0
+	for _, key := range keys {
+		item, err := json.Marshal(entries.MapIndex(reflect.ValueOf(key)).Interface())
+		if err != nil {
+			return nil, err
+		}
+		name, _ := json.Marshal(key)
+		if comma {
+			out.WriteByte(',')
+		}
+		comma = true
+		out.Write(name)
+		out.WriteByte(':')
+		out.Write(item)
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
+}
+
+// unmarshalObject decodes declared properties into target (a *plain alias) and the rest into extra (a *map[string]T).
+func unmarshalObject(data []byte, target any, tags []unionTag, extra any) error {
+	if err := unmarshalTagged(data, target, tags); err != nil || extra == nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		return err
+	}
+	out := reflect.ValueOf(extra).Elem()
+	out.Set(reflect.Zero(out.Type()))
+	entries := extraFields(reflect.TypeOf(target).Elem(), tags, fields)
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		item := reflect.New(out.Type().Elem())
+		if err := decodeNumbers(entries[name], item.Interface(), false); err != nil {
+			return &ValidationError{Field: "additionalProperties." + name, Message: err.Error()}
+		}
+		if out.IsNil() {
+			out.Set(reflect.MakeMap(out.Type()))
+		}
+		out.SetMapIndex(reflect.ValueOf(name), item.Elem())
+	}
+	return nil
+}
+
+// applyAdditional runs the decode policies (strict keys, validation, defaults) over a struct's additional properties.
+func applyAdditional(value reflect.Value, index int, fields map[string]json.RawMessage, strict, validate, defaults bool, arguments map[string]string) error {
+	field := value.Type().Field(index)
+	shape, err := propertyShape(field, arguments)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(extraFields(value.Type(), modelTags(value), fields))
+	if err != nil {
+		return err
+	}
+	if validate && field.Tag.Get("tspvalidate") != "false" {
+		if err := checkJSONShape("additionalProperties", shape, raw); err != nil {
+			return err
+		}
+	}
+	return applyJSON(value.Field(index), raw, strict, validate, defaults, shape)
+}
+
+// encodeAdditional applies encode policies to the additional properties of value (a struct) present in fields.
+func encodeAdditional(value reflect.Value, index int, fields map[string]json.RawMessage, encodeDefaults, explicitNulls bool) error {
+	tags := modelTags(value)
+	iter := value.Field(index).MapRange()
+	for iter.Next() {
+		name := iter.Key().String()
+		item, ok := fields[name]
+		if !ok || declaredKey(value.Type(), tags, name) {
+			continue
+		}
+		encoded, err := encodeValue(iter.Value(), item, encodeDefaults, explicitNulls)
+		if err != nil {
+			return err
+		}
+		fields[name] = encoded
+	}
+	return nil
+}

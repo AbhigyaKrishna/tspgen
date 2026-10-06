@@ -1,0 +1,362 @@
+import (
+	"bytes"
+	"encoding"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math/big"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"unicode/utf8"
+)
+
+// ValidationError identifies a value that violates the generated contract.
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e *ValidationError) Error() string { return e.Field + ": " + e.Message }
+
+type PropertyConstraints struct {
+	MinLength, MaxLength, MinItems, MaxItems int
+	MinValue, MaxValue, Pattern, Literal     string
+}
+
+func absent(value reflect.Value) bool {
+	if !value.IsValid() {
+		return true
+	}
+	switch value.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice:
+		return value.IsNil()
+	}
+	return false
+}
+
+func dereference(value reflect.Value) reflect.Value {
+	for value.IsValid() && (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) {
+		if value.IsNil() {
+			return reflect.Value{}
+		}
+		value = value.Elem()
+	}
+	return value
+}
+
+type shapeVisit struct {
+	typeOf reflect.Type
+	address uintptr
+	length int
+	shape string
+}
+
+func checkShape(name, shape string, value reflect.Value) error {
+	var typeOf reflect.Type
+	if value.IsValid() {
+		typeOf = value.Type()
+	}
+	resolved, err := resolveShape(shape, nil, typeOf)
+	if err != nil {
+		return err
+	}
+	return checkShapeValue(name, resolved, value, map[shapeVisit]bool{})
+}
+
+func visitedShape(value reflect.Value, shape string, seen map[shapeVisit]bool) bool {
+	if absent(value) {
+		return false
+	}
+	if value.Kind() != reflect.Pointer && value.Kind() != reflect.Map && value.Kind() != reflect.Slice {
+		return false
+	}
+	key := shapeVisit{typeOf: value.Type(), address: uintptr(value.UnsafePointer()), shape: shape}
+	if value.Kind() != reflect.Pointer {
+		key.length = value.Len()
+	}
+	if seen[key] {
+		return true
+	}
+	seen[key] = true
+	return false
+}
+
+func checkShapeValue(name, shape string, value reflect.Value, seen map[shapeVisit]bool) error {
+	nullable := strings.HasPrefix(shape, "?")
+	shape = strings.TrimPrefix(shape, "?")
+	if visitedShape(value, shape, seen) {
+		return nil
+	}
+	value = dereference(value)
+	if absent(value) {
+		if nullable {
+			return nil
+		}
+		return &ValidationError{Field: name, Message: "must not be null"}
+	}
+	if shape == "i" {
+		raw, err := json.Marshal(value.Interface())
+		if err != nil {
+			return err
+		}
+		return checkInteger(name, raw)
+	}
+	if strings.HasPrefix(shape, "g") && value.Kind() == reflect.Struct {
+		return checkGenericShape(name, shape, value, seen)
+	}
+	return checkCollectionShape(name, shape, value, seen)
+}
+
+func checkCollectionShape(name, shape string, value reflect.Value, seen map[shapeVisit]bool) error {
+	if strings.HasPrefix(shape, "a") && (value.Kind() == reflect.Slice || value.Kind() == reflect.Array) {
+		for i := 0; i < value.Len(); i++ {
+			if err := checkShapeValue(fmt.Sprintf("%s[%d]", name, i), shape[1:], value.Index(i), seen); err != nil {
+				return err
+			}
+		}
+	}
+	if strings.HasPrefix(shape, "m") && value.Kind() == reflect.Map {
+		iter := value.MapRange()
+		for iter.Next() {
+			if err := checkShapeValue(fmt.Sprintf("%s[%v]", name, iter.Key()), shape[1:], iter.Value(), seen); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func checkGenericShape(name, shape string, value reflect.Value, seen map[shapeVisit]bool) error {
+	arguments, err := shapeArguments(shape)
+	if err != nil {
+		return err
+	}
+	for index := 0; index < value.NumField(); index++ {
+		field := value.Type().Field(index)
+		presence := field.Tag.Get("tsp")
+		if field.PkgPath != "" || presence == "" || field.Tag.Get("tspvalidate") == "false" {
+			continue
+		}
+		item := value.Field(index)
+		additional := strings.HasPrefix(presence, "additional,")
+		if (additional || strings.HasPrefix(presence, "optional,")) && absent(item) {
+			continue
+		}
+		resolved, err := propertyShape(field, arguments)
+		if err != nil {
+			return err
+		}
+		fieldName := strings.Split(field.Tag.Get("json"), ",")[0]
+		if additional {
+			fieldName = "additionalProperties"
+		}
+		if err := checkShapeValue(name + "." + fieldName, resolved, item, seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CheckProperty checks one generated property or HTTP parameter.
+func CheckProperty(name string, input any, optional bool, shape string, c PropertyConstraints) error {
+	value := reflect.ValueOf(input)
+	if optional && absent(value) {
+		return nil
+	}
+	if err := checkShape(name, shape, value); err != nil {
+		return err
+	}
+	value = dereference(value)
+	if absent(value) {
+		return nil
+	}
+	fail := func(message string) error { return &ValidationError{Field: name, Message: message} }
+	if c.Literal != "" {
+		raw, err := json.Marshal(value.Interface())
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(raw, []byte(c.Literal)) {
+			return fail("does not match the declared literal")
+		}
+	}
+	if value.Kind() == reflect.String {
+		length := utf8.RuneCountInString(value.String())
+		if c.MinLength >= 0 && length < c.MinLength {
+			return fail("too short")
+		}
+		if c.MaxLength >= 0 && length > c.MaxLength {
+			return fail("too long")
+		}
+		if c.Pattern != "" {
+			matched, err := matchPattern(c.Pattern, value.String())
+			if err != nil {
+				return err
+			}
+			if !matched {
+				return fail("does not match the declared pattern")
+			}
+		}
+	}
+	if value.Kind() == reflect.Slice || value.Kind() == reflect.Array || value.Kind() == reflect.Map {
+		if c.MinItems >= 0 && value.Len() < c.MinItems {
+			return fail("too few items")
+		}
+		if c.MaxItems >= 0 && value.Len() > c.MaxItems {
+			return fail("too many items")
+		}
+	}
+	for _, bound := range []struct {
+		text    string
+		minimum bool
+	}{{c.MinValue, true}, {c.MaxValue, false}} {
+		if bound.text == "" {
+			continue
+		}
+		number, ok := new(big.Rat).SetString(fmt.Sprint(value.Interface()))
+		if !ok {
+			return fail("invalid number")
+		}
+		limit, ok := new(big.Rat).SetString(bound.text)
+		if !ok {
+			return fail("invalid numeric constraint")
+		}
+		comparison := number.Cmp(limit)
+		if (bound.minimum && comparison < 0) || (!bound.minimum && comparison > 0) {
+			return fail("outside the declared numeric bounds")
+		}
+	}
+	return nil
+}
+
+var compiledPatterns sync.Map
+
+// matchPattern compiles each declared pattern once; TypeSpec patterns must also be valid RE2 syntax.
+func matchPattern(pattern, value string) (bool, error) {
+	if compiled, ok := compiledPatterns.Load(pattern); ok {
+		return compiled.(*regexp.Regexp).MatchString(value), nil
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return false, fmt.Errorf("pattern %q is not a valid Go regular expression: %w", pattern, err)
+	}
+	compiledPatterns.Store(pattern, compiled)
+	return compiled.MatchString(value), nil
+}
+
+func checkJSONShape(name, shape string, raw json.RawMessage) error {
+	raw = bytes.TrimSpace(raw)
+	nullable := strings.HasPrefix(shape, "?")
+	shape = strings.TrimPrefix(shape, "?")
+	if bytes.Equal(raw, []byte("null")) {
+		if nullable {
+			return nil
+		}
+		return &ValidationError{Field: name, Message: "must not be null"}
+	}
+	if shape == "i" {
+		return checkInteger(name, raw)
+	}
+	if strings.HasPrefix(shape, "a") {
+		var items []json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return err
+		}
+		for i, item := range items {
+			if err := checkJSONShape(fmt.Sprintf("%s[%d]", name, i), shape[1:], item); err != nil {
+				return err
+			}
+		}
+	}
+	if strings.HasPrefix(shape, "m") {
+		var items map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return err
+		}
+		for key, item := range items {
+			if err := checkJSONShape(name+"."+key, shape[1:], item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateValue walks generated models, including generic instances and collections.
+func ValidateValue(input any) error {
+	type visitKey struct {
+		typeOf  reflect.Type
+		address uintptr
+		length  int
+	}
+	seen := map[visitKey]bool{}
+	var visit func(reflect.Value) error
+	visit = func(value reflect.Value) error {
+		if absent(value) {
+			return nil
+		}
+		if value.Kind() == reflect.Pointer {
+			key := visitKey{typeOf: value.Type(), address: value.Pointer()}
+			if seen[key] {
+				return nil
+			}
+			seen[key] = true
+		}
+		validated := false
+		if value.CanInterface() {
+			if validator, ok := value.Interface().(interface{ Validate() error }); ok {
+				if err := validator.Validate(); err != nil {
+					return err
+				}
+				validated = true
+			}
+		}
+		value = dereference(value)
+		if absent(value) {
+			return nil
+		}
+		if value.Kind() == reflect.Map || value.Kind() == reflect.Slice {
+			key := visitKey{typeOf: value.Type(), address: uintptr(value.UnsafePointer()), length: value.Len()}
+			if seen[key] {
+				return nil
+			}
+			seen[key] = true
+		}
+		if !validated && value.CanAddr() && value.Addr().CanInterface() {
+			if validator, ok := value.Addr().Interface().(interface{ Validate() error }); ok {
+				if err := validator.Validate(); err != nil {
+					return err
+				}
+			}
+		}
+		switch value.Kind() {
+		case reflect.Struct:
+			for i := 0; i < value.NumField(); i++ {
+				if value.Type().Field(i).PkgPath == "" {
+					if err := visit(value.Field(i)); err != nil {
+						return err
+					}
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < value.Len(); i++ {
+				if err := visit(value.Index(i)); err != nil {
+					return err
+				}
+			}
+		case reflect.Map:
+			iter := value.MapRange()
+			for iter.Next() {
+				if err := visit(iter.Value()); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return visit(reflect.ValueOf(input))
+}

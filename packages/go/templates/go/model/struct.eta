@@ -1,0 +1,48 @@
+<% for (const line of it.docs) { %>// <%= line %>
+<% } %>type <%= it.name %><%= it.typeParameters %> struct {
+<% for (const field of it.fields) { %>
+<% for (const line of field.docs) { %>	// <%= line %>
+<% } %>	<%= field.name %> <%= field.type.text %> <%= field.tag %>
+<% } %><% if (it.additional) { %>	// AdditionalProperties holds JSON properties the model does not declare.
+	AdditionalProperties <%= it.additional.text %> <%= it.additional.tag %>
+<% } %>}
+<% if (it.defaults) { %>
+// New<%= it.name %> initializes declared property defaults.
+func New<%= it.name %><%= it.typeParameters %>() *<%= it.instance %> {
+	value := new(<%= it.instance %>)
+	if err := ApplyDefaults(value); err != nil {
+		panic(err)
+	}
+	return value
+}
+<% } %>
+<% if (it.validation) { %>
+func (value *<%= it.instance %>) Validate() error {
+	if value == nil {
+		return &ValidationError{Field: <%= JSON.stringify(it.name) %>, Message: "must not be null"}
+	}
+<% for (const field of it.fields) { %>	if err := <%= field.check %>; err != nil {
+		return err
+	}
+<% } %><% if (it.additional) { %>	if err := <%= it.additional.check %>; err != nil {
+		return err
+	}
+<% } %>	return nil
+}
+<% } %>
+<% if (it.tags.length) { %>
+var unionTags<%= it.name %> = []unionTag{<%= it.tagsLiteral %>}
+
+func (<%= it.instance %>) unionTags() []unionTag { return unionTags<%= it.name %> }
+<% } %>
+<% if (it.tags.length || it.additional) { %>
+func (value <%= it.instance %>) MarshalJSON() ([]byte, error) {
+	type plain <%= it.instance %>
+	return marshalObject(plain(value), <%= it.tagsRef %>, <%= it.additional ? "value.AdditionalProperties" : "nil" %>)
+}
+
+func (value *<%= it.instance %>) UnmarshalJSON(data []byte) error {
+	type plain <%= it.instance %>
+	return unmarshalObject(data, (*plain)(value), <%= it.tagsRef %>, <%= it.additional ? "&value.AdditionalProperties" : "nil" %>)
+}
+<% } %>

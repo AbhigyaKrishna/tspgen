@@ -1,0 +1,7 @@
+<% if (it.imports.length) { %>import (
+<% for (const imported of it.imports) { %>	<%= imported.alias ? imported.alias + " " : "" %><%= JSON.stringify(imported.path) %>
+<% } %>)
+
+<% } %><% for (const section of it.sections) { %><%~ include(section.template, { ...it, ...section.data }) %>
+
+<% } %>

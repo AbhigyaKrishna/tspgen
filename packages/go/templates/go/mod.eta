@@ -1,0 +1,3 @@
+module <%= it.module %>
+
+go <%= it.goVersion ?? "1.22" %>

@@ -1,0 +1,14 @@
+<% const op = it.op; %>	if err != nil {
+		var rawError *HTTPError
+		if errors.As(err, &rawError) {
+<% for (const error of op.errorBranches) { %>			if <%= error.condition %> {
+				typed := &<%= error.name %>{StatusCode: rawError.StatusCode, Cause: rawError}
+<% if (error.bodyType) { %>				if decodeErr := models.DecodeJSON(rawError.Body, &typed.Body, <%= it.wire.ignoreUnknown %>, <%= it.wire.validate %>, <%= it.wire.defaults %>, <%= JSON.stringify(error.shape) %>); decodeErr != nil {
+					err = fmt.Errorf("decode error response: %w", decodeErr)
+					<%= op.returnStatement %>
+				}
+<% } %>				err = typed
+				<%= op.returnStatement %>
+			}
+<% } %>		}
+	}

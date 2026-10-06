@@ -20,6 +20,10 @@ jobs:
           cache: pnpm
           registry-url: https://npm.pkg.github.com
           scope: "@abhigyakrishna"
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.x'
+          cache: false
       - run: pnpm install --frozen-lockfile
       # Packages type-check against each other's dist/, so build first.
       - run: pnpm build
