@@ -7,7 +7,7 @@ const Z: TsImport = { name: "z", from: "zod", typeOnly: false, external: true };
 /** File of the API version constants without a models barrel (`features.barrel: false`). */
 export const API_VERSION_FILE = "models/api-version";
 
-function declImports(decl: TsDecl, zod: boolean): TsImport[] {
+function declImports(decl: TsDecl, zod: boolean, effect = false): TsImport[] {
   const uses =
     decl.kind === "interface" ? decl.properties.map((p) => p.type) : decl.kind === "alias" ? [decl.type] : [];
   const extendsImports = decl.kind === "interface" ? decl.extends.flatMap((e) => e.imports) : [];
@@ -15,6 +15,7 @@ function declImports(decl: TsDecl, zod: boolean): TsImport[] {
     ...uses.flatMap((u) => u.imports),
     ...extendsImports,
     ...(zod ? [Z, ...uses.flatMap((u) => u.schemaImports)] : []),
+    ...(effect ? [{ name: "Schema", from: "effect", typeOnly: false, external: true }, ...uses.flatMap((u) => u.effectImports ?? [])] : []),
   ];
 }
 
@@ -59,11 +60,12 @@ export const tsModelsTarget: Target<TsIR> = {
           path: "types.ts",
           template: "ts/file",
           data: {
-            imports: renderImports("types", ir.declarations.flatMap((d) => declImports(d, ir.zod)), ext),
+            imports: renderImports("types", ir.declarations.flatMap((d) => declImports(d, ir.zod, ir.effect)), ext),
             body: "ts/types",
             sections: sections(ir.declarations),
             constants: ir.apiVersions,
             zod: ir.zod,
+            effect: ir.effect,
             codecs: ir.codecsFile === "types",
           },
         });
@@ -74,10 +76,11 @@ export const tsModelsTarget: Target<TsIR> = {
           path: `${decl.file}.ts`,
           template: "ts/file",
           data: {
-            imports: renderImports(decl.file, declImports(decl, ir.zod), ext),
+            imports: renderImports(decl.file, declImports(decl, ir.zod, ir.effect), ext),
             body: `ts/model/${decl.kind}`,
             decl,
             zod: ir.zod,
+            effect: ir.effect,
           },
         });
       }

@@ -28,6 +28,10 @@ export const typescriptFeatures = defineFeatures({
     default: false,
     description: "zod schemas (<Name>Schema) next to the types, constraint decorators as refinements; needs zod >= 4.3.",
   },
+  effect: {
+    default: false,
+    description: "Effect 4 schemas (<Name>EffectSchema) next to the types; independent of features.zod.",
+  },
   barrel: { default: true, description: "models/index.ts re-exporting every model (per-type layout)." },
   readonly: {
     default: false,
@@ -141,6 +145,12 @@ export const $lib = createTypeSpecLibrary({
       messages: {
         default: paramMessage`Generated type '${"name"}' clashes with the flat client's own export; rename it with @TS.name or set error-class.`,
         local: paramMessage`Generated type '${"name"}' clashes with a name the flat client uses internally ('${"name"}'); rename it with @TS.name.`,
+      },
+    },
+    "effect-client-name-clash": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Generated name '${"name"}' clashes with the Effect client; rename it with @TS.name or change error-class.`,
       },
     },
     "flat-react-query-name-clash": {

@@ -1,5 +1,5 @@
 import { lineComments } from "@abhigyakrishna/tspgen-core";
-import type { TsEnum, TsResultVariant } from "./transform/model.js";
+import type { TsDecl, TsEnum, TsResultVariant } from "./transform/model.js";
 
 /** Helpers exposed to templates as `it.h`. */
 export const tsHelpers = {
@@ -48,6 +48,24 @@ export const tsHelpers = {
     if (strings && d.style === "const-array" && d.values) return `z.enum(${d.values})`;
     const literals = d.members.map((m) => tsHelpers.literal(m.value));
     return strings ? `z.enum([${literals.join(", ")}])` : `z.union([${literals.map((l) => `z.literal(${l})`).join(", ")}])`;
+  },
+  /** Effect schema expression for a declaration; named references suspend to support cycles. */
+  effectSchema(d: TsDecl): string {
+    if (d.kind === "alias") return d.type.effectSchema!;
+    if (d.kind === "enum") {
+      if (d.style === "enum") return `Schema.Enum(${d.name})`;
+      return `Schema.Literals([${d.members.map((m) => tsHelpers.literal(m.value)).join(", ")}])`;
+    }
+    const fields = d.properties.map((p) => {
+      const schema = p.optional ? `Schema.optionalKey(${p.type.effectSchema})` : p.type.effectSchema;
+      return `${p.key}: ${p.readonly ? schema : `Schema.mutableKey(${schema})`}`;
+    });
+    const indent = d.typeParameters?.length ? "  " : "";
+    const schema = `Schema.Struct({\n${fields.map((field) => `${indent}  ${field},`).join("\n")}\n${indent}})`;
+    // External supertypes have no runtime schema, matching the Zod schema's opaque extension.
+    if (!d.extends.length) return schema;
+    const typeParameters = d.typeParameters?.length ? `<${d.typeParameters.join(", ")}>` : "";
+    return `Schema.StructWithRest(${schema}, [Schema.Record(Schema.String, Schema.Unknown)]) as unknown as Schema.Codec<${d.name}${typeParameters}, unknown>`;
   },
   /** `{ status: 201; body: Pet; headers: { location: string } }` */
   resultVariant(v: TsResultVariant): string {

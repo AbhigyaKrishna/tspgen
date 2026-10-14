@@ -7,7 +7,7 @@ const NULLABLE = ".nullable()";
 /**
  * Appends zod refinements for TypeSpec constraint decorators (and the `notBlank` meta flag) to a string,
  * number or array schema, before any `.nullable()`. Constraints that don't fit the base schema are ignored,
- * as in the Kotlin emitter; only `schema` changes. A `@pattern` is compiled with the `u` flag when valid
+ * as in the Kotlin emitter; refines `schema` and `effectSchema`. A `@pattern` is compiled with the `u` flag when valid
  * there, else without flags; one JavaScript can't parse at all is skipped and passed to `onInvalidPattern`.
  * `@minValue`/`@maxValue` on an `@encode(string)` integer (base `INTEGER_STRING`/`UNSIGNED_INTEGER_STRING`) are
  * checked with a `BigInt`-comparing `.refine()` (the value can exceed `Number`'s safe range). The same on a
@@ -26,7 +26,11 @@ export function constrain(
   const base = isNullable ? type.schema.slice(0, -NULLABLE.length) : type.schema;
   const rules = refinements(base, c ?? {}, notBlank, onInvalidPattern, onUnsupportedBounds);
   if (rules.length === 0) return type;
-  return { ...type, schema: `${base}${rules.join("")}${isNullable ? NULLABLE : ""}` };
+  return {
+    ...type,
+    schema: `${base}${rules.join("")}${isNullable ? NULLABLE : ""}`,
+    ...(type.effectSchema ? { effectSchema: constrainEffect(type.effectSchema, base, c ?? {}, notBlank) } : {}),
+  };
 }
 
 function refinements(
@@ -85,4 +89,37 @@ function compiles(pattern: string, flags: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The same property constraints applied to Effect's corresponding scalar/container schema. */
+function constrainEffect(schema: string, base: string, c: ConstraintsIR, notBlank: boolean): string {
+  const checks: string[] = [];
+  const add = (name: string, value: number | undefined) => {
+    if (value !== undefined) checks.push(`Schema.${name}(${value})`);
+  };
+  if (base.startsWith("z.string()")) {
+    if (base === INTEGER_STRING || base === UNSIGNED_INTEGER_STRING) {
+      for (const [value, operator] of [[c.minValue, ">="], [c.maxValue, "<="]] as const) {
+        if (value !== undefined) checks.push(`Schema.makeFilter((v: string) => /^-?\\d+$/.test(v) && BigInt(v) ${operator} ${BigInt(Math.trunc(value))}n)`);
+      }
+    }
+    if (notBlank) checks.push("Schema.isPattern(/\\S/)");
+    add("isMinLength", c.minLength);
+    add("isMaxLength", c.maxLength);
+    if (c.pattern !== undefined) {
+      const regex = regexExpression(c.pattern);
+      if (regex) checks.push(`Schema.isPattern(${regex})`);
+    }
+  } else if (base.startsWith("z.number()")) {
+    add("isGreaterThanOrEqualTo", c.minValue);
+    add("isLessThanOrEqualTo", c.maxValue);
+  } else if (base.startsWith("z.array(")) {
+    add("isMinLength", c.minItems);
+    add("isMaxLength", c.maxItems);
+  }
+  if (!checks.length) return schema;
+  const nullable = schema.startsWith("Schema.NullOr(");
+  const inner = nullable ? schema.slice("Schema.NullOr(".length, -1) : schema;
+  const constrained = `${inner}.check(${checks.join(", ")})`;
+  return nullable ? `Schema.NullOr(${constrained})` : constrained;
 }

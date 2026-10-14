@@ -37,14 +37,18 @@
   "peerDependencies": {
     "@typespec/compiler": "^1.16.0",
     "@typespec/http": "^1.16.0",
+    "@typespec/versioning": ">=0.86.0 <1.0.0",
     "zod": ">=4.3.0",
-    "@typespec/versioning": ">=0.86.0 <1.0.0"
+    "effect": ">=4.0.4 <5"
   },
   "peerDependenciesMeta": {
     "zod": {
       "optional": true
     },
     "@typespec/versioning": {
+      "optional": true
+    },
+    "effect": {
       "optional": true
     }
   },
@@ -54,7 +58,8 @@
     "@typespec/http": "1.16.0",
     "@typespec/sse": "0.86.0",
     "@typespec/streams": "0.86.0",
-    "zod": "^4.6.5",
-    "@typespec/versioning": "0.86.0"
+    "@typespec/versioning": "0.86.0",
+    "effect": "^4.0.4",
+    "zod": "^4.6.5"
   }
 }

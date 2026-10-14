@@ -12,3 +12,7 @@ export const <%= d.name %> = {
 
 export const <%= d.name %>Schema: z.ZodType<<%= d.name %>> = <%~ it.h.enumSchema(d) %>;
 <% } -%>
+<% if (it.effect) { -%>
+
+<%~ include("ts/model/effect", it) %>
+<% } -%>

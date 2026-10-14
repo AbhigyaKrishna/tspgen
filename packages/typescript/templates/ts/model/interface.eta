@@ -23,3 +23,7 @@ export const <%= d.name %>Schema<%= ext ? "" : ": z.ZodType<" + d.name + ">" %> 
 <% } -%>
 })<%= ext ? ".loose() as unknown as z.ZodType<" + d.name + ">" : "" %>;
 <% } -%>
+<% if (it.effect) { -%>
+
+<%~ include("ts/model/effect", it) %>
+<% } -%>

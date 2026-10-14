@@ -14,7 +14,7 @@
 <% if (j > 0) { -%>
 
 <% } -%>
-<%~ include(`ts/model/${d.kind}`, { decl: d, zod: it.zod, h: it.h }).trimEnd() %>
+<%~ include(`ts/model/${d.kind}`, { decl: d, zod: it.zod, effect: it.effect, h: it.h }).trimEnd() %>
 <% }) -%>
 <% }) -%>
 <% if (it.constants?.length) { -%>

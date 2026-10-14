@@ -289,6 +289,9 @@ importers:
       '@typespec/versioning':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+      effect:
+        specifier: ^4.0.4
+        version: 4.0.4
       next:
         specifier: ^16.3.0
         version: 16.3.6(@types/node@24.13.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -499,6 +502,9 @@ importers:
       '@typespec/versioning':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+      effect:
+        specifier: ^4.0.4
+        version: 4.0.4
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -530,6 +536,9 @@ importers:
       '@typespec/versioning':
         specifier: 0.86.0
         version: 0.86.0(@typespec/compiler@1.16.0(@types/node@24.13.6))
+      effect:
+        specifier: ^4.0.4
+        version: 4.0.4
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -1270,6 +1279,9 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  effect@4.0.4:
+    resolution: {integrity: sha512-Sr50OeVSC3M5UkoUYUhFf3EULryhGaZZUf6OzDHTvaznOw7HRlxOKdF3/4nvQXHL22StOyMG3Cvo8Bt7xUp+Ng==}
 
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
@@ -2256,6 +2268,8 @@ snapshots:
   csstype@3.2.3: {}
 
   detect-libc@2.1.2: {}
+
+  effect@4.0.4: {}
 
   emoji-regex@10.6.0: {}
 

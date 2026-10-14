@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import type { TsImport } from "../imports.js";
 import type { TsTypeUse } from "./model.js";
 
 const INT = "z.number().int()";
@@ -38,23 +39,34 @@ const SCALARS: Record<string, [string, string]> = {
   duration: ["string", "z.iso.duration()"],
 };
 
-export function simple(text: string, schema: string): TsTypeUse {
-  return { text, imports: [], schema, schemaImports: [] };
+export function simple(text: string, schema: string, effectSchema?: string): TsTypeUse {
+  return { text, imports: [], schema, schemaImports: [], ...(effectSchema ? { effectSchema, effectImports: [] } : {}) };
 }
 
-export const UNKNOWN = simple("unknown", "z.unknown()");
-export const VOID = simple("void", "z.void()");
+function stringPattern(pattern: string): string {
+  return `Schema.String.check(Schema.isPattern(${pattern}))`;
+}
+
+function scalarEffectSchema(name: string, text: string): string {
+  if (name.startsWith("decimal")) return stringPattern("/^-?\\d+(\\.\\d+)?([eE][+-]?\\d+)?$/");
+  if (text === "boolean") return "Schema.Boolean";
+  if (text === "number") return SCALARS[name]?.[1] === INT ? "Schema.Int" : "Schema.Finite";
+  return "Schema.String";
+}
+
+export const UNKNOWN = simple("unknown", "z.unknown()", "Schema.Unknown");
+export const VOID = simple("void", "z.void()", "Schema.Void");
 /** `Http.File`: a DOM Blob (a `File` is one), checked with `instanceof`; via globalThis so a generated type named Blob cannot shadow it. */
-export const FILE = simple("globalThis.Blob", "z.instanceof(globalThis.Blob)");
+export const FILE = simple("globalThis.Blob", "z.instanceof(globalThis.Blob)", "Schema.instanceOf(globalThis.Blob)");
 
 /** `encoding: "string"` (only set by core on integers and decimals): a JSON string holding the number. */
 export function scalarUse(name: string, encoding?: "string"): TsTypeUse {
   if (encoding === "string") {
-    if (name.startsWith("decimal")) return simple("string", DECIMAL_STRING);
-    return simple("string", name.startsWith("uint") ? UNSIGNED_INTEGER_STRING : INTEGER_STRING);
+    if (name.startsWith("decimal")) return simple("string", DECIMAL_STRING, scalarEffectSchema(name, "string"));
+    return simple("string", name.startsWith("uint") ? UNSIGNED_INTEGER_STRING : INTEGER_STRING, stringPattern(name.startsWith("uint") ? "/^\\d+$/" : "/^-?\\d+$/"));
   }
   const [text, schema] = SCALARS[name] ?? SCALARS.string;
-  return simple(text, schema);
+  return simple(text, schema, scalarEffectSchema(name, text));
 }
 
 /**
@@ -68,6 +80,8 @@ export function dateUse(file: string): TsTypeUse {
     text: "globalThis.Date",
     imports: [],
     schema: "dateTimeCodec",
+    effectSchema: "Schema.DateFromString",
+    effectImports: [],
     schemaImports: [{ name: "dateTimeCodec", from: file, typeOnly: false, root: "models" }],
     codec: true,
     date: true,
@@ -81,7 +95,7 @@ function codecOf(uses: readonly TsTypeUse[]): { codec?: true } {
 
 export function literalUse(value: string | number | boolean): TsTypeUse {
   const literal = typeof value === "string" ? JSON.stringify(value) : String(value);
-  return simple(literal, `z.literal(${literal})`);
+  return simple(literal, `z.literal(${literal})`, `Schema.Literal(${literal})`);
 }
 
 /**
@@ -91,16 +105,17 @@ export function literalUse(value: string | number | boolean): TsTypeUse {
  */
 export function externalUse(name: string, module?: string, fromRoot = false): TsTypeUse {
   const relative = fromRoot && (module?.startsWith(".") ?? false);
+  const imports: TsImport[] = module
+    ? [relative
+        ? { name, from: posix.normalize(module), typeOnly: true, root: "models" }
+        : { name, from: module, typeOnly: true, external: true }]
+    : [];
   return {
     text: name,
-    imports: module
-      ? [
-          relative
-            ? { name, from: posix.normalize(module), typeOnly: true, root: "models" as const }
-            : { name, from: module, typeOnly: true, external: true },
-        ]
-      : [],
+    imports,
     schema: `z.custom<${name}>()`,
+    effectSchema: `Schema.declare((_: unknown): _ is ${name} => true)`,
+    effectImports: imports,
     schemaImports: [],
   };
 }
@@ -111,6 +126,8 @@ export function declUse(name: string, file: string, codec = false): TsTypeUse {
     text: name,
     imports: [{ name, from: file, typeOnly: true, root: "models" }],
     schema: `z.lazy(() => ${name}Schema)`,
+    effectSchema: `Schema.suspend(() => ${name}EffectSchema)`,
+    effectImports: [{ name: `${name}EffectSchema`, from: file, typeOnly: false, root: "models" }],
     schemaImports: [{ name: `${name}Schema`, from: file, typeOnly: false, root: "models" }],
     ...(codec ? { codec: true as const } : {}),
   };
@@ -124,13 +141,15 @@ export function genericDeclUse(name: string, file: string, args: readonly TsType
     imports: [...base.imports, ...args.flatMap((a) => a.imports)],
     schema: `z.lazy(() => ${name}Schema(${args.map((a) => a.schema).join(", ")}))`,
     schemaImports: [...base.schemaImports, ...args.flatMap((a) => a.schemaImports)],
+    effectSchema: `Schema.suspend(() => ${name}EffectSchema(${args.map((a) => a.effectSchema).join(", ")}))`,
+    effectImports: [...(base.effectImports ?? []), ...args.flatMap((a) => a.effectImports ?? [])],
     ...(codec ? { codec: true as const } : codecOf(args)),
   };
 }
 
 /** A type parameter inside a generic interface; its schema is the schema function's parameter. */
 export function typeParamUse(name: string): TsTypeUse {
-  return simple(name, `${name}Schema`);
+  return simple(name, `${name}Schema`, `${name}EffectSchema`);
 }
 
 function wrap(text: string): string {
@@ -144,15 +163,31 @@ function dropDate<T extends TsTypeUse>(use: T): Omit<T, "date"> {
 }
 
 export function arrayOf(item: TsTypeUse): TsTypeUse {
-  return { ...dropDate(item), text: `${wrap(item.text)}[]`, schema: `z.array(${item.schema})` };
+  return {
+    ...dropDate(item),
+    text: `${wrap(item.text)}[]`,
+    schema: `z.array(${item.schema})`,
+    effectSchema: `Schema.mutable(Schema.Array(${item.effectSchema}))`,
+  };
 }
 
 export function recordOf(value: TsTypeUse): TsTypeUse {
-  return { ...dropDate(value), text: `Record<string, ${value.text}>`, schema: `z.record(z.string(), ${value.schema})` };
+  return {
+    ...dropDate(value),
+    text: `Record<string, ${value.text}>`,
+    schema: `z.record(z.string(), ${value.schema})`,
+    effectSchema: `Schema.Record(Schema.String, Schema.mutableKey(${value.effectSchema}))`,
+  };
 }
 
 export function nullable(type: TsTypeUse): TsTypeUse {
-  return type.text.endsWith(" | null") ? type : { ...dropDate(type), text: `${type.text} | null`, schema: `${type.schema}.nullable()` };
+  if (type.text.endsWith(" | null")) return type;
+  return {
+    ...dropDate(type),
+    text: `${type.text} | null`,
+    schema: `${type.schema}.nullable()`,
+    effectSchema: `Schema.NullOr(${type.effectSchema})`,
+  };
 }
 
 export function unionOf(types: TsTypeUse[]): TsTypeUse {
@@ -161,6 +196,8 @@ export function unionOf(types: TsTypeUse[]): TsTypeUse {
     imports: types.flatMap((t) => t.imports),
     schema: `z.union([${types.map((t) => t.schema).join(", ")}])`,
     schemaImports: types.flatMap((t) => t.schemaImports),
+    effectSchema: `Schema.Union([${types.map((t) => t.effectSchema).join(", ")}])`,
+    effectImports: types.flatMap((t) => t.effectImports ?? []),
     ...codecOf(types),
   };
 }
@@ -174,10 +211,13 @@ export interface ObjectField {
 /** `Page` + [`Pet`] → `Page<Pet>` with the imports of both; validated as an opaque custom type. */
 export function genericOf(base: TsTypeUse, args: readonly TsTypeUse[]): TsTypeUse {
   const text = `${base.text}<${args.map((a) => a.text).join(", ")}>`;
+  const imports = [...base.imports, ...args.flatMap((a) => a.imports)];
   return {
     text,
-    imports: [...base.imports, ...args.flatMap((a) => a.imports)],
+    imports,
     schema: `z.custom<${text}>()`,
+    effectSchema: `Schema.declare((_: unknown): _ is ${text} => true)`,
+    effectImports: imports,
     schemaImports: [],
   };
 }
@@ -188,6 +228,8 @@ export function objectUse(fields: ObjectField[]): TsTypeUse {
     imports: fields.flatMap((f) => f.type.imports),
     schema: `z.object({ ${fields.map((f) => `${f.key}: ${f.type.schema}${f.optional ? ".exactOptional()" : ""}`).join(", ")} })`,
     schemaImports: fields.flatMap((f) => f.type.schemaImports),
+    effectSchema: `Schema.Struct({ ${fields.map((f) => `${f.key}: ${f.optional ? `Schema.optionalKey(${f.type.effectSchema})` : f.type.effectSchema}`).join(", ")} })`,
+    effectImports: fields.flatMap((f) => f.type.effectImports ?? []),
     ...codecOf(fields.map((f) => f.type)),
   };
 }

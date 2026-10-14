@@ -11,6 +11,7 @@ import {
   type TsOperation,
   type TsService,
 } from "@abhigyakrishna/tspgen-typescript";
+import { planEffectFile } from "./effect.js";
 import { clientAuth, type ClientAuth } from "./auth.js";
 import { nextExtras, type NextOpExtras } from "./extras.js";
 import type { ReactQueryOutput } from "./flat-react-query.js";
@@ -143,7 +144,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
       {
         services,
         auth,
-        exports: [CORE, ...groups.map(names.groupFile)].map((f) => relativeSpecifier("client/index", f, ir.importExtension)),
+        exports: [CORE, ...groups.map(names.groupFile), ...(options.features.effect ? ["client/effect"] : [])].map((f) => relativeSpecifier("client/index", f, ir.importExtension)),
       },
     ),
   );
@@ -153,6 +154,7 @@ export function planNextFiles(tsIR: TsIR, options: NextClientOptions, ctx: Targe
     files.push(...reactQueryFiles(ir, services, extras, { hooks: options.features.hooks, keyPrefix: options["query-key-prefix"] }));
   }
   if (actions) files.push(...actionFiles(ir, services, options, auth, options.features["server-only"]));
+  if (options.features.effect) files.push(planEffectFile(ir, options, ctx));
   return files;
 }
 

@@ -1,0 +1,8 @@
+<% const d = it.decl; const tps = d.typeParameters ?? []; const tp = tps.length ? "<" + tps.join(", ") + ">" : ""; -%>
+<% if (tps.length) { -%>
+export function <%= d.name %>EffectSchema<%= tp %>(<%= tps.map((t) => t + "EffectSchema: Schema.Codec<" + t + ", unknown>").join(", ") %>): Schema.Codec<<%= d.name %><%= tp %>, unknown> {
+  return <%= it.h.effectSchema(d) %>;
+}
+<% } else { -%>
+export const <%= d.name %>EffectSchema: Schema.Codec<<%= d.name %>, unknown> = <%= it.h.effectSchema(d) %>;
+<% } -%>

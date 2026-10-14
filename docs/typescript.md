@@ -9,6 +9,7 @@ options:
     layout: per-type                  # per-type (models/<Name>.ts + barrel) | single-file (types.ts, namespace banners)
     errors: typed                     # typed | thrown (no <Body>Error classes; success unions unchanged; api/errors.ts keeps HttpError)
     features:
+      effect: true                    # <Name>EffectSchema (Effect 4, default false; independent of zod)
       zod: true                       # PetSchema: z.ZodType<Pet> next to each type, constraint decorators as refinements (default false; zod ≥ 4.3)
     targets:
       - "@abhigyakrishna/tspgen-ts-nextjs-client":
@@ -18,6 +19,7 @@ options:
           error-model: ErrorResponse  # flat: model whose fields the error class exposes (optional)
           query-key-prefix: api       # React Query: first element of every generated query key (default: none)
           features:
+            effect: true              # companion Effect client (both styles, default false)
             react-query: true         # TanStack Query keys, queryOptions and hooks (both styles, default true)
             server-actions: true      # grouped only (flat: ignored; unsupported-feature when set true)
             validate: true            # flat only: zod checks of body/query/constrained path params before fetch (needs features.zod)
@@ -57,6 +59,47 @@ await queryClient.prefetchQuery(petStoreQueries.pets.get(api, { petId: 1 }));
 const result = await petsCreateAction({ pet });
 if (!result.ok) console.error(result.status, result.error);
 ```
+
+**Effect (optional).** Install `effect` 4.0.4 or newer within major 4, then enable `features.effect` on the
+TypeScript emitter for schemas and on the client target for Effect methods. These switches are independent;
+both default to false. Generated code imports Effect only when one is enabled. Zod and Effect can be enabled
+together: `<Name>Schema` remains the Zod schema, and `<Name>EffectSchema` is the Effect codec.
+
+```bash
+npm install 'effect@^4.0.4'
+```
+
+The grouped client adds `client/effect.ts` (re-exported by `client/index.ts`); the flat client adds `effect.ts`
+(re-exported by the root `index.ts`). Both export `create<Service>EffectClient` and `<Service>EffectClient`.
+The companion retains the fetch client's arguments, configuration, auth, uploads and response types:
+
+```ts
+import { Effect, Schema, Stream } from "effect";
+import { createPetStoreEffectClient } from "./generated/client";
+import { PetEffectSchema } from "./generated/models";
+
+const api = createPetStoreEffectClient({ baseUrl: "/api" });
+const pet = await Effect.runPromise(api.pets.get({ petId: 1 }));
+const decoded = await Effect.runPromise(Schema.decodeUnknownEffect(PetEffectSchema)(unknownJson));
+const events = await Effect.runPromise(api.feed.watch().pipe(Stream.take(10), Stream.runCollect));
+```
+
+Methods return lazy, repeatable `Effect`s; SSE methods return lazy `Stream`s. Interruption aborts the fetch,
+combining the fiber's signal with any per-call `signal`. Stream completion, early termination and interruption
+release the connection. Declared HTTP failures keep their existing error classes in the error channel
+(grouped: `HttpError`; flat: the configured error class). Transport and validation failures become the tagged
+`EffectClientError` with the original `cause`.
+
+With emitter `features.effect` enabled, companion methods validate successful responses and SSE elements
+with the generated Effect schemas, independently of the fetch client's Zod `validate` setting. These checks
+validate decoded values, so existing `Date` codecs are not applied twice. Request validation follows the
+underlying fetch client; enabling Effect alone adds no request checks.
+
+Effect schemas support recursive models, generic schema factories, enums, unions, inherited model properties,
+nullable values, mutable arrays and records, exact optional keys, and the same property constraint decorators
+listed below for Zod. Integer and decimal strings are checked without coercion. `@TS.type` overrides and
+external `supertypes` remain opaque, as with Zod. Temporal scalars remain strings without format checks;
+with the existing `date-type: date` option (which requires Zod), `utcDateTime` uses `Schema.DateFromString`.
 
 **Request options.** Every method takes a trailing `RequestOptions`: every `RequestInit` field except `method`,
 `body` and `window` (`credentials`, `mode`, `keepalive`, `redirect`, `priority`, `referrerPolicy`, `integrity`,
