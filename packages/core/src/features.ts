@@ -97,7 +97,7 @@ export function defineFeatures<K extends string>(defs: Readonly<Record<K, Featur
       nullable: true,
       additionalProperties: true,
       properties: { ...properties },
-      description: "On/off gates (see the README's Options reference); plugins may add their own.",
+      description: "On/off gates (see docs/options.md); plugins may add their own.",
     },
     resolve(configured) {
       const values = {} as Record<K, boolean>;

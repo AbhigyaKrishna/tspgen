@@ -1,5 +1,5 @@
-// Renders the README "Options reference" tables from each package's options schema and feature definitions.
-// `pnpm docs:options` builds the packages and rewrites README.md between the markers below.
+// Renders the docs/options.md tables from each package's options schema and feature definitions.
+// `pnpm docs:options` builds the packages and rewrites docs/options.md between the markers below.
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -36,7 +36,7 @@ function featureRows(defs) {
 
 function table(title, rows) {
   return [
-    `### ${title}`,
+    `## ${title}`,
     "",
     "| Key | Kind | Default | `@meta` override | Description |",
     "|---|---|---|---|---|",
@@ -81,11 +81,11 @@ export async function optionsReference() {
 export function withOptionsReference(readme, reference) {
   const start = readme.indexOf(START);
   const end = readme.indexOf(END);
-  if (start < 0 || end < start) throw new Error(`README.md needs ${START} and ${END} markers`);
+  if (start < 0 || end < start) throw new Error(`docs/options.md needs ${START} and ${END} markers`);
   return `${readme.slice(0, start + START.length)}\n\n${reference}\n${readme.slice(end)}`;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const path = resolve(ROOT, "README.md");
+  const path = resolve(ROOT, "docs/options.md");
   writeFileSync(path, withOptionsReference(readFileSync(path, "utf8"), await optionsReference()));
 }
