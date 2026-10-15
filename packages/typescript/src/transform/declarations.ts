@@ -53,8 +53,9 @@ export function typeOverride(decorators: DecoratorData | undefined): TsTypeUse |
 
 export interface DeclarationOptions {
   layout?: "per-type" | "single-file";
-  /** zod schemas are emitted; unparsable `@pattern`s are only reported then. */
+  /** Schema generation controls warnings for constraints that cannot be checked. */
   zod?: boolean;
+  effect?: boolean;
   enumStyle?: EnumStyle;
   declaration?: "interface" | "type";
   features?: ResolvedFeatures<string>;
@@ -148,9 +149,9 @@ export class DeclarationBuilder {
       jsdoc: [],
       extends: [],
       properties: [
-        { key: "event", wireName: "event", type: simple("string", "z.string()"), optional: true, docs: 'The `event:` name; absent for the default "message" type.', meta: {}, readonly: false, jsdoc: [] },
-        { key: "data", wireName: "data", type: simple("string", "z.string()"), optional: false, docs: 'The `data:` lines, joined with "\\n".', meta: {}, readonly: false, jsdoc: [] },
-        { key: "id", wireName: "id", type: simple("string", "z.string()"), optional: true, docs: "The last `id:`.", meta: {}, readonly: false, jsdoc: [] },
+        { key: "event", wireName: "event", type: scalarUse("string"), optional: true, docs: 'The `event:` name; absent for the default "message" type.', meta: {}, readonly: false, jsdoc: [] },
+        { key: "data", wireName: "data", type: scalarUse("string"), optional: false, docs: 'The `data:` lines, joined with "\\n".', meta: {}, readonly: false, jsdoc: [] },
+        { key: "id", wireName: "id", type: scalarUse("string"), optional: true, docs: "The last `id:`.", meta: {}, readonly: false, jsdoc: [] },
       ],
     };
     return { type: declUse("SseMessage", this.sseMessageDecl.file) };
@@ -376,7 +377,7 @@ export class DeclarationBuilder {
     const literals = types.filter((t) => t.kind === "literal" && typeof t.value === "string");
     const strings = types.filter((t) => t.kind === "scalar" && t.name === "string");
     if (literals.length > 0 && literals.length + strings.length === types.length) {
-      decl.type = simple(`${literals.map((t) => this.typeUse(t).text).join(" | ")} | (string & {})`, "z.string()");
+      decl.type = simple(`${literals.map((t) => this.typeUse(t).text).join(" | ")} | (string & {})`, "z.string()", "Schema.String");
       return;
     }
     const disc = u.discriminator;
@@ -408,7 +409,7 @@ export class DeclarationBuilder {
         { key: "data", type: this.typeUse(e.payload), optional: false },
       ]),
     );
-    if (variants.length === 0) return simple("never", "z.never()");
+    if (variants.length === 0) return simple("never", "z.never()", "Schema.Never");
     const union = unionOf(variants);
     const names = (u.events ?? []).map((e) => e.name);
     return {
@@ -476,22 +477,23 @@ export class DeclarationBuilder {
     };
   }
 
-  /** Warns that a `@pattern` is not a JavaScript regular expression (so zod does not check it). */
+  /** Warns that a `@pattern` is not a JavaScript regular expression (so runtime schemas do not check it). */
   invalidPattern(pattern: string, where: string): void {
-    if (!this.options.zod) return;
+    if (!this.options.zod && !this.options.effect) return;
     reportDiagnostic(this.program, { code: "invalid-pattern", format: { pattern, where }, target: NoTarget });
   }
 
   /** Warns that `@minValue`/`@maxValue` on a decimal (always represented as a string) is not checked. */
   unsupportedBounds(where: string): void {
-    if (!this.options.zod) return;
+    if (!this.options.zod && !this.options.effect) return;
     reportDiagnostic(this.program, { code: "unsupported-bounds", format: { where }, target: NoTarget });
   }
 
   private checkDuplicates(): void {
-    const seen = new Map<string, string>();
+    const seen = new Map<string, string>(this.options.effect ? [["Schema", "the Effect Schema import"]] : []);
     for (const decl of this.decls.values()) {
       const names = decl.kind === "enum" && decl.values ? [decl.name, decl.values] : [decl.name];
+      if (this.options.effect) names.push(`${decl.name}EffectSchema`);
       for (const name of names) {
         const first = seen.get(name);
         if (first) {

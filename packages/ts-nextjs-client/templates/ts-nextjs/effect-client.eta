@@ -1,0 +1,92 @@
+/** A transport, decoding or validation failure; declared HTTP errors retain their existing class. */
+export class EffectClientError extends Data.TaggedError("EffectClientError")<{ readonly cause: unknown }> {}
+
+function toEffectError(cause: unknown): <%= it.error %> | EffectClientError {
+  return cause instanceof <%= it.error %> ? cause : new EffectClientError({ cause });
+}
+
+/** Insert the request options without changing omitted positional arguments or the caller's signal. */
+function withSignal<Args extends unknown[]>(args: Args, index: number, signal: AbortSignal): Args {
+  const copy = [...args];
+  const options = copy[index] as RequestOptions | undefined;
+  copy[index] = { ...options, signal: options?.signal ? AbortSignal.any([signal, options.signal]) : signal };
+  return copy as Args;
+}
+
+function effectMethod<Args extends unknown[], A>(
+  invoke: (...args: Args) => Promise<A>,
+  optionsIndex: number,
+<% if (it.schemas) { -%>
+  schema: Schema.Codec<A, unknown>,
+<% } -%>
+): (...args: Args) => Effect.Effect<A, <%= it.error %> | EffectClientError> {
+  return (...args) => Effect.tryPromise({
+    try: (signal) => invoke(...withSignal(args, optionsIndex, signal)),
+    catch: toEffectError,
+  })<% if (it.schemas) { %>.pipe(
+    Effect.flatMap((value) =>
+      Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(Effect.mapError(toEffectError)),
+    ),
+  )<% } %>;
+}
+<% if (it.streams) { -%>
+
+/** Abort before iterator.return(): an async generator may still be awaiting fetch or its next chunk. */
+function abortableIterable<A>(iterable: AsyncIterable<A>, controller: AbortController): AsyncIterable<A> {
+  return {
+    [Symbol.asyncIterator]() {
+      const iterator = iterable[Symbol.asyncIterator]();
+      return {
+        next: () => iterator.next(),
+        return: async () => {
+          controller.abort();
+          return iterator.return ? iterator.return() : { done: true, value: undefined };
+        },
+      };
+    },
+  };
+}
+
+function streamMethod<Args extends unknown[], A>(
+  invoke: (...args: Args) => AsyncIterable<A>,
+  optionsIndex: number,
+<% if (it.schemas) { -%>
+  schema: Schema.Codec<A, unknown>,
+<% } -%>
+): (...args: Args) => Stream.Stream<A, <%= it.error %> | EffectClientError> {
+  return (...args) => Stream.unwrap(Effect.gen(function* () {
+    const controller = yield* Effect.acquireRelease(
+      Effect.sync(() => new AbortController()),
+      (controller) => Effect.sync(() => controller.abort()),
+    );
+    const iterable = invoke(...withSignal(args, optionsIndex, controller.signal));
+    return Stream.fromAsyncIterable(abortableIterable(iterable, controller), toEffectError)<% if (it.schemas) { %>.pipe(
+      Stream.mapEffect((value) =>
+        Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(Effect.mapError(toEffectError)),
+      ),
+    )<% } %>;
+  }));
+}
+<% } -%>
+<% for (const service of it.services) { const source = it.clientName(service.name); -%>
+
+export type <%= service.name %>EffectClient = ReturnType<typeof create<%= service.name %>EffectClient>;
+
+/** Lazy Effect methods with the fetch client's arguments; SSE methods return scoped Streams. */
+export function create<%= service.name %>EffectClient(config: ConstructorParameters<typeof <%= source %>>[0]) {
+  const client = new <%= source %>(config);
+  return {
+<% for (const group of service.groups) { const property = it.h.nextjs.names.groupProperty(group); const receiver = it.flat ? "client" : `client.${property}`; -%>
+<% if (!it.flat) { -%>
+    <%= property %>: {
+<% } -%>
+<% for (const op of group.operations) { -%>
+      <%= op.name %>: <%= it.h.nextjs.isStream(op) ? "streamMethod" : "effectMethod" %>(<%= receiver %>.<%= op.name %>.bind(<%= receiver %>), <%= it.optionsIndex(op) %><%= it.schemas ? `, ${it.responseSchema(op)}` : "" %>),
+<% } -%>
+<% if (!it.flat) { -%>
+    },
+<% } -%>
+<% } -%>
+  };
+}
+<% } -%>

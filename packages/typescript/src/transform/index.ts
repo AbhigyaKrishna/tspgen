@@ -15,6 +15,7 @@ export * from "./model.js";
 
 export interface TsTransformOptions {
   zod: boolean;
+  effect?: boolean;
   importExtension: "" | ".js";
   layout?: "per-type" | "single-file";
   errors?: "typed" | "thrown";
@@ -32,6 +33,7 @@ export interface TsTransformOptions {
 export function resolveTsOptions(options: Record<string, unknown>, features?: ResolvedFeatures<string>): TsTransformOptions {
   return {
     zod: features?.values.zod === true,
+    effect: features?.values.effect === true,
     importExtension: options["import-extension"] === ".js" ? ".js" : "",
     layout: options.layout === "single-file" ? "single-file" : "per-type",
     errors: options.errors === "thrown" ? "thrown" : "typed",
@@ -58,6 +60,7 @@ export function transformToTs(program: Program, api: ApiIR, options: TsTransform
   const builder = new DeclarationBuilder(program, api, {
     layout,
     zod: options.zod,
+    effect: options.effect === true,
     enumStyle: options.enumStyle ?? "union-const",
     declaration: options.declaration ?? "interface",
     dateType,
@@ -80,6 +83,7 @@ export function transformToTs(program: Program, api: ApiIR, options: TsTransform
     services,
     apiActive: apiBuilder.active,
     zod: options.zod,
+    effect: options.effect === true,
     importExtension: options.importExtension,
     layout,
     dateType,

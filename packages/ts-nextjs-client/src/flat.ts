@@ -14,6 +14,7 @@ import {
   type TsParam,
 } from "@abhigyakrishna/tspgen-typescript";
 import { NoTarget } from "@typespec/compiler";
+import { planEffectFile } from "./effect.js";
 import { clientAuth, memberType, type AuthMember, type ClientAuth } from "./auth.js";
 import { nextExtras } from "./extras.js";
 import { HOOKS_INTERNALS, planFlatReactQuery, QUERIES_INTERNALS, reactQueryNames, varsKeyClash } from "./flat-react-query.js";
@@ -451,11 +452,12 @@ export function planFlatFiles(ir: TsIR & { modelsPrefix?: string }, options: Nex
       data: {
         imports: [],
         body: "ts/barrel",
-        exports: [...(ir.declarations.length > 0 ? typeFiles : []), "client", ...(reactQuery ? ["queries"] : [])]
+        exports: [...(ir.declarations.length > 0 ? typeFiles : []), "client", ...(options.features.effect ? ["effect"] : []), ...(reactQuery ? ["queries"] : [])]
           .map((f) => relativeSpecifier("index", f, ext))
           .sort(),
       },
     },
+    ...(options.features.effect ? [planEffectFile(ir, options, ctx)] : []),
     ...(reactQuery ? planFlatReactQuery(ir, services, extras, { hooks, keyPrefix: options["query-key-prefix"] }) : []),
   ];
 }

@@ -4,3 +4,7 @@
 
 export const <%= d.name %>Schema: z.ZodType<<%= d.name %>> = <%= d.type.schema %>;
 <% } -%>
+<% if (it.effect) { -%>
+
+<%~ include("ts/model/effect", it) %>
+<% } -%>

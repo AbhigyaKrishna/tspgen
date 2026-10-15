@@ -1,6 +1,10 @@
 import { defineFeatures, type MovedOptions } from "@abhigyakrishna/tspgen-core";
 
 export const nextClientFeatures = defineFeatures({
+  effect: {
+    default: false,
+    description: "Companion Effect 4 client (Effect methods and Stream event streams); schemas use emitter features.effect when enabled.",
+  },
   "server-actions": { default: true, description: "Server Actions for non-GET operations (grouped style only)." },
   "server-only": {
     default: true,

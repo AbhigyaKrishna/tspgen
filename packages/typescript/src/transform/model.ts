@@ -9,12 +9,15 @@ import type {
 } from "@abhigyakrishna/tspgen-core";
 import type { TsImport } from "../imports.js";
 
-/** A TypeScript type at a use site, with its zod schema expression and the imports each needs. */
+/** A TypeScript type at a use site, with optional runtime schema expressions and the imports each needs. */
 export interface TsTypeUse {
   text: string;
   imports: TsImport[];
   schema: string;
   schemaImports: TsImport[];
+  /** Effect 4 codec expression and the model imports it needs. */
+  effectSchema?: string;
+  effectImports?: TsImport[];
   /**
    * The schema transforms values (it contains `dateTimeCodec`): `schema.parse(json)` decodes wire strings into
    * `Date`s, and `z.encode(schema, value)` / `schema.safeEncode(value)` validate `Date`s and return wire values.
@@ -235,6 +238,7 @@ export interface TsIR {
   /** True when some service has operations (api/ files are emitted). */
   apiActive: boolean;
   zod: boolean;
+  effect?: boolean;
   /** The generated `SseMessage` interface, when an operation streams untyped server-sent events. */
   sseMessage?: TsInterface;
   /** "" or ".js" — suffix for relative imports. */

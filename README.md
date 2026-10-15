@@ -9,8 +9,8 @@ The core is language-neutral; languages and server/client libraries plug in as s
 | `@abhigyakrishna/tspgen-kotlin` | The TypeSpec emitter for Kotlin: kotlinx.serialization models, result/error types, `@Kotlin.*` decorators |
 | `@abhigyakrishna/tspgen-kotlin-ktor-server` | Target: Ktor server — service interfaces, routing, module with JSON + StatusPages |
 | `@abhigyakrishna/tspgen-kotlin-ktor-client` | Target: Ktor `HttpClient` SDK |
-| `@abhigyakrishna/tspgen-typescript` | The TypeSpec emitter for TypeScript: interfaces, literal-union enums, optional zod schemas, result/error types, `@TS.*` decorators |
-| `@abhigyakrishna/tspgen-ts-nextjs-client` | Target: Next.js client SDK — typed `fetch` client, TanStack Query hooks, Server Actions |
+| `@abhigyakrishna/tspgen-typescript` | The TypeSpec emitter for TypeScript: interfaces, literal-union enums, optional Zod and Effect schemas, result/error types, `@TS.*` decorators |
+| `@abhigyakrishna/tspgen-ts-nextjs-client` | Target: Next.js client SDK — typed `fetch` client, optional Effect client, TanStack Query hooks, Server Actions |
 | `@abhigyakrishna/tspgen-go` | Go emitter: JSON models in their own Go module (initial implementation) |
 | `@abhigyakrishna/tspgen-go-nethttp-client` | Target: Go `net/http` client in its own module (initial implementation) |
 | `@abhigyakrishna/tspgen-go-nethttp-server` | Target: Go `net/http` server in its own module (initial implementation) |
