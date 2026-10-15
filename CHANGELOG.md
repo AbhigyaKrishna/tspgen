@@ -1,9 +1,23 @@
 # Changelog
 
 All packages (`@abhigyakrishna/tspgen-core`, `-kotlin`, `-kotlin-ktor-server`, `-kotlin-ktor-client`,
-`-typescript`, `-ts-nextjs-client`) are released together with the same version.
+`-typescript`, `-ts-nextjs-client`, `-go`, `-go-nethttp-client`, `-go-nethttp-server`, `-go-gin-server`)
+are released together with the same version.
 
-## Unreleased
+## 0.2.2 — 2026-10-15
+
+### Added
+
+- Go emitter and net/http client, net/http server and Gin server targets, each generating an independent Go
+  module. Models support generics, enums, unions, additional properties, defaults, validation and optional
+  go-playground/validator tags; HTTP targets support typed errors and scalar, enum and scalar-union parameters.
+  See the [Go guide](docs/go.md) for configuration and the supported HTTP subset.
+- TypeScript: optional Effect 4 schemas (`<Name>EffectSchema`) with `features.effect`, independently of Zod.
+  Schemas support recursive and generic models, enums, unions and property constraints.
+- Next.js client: optional companion Effect clients for both grouped and flat styles with target
+  `features.effect`. Methods return lazy Effects, SSE methods return Streams, and interruption aborts requests.
+  Enabling the emitter's Effect schemas also validates successful responses and SSE elements. Both switches
+  default to false; generated Effect code requires `effect >=4.0.4 <5`.
 
 ### Changed
 
