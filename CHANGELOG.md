@@ -4,6 +4,25 @@ All packages (`@abhigyakrishna/tspgen-core`, `-kotlin`, `-kotlin-ktor-server`, `
 `-typescript`, `-ts-nextjs-client`, `-go`, `-go-nethttp-client`, `-go-nethttp-server`, `-go-gin-server`)
 are released together with the same version.
 
+## 0.2.3 — 2026-10-25
+
+### Added
+
+- Ktor client: `webSocket: true` operation metadata generates scoped WebSocket methods with normal URL/auth handling
+  and typed JSON frame conversion. Sessions close on return, failure or cancellation.
+- Core: opt-in reachable-model generation with exact service/operation filters and explicit extra type roots.
+- Kotlin: opt-in optional nullable field presence and untagged JSON union wrappers with ambiguity rejection.
+- Ktor client: shared HTTP execution and cached authentication plans for all generated clients, opt-in scoped raw
+  binary streaming methods, and configurable buffered success/error body limits. Credential providers remain dynamic;
+  streaming cleanup follows callback scope.
+- A large-client generation benchmark and generated Kotlin wire tests for client features.
+
+### Fixed
+
+- Ktor client: preserve structural brackets in nested query names while encoding values, including array queries.
+- Raw non-JSON HTTP bytes now use `ByteArray`; JSON bytes continue to use base64 strings.
+- Literal null types retain their wire meaning instead of warning and widening to arbitrary JSON.
+
 ## 0.2.2 — 2026-10-15
 
 ### Added
