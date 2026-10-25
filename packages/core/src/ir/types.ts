@@ -10,7 +10,7 @@ export type TypeRef =
   | { kind: "map"; of: TypeRef }
   /** `encoding: "string"`: `@encode(string)` on an integer or decimal (property or scalar): a JSON string on the wire. */
   | { kind: "scalar"; name: string; custom?: CustomScalarIR; encoding?: "string" }
-  | { kind: "literal"; value: string | number | boolean }
+  | { kind: "literal"; value: string | number | boolean | null }
   | { kind: "nullable"; of: TypeRef }
   /** `Http.File` or a model extending it: each language maps it to its built-in file type. */
   | { kind: "file" }

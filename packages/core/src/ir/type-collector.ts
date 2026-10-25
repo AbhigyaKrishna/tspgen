@@ -179,6 +179,7 @@ export class TypeCollector {
       case "Boolean":
         return { kind: "literal", value: type.value };
       case "Intrinsic":
+        if (isNullType(type)) return { kind: "literal", value: null };
         if (type.name === "unknown") return UNKNOWN;
         break;
       case "TemplateParameter":

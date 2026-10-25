@@ -106,6 +106,7 @@ function resolveType(ref: TypeRef, ctx: TypeContext): GoType {
     }
     case "nullable": return pointer(resolveType(ref.of, ctx));
     case "literal": {
+      if (ref.value === null) return { text: "any", pointer: false };
       const text = typeof ref.value === "string" ? "string" : typeof ref.value === "boolean" ? "bool" : "float64";
       return { text, pointer: false };
     }

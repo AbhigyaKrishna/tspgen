@@ -72,6 +72,8 @@ export interface KtProperty {
    * wire when the Json omits defaults (`encodeDefaults = false`) — other languages' models require it.
    */
   encodeDefault?: boolean;
+  /** Optional nullable field represented by OptionalValue; the wrapped type. */
+  presence?: KtTypeUse;
 }
 
 export interface KtDataClass extends KtDeclBase {
@@ -115,6 +117,11 @@ export interface KtEnum extends KtDeclBase {
   serializerName?: string;
 }
 
+export interface KtUntaggedUnion extends KtDeclBase {
+  kind: "untagged-union";
+  variants: { name: string; type: KtTypeUse; guard: string; literal?: string }[];
+}
+
 export interface KtTypeAlias extends KtDeclBase {
   kind: "typealias";
   target: KtTypeUse;
@@ -154,7 +161,7 @@ export interface KtEvents extends KtDeclBase {
   events: KtEvent[];
 }
 
-export type KtDecl = KtDataClass | KtSealedInterface | KtEnum | KtTypeAlias | KtEvents | KtValueClass;
+export type KtDecl = KtDataClass | KtSealedInterface | KtEnum | KtTypeAlias | KtEvents | KtValueClass | KtUntaggedUnion;
 
 export interface KtParam {
   name: string;
@@ -285,6 +292,8 @@ export interface KotlinIR {
    * `notBlank`, or an @meta check naming it): targets reference it only then.
    */
   modelCheckException?: string;
+  /** Optional-field presence support, generated only when a property uses it. */
+  optionalValue?: string;
   /** `@encode(string)` on uint64 is used: ModelSerializers.kt declares `ULongAsStringSerializer`. */
   ulongAsString?: boolean;
   /**

@@ -20,7 +20,7 @@ internal fun HttpResponse.isProblem(): Boolean = contentType()?.match(ContentTyp
  * the generated Ktor server sends), else the body text.
  */
 internal suspend fun HttpResponse.errorMessage(): String {
-    val text = bodyAsText()
+    val text = <%~ it.bounded ? "apiBodyText()" : "bodyAsText()" %>
     if (!isProblem()) return text
     return runCatching { Json.parseToJsonElement(text).jsonObject["detail"]?.jsonPrimitive?.contentOrNull }.getOrNull() ?: text
 }
@@ -206,5 +206,75 @@ internal fun HttpRequestBuilder.applyAuth(credentials: List<Pair<AuthScheme, Any
             AuthPlacement.COOKIE -> cookie(scheme.name, value.toString())
         }
     }
+}
+<% } -%>
+
+/** Shared scoped execution. Closing the statement also releases an unread response on failure or cancellation. */
+internal suspend fun <T> executeApiRequest(
+    http: HttpClient,
+    baseUrl: String,
+    method: HttpMethod,
+    segments: List<String>,
+    configure: HttpRequestBuilder.() -> Unit,
+    decode: suspend (HttpResponse) -> T,
+): T = http.prepareRequest {
+    expectSuccess = false
+    this.method = method
+    url {
+        takeFrom(baseUrl)
+        appendPathSegments(segments)
+    }
+    configure(this)
+}.execute { response -> decode(response) }
+<% if (it.bounded) { -%>
+
+/** Reads at most limit + 1 bytes to detect overflow, including responses without Content-Length. */
+internal suspend fun HttpResponse.apiBodyBytes(): ByteArray {
+    val limit = if (status.isSuccess()) <%= it.maxResponseSize %> else <%= it.maxErrorSize %>
+    if (limit == 0) return body()
+    val bytes = bodyAsChannel().readRemaining(limit.toLong() + 1).readByteArray()
+    if (bytes.size > limit) throw ApiException(status.value, "Response body exceeds the configured byte limit")
+    return bytes
+}
+
+internal fun HttpResponse.decodeApiText(bytes: ByteArray): String =
+    (charset() ?: Charsets.UTF_8).newDecoder().decode(Buffer().apply { write(bytes) })
+
+internal suspend fun HttpResponse.apiBodyText(): String = decodeApiText(apiBodyBytes())
+
+internal suspend inline fun <reified T> HttpClient.readApiBody(response: HttpResponse): T {
+    val bytes = response.apiBodyBytes()
+    if (T::class == ByteArray::class) return bytes as T
+    val text = response.decodeApiText(bytes)
+    val contentType = response.contentType()
+    val jsonBody = contentType?.contentSubtype?.let { it == "json" || it.endsWith("+json") } == true
+    if (T::class == String::class && !jsonBody) return text as T
+    return apiJson.decodeFromString<T>(text)
+}
+<% } -%>
+<% if (it.webSockets) { -%>
+
+/** The session and its frames must stay inside consume; Ktor closes it on return, failure or cancellation. */
+internal suspend fun executeApiWebSocket(
+    http: HttpClient,
+    baseUrl: String,
+    segments: List<String>,
+    configure: HttpRequestBuilder.() -> Unit,
+    consume: suspend (DefaultClientWebSocketSession) -> Unit,
+) {
+    http.webSocket(request = {
+        expectSuccess = false
+        url {
+            takeFrom(baseUrl)
+            protocol = when (protocol) {
+                URLProtocol.HTTP -> URLProtocol.WS
+                URLProtocol.HTTPS -> URLProtocol.WSS
+                URLProtocol.WS, URLProtocol.WSS -> protocol
+                else -> throw IllegalArgumentException("Expected an HTTP(S) or WS(S) base URL")
+            }
+            appendPathSegments(segments)
+        }
+        configure(this)
+    }) { consume(this) }
 }
 <% } -%>

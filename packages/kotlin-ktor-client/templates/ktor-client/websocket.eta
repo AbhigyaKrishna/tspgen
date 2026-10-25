@@ -1,0 +1,29 @@
+<%
+const op = it.op;
+const c = it.h.ktorClient;
+const auth = it.extras[op.id].auth;
+const signature = c.signature(op);
+const taken = new Set(op.params.map((p) => p.name));
+let consumer = "consume";
+while (taken.has(consumer)) consumer += "Socket";
+-%>
+    suspend fun <%= op.name %>(<%= signature %><%= signature ? ", " : "" %><%= consumer %>: suspend (io.ktor.client.plugins.websocket.DefaultClientWebSocketSession) -> Unit) {
+<% if (auth) { -%>
+        val <%= auth.variable %> = resolveAuth(<%~ auth.alternatives %>)
+<% } -%>
+        executeApiWebSocket(this@<%= it.group.name %>Client.http, this@<%= it.group.name %>Client.baseUrl, listOf(<%~ c.pathSegments(op) %>), {
+<% if (c.queryLines(op).length) { -%>
+            url {
+<% for (const line of c.queryLines(op)) { -%>
+                <%~ line %>
+<% } -%>
+            }
+<% } -%>
+<% for (const line of c.requestLines(op)) { -%>
+            <%~ line %>
+<% } -%>
+<% if (auth) { -%>
+            applyAuth(<%= auth.variable %>)
+<% } -%>
+        }, <%= consumer %>)
+    }

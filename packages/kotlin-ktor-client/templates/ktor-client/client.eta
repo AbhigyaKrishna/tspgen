@@ -6,11 +6,16 @@
     private val auth: <%= it.auth %>? = null,
 <% } -%>
 ) {
+<% for (const p of it.authPlans ?? []) { -%>
+    private val <%= p.name %> = <%~ p.alternatives %>
+<% } -%>
 <% g.operations.forEach((op, i) => { const segments = c.pathSegments(op); const auth = it.extras[op.id].auth; -%>
 <% if (i > 0) { -%>
 
 <% } -%>
-<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations([...op.annotations, ...it.extras[op.id].annotations], "    ") %><% const stream = c.stream(op); if (stream) { -%>
+<%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations([...op.annotations, ...it.extras[op.id].annotations], "    ") %><% const stream = c.stream(op); if (it.extras[op.id].webSocket) { -%>
+<%~ include("ktor-client/websocket", { ...it, op }) -%>
+<% } else if (stream) { -%>
     fun <%= op.name %>(<%= c.signature(op) %>): <%= op.result.type.text %> = flow {
 <% for (const line of c.preludeLines(stream)) { -%>
         <%~ line %>
@@ -43,7 +48,7 @@
                 if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
 <% } -%>
                 throw when (response.status.value) {
-<% for (const e of c.errorBranches(op)) { -%>
+<% for (const e of c.errorBranches(op, it.bounded)) { -%>
                     <%= e.match %> -> <%~ e.expr %>
 <% } -%>
                 }
@@ -60,27 +65,30 @@
 <% if (auth) { -%>
         val <%= auth.variable %> = resolveAuth(<%~ auth.alternatives %>)
 <% } -%>
-        val response = http.request {
-            expectSuccess = false
-            method = HttpMethod.<%= c.method(op.verb) %>
+        return executeApiRequest(http, baseUrl, HttpMethod.<%= c.method(op.verb) %>, listOf(<%~ segments %>), {
+<% if (c.queryLines(op).length) { -%>
             url {
-                takeFrom(baseUrl)
-<% if (segments) { -%>
-                appendPathSegments(<%~ segments %>)
 <% } -%>
 <% for (const line of c.queryLines(op)) { -%>
                 <%~ line %>
 <% } -%>
+<% if (c.queryLines(op).length) { -%>
             }
+<% } -%>
 <% for (const line of c.requestLines(op)) { -%>
             <%~ line %>
 <% } -%>
 <% if (auth) { -%>
             applyAuth(<%= auth.variable %>)
 <% } -%>
-        }
-<%~ include("ktor-client/response", { op, h: it.h }) %>
+        }, { response ->
+<%~ it.h.indent(include("ktor-client/response", { op, h: it.h, bounded: it.bounded, returnLabel: "@executeApiRequest" }), "    ") %>
+        })
     }
+<% if (it.streaming && op.result.kind === "single" && op.result.type.text === "ByteArray") { -%>
+
+<%~ include("ktor-client/raw-stream", { ...it, op }) %>
+<% } -%>
 <% } -%>
 <% }) -%>
 }

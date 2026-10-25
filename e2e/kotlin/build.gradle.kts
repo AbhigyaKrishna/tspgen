@@ -18,9 +18,11 @@ dependencies {
     implementation("io.ktor:ktor-server-sse:$ktor")
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktor")
     implementation("io.ktor:ktor-client-core:$ktor")
+    implementation("io.ktor:ktor-client-websockets:$ktor")
     implementation("io.ktor:ktor-client-content-negotiation:$ktor")
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
     testImplementation("io.ktor:ktor-server-test-host:$ktor")
+    testImplementation("io.ktor:ktor-server-websockets:$ktor")
     testImplementation("io.ktor:ktor-server-cio:$ktor")
     testImplementation("io.ktor:ktor-client-cio:$ktor")
     testImplementation(kotlin("test"))
@@ -33,6 +35,10 @@ kotlin {
     }
     sourceSets.main {
         kotlin.srcDirs(
+            "build/generated/tspgen-websocket/models",
+            "build/generated/tspgen-websocket/client",
+            "build/generated/tspgen-client/models",
+            "build/generated/tspgen-client/client",
             "build/generated/tspgen/models",
             "build/generated/tspgen/server",
             "build/generated/tspgen/client",

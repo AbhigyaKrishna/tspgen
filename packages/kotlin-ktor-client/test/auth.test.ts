@@ -50,28 +50,25 @@ class ShopAuth(
     private val baseUrl: String,
     private val auth: ShopAuth? = null,
 ) {
+    private val authPlan1 = listOf(listOf(AuthScheme("BearerAuth", AuthPlacement.BEARER, "Authorization", auth?.bearerAuth)))
+    private val authPlan2 = listOf(listOf(AuthScheme("BasicAuth", AuthPlacement.BASIC, "Authorization", auth?.basicAuth)), listOf(AuthScheme("Key", AuthPlacement.QUERY, "api-key", auth?.key)))
+    private val authPlan3 = listOf(listOf(AuthScheme("Session", AuthPlacement.COOKIE, "sid", auth?.session), AuthScheme("Partner", AuthPlacement.HEADER, "X-Partner", auth?.partner)))
     suspend fun list(): List<String> {
-        val credentials = resolveAuth(listOf(listOf(AuthScheme("BearerAuth", AuthPlacement.BEARER, "Authorization", auth?.bearerAuth))))
-        val response = http.request {
-            expectSuccess = false
-            method = HttpMethod.Get
-            url {
-                takeFrom(baseUrl)
-                appendPathSegments("items")
-            }
+        val credentials = resolveAuth(this@ItemsClient.authPlan1)
+        return executeApiRequest(http, baseUrl, HttpMethod.Get, listOf("items"), {
             applyAuth(credentials)
-        }
+        }, { response ->
 `);
     // NoAuth only: nothing resolved.
     expect(items).toContain(`    suspend fun create() {
-        val response = http.request {`);
+        return executeApiRequest(http, baseUrl, HttpMethod.Post, listOf("items"), {`);
     // A | B | NoAuth: the NoAuth alternative is what remains when neither is satisfied.
     expect(items).toContain(
-      `        val credentials = resolveAuth(listOf(listOf(AuthScheme("BasicAuth", AuthPlacement.BASIC, "Authorization", auth?.basicAuth)), listOf(AuthScheme("Key", AuthPlacement.QUERY, "api-key", auth?.key))))\n`,
+      `        val credentials = resolveAuth(this@ItemsClient.authPlan2)\n`,
     );
     // A & B.
     expect(items).toContain(
-      `        val credentials = resolveAuth(listOf(listOf(AuthScheme("Session", AuthPlacement.COOKIE, "sid", auth?.session), AuthScheme("Partner", AuthPlacement.HEADER, "X-Partner", auth?.partner))))\n`,
+      `        val credentials = resolveAuth(this@ItemsClient.authPlan3)\n`,
     );
   });
 
@@ -133,7 +130,8 @@ class ShopAuth(
       message: "Auth scheme 'Digest' (http Digest) is not supported by the Ktor client; alternatives needing it are ignored.",
     });
     const a = outputs[`${DIR}/AClient.kt`];
-    expect(a).toContain(`resolveAuth(listOf(listOf(AuthScheme("BearerAuth", AuthPlacement.BEARER, "Authorization", auth?.bearerAuth))))`);
+    expect(a).toContain(`private val authPlan1 = listOf(listOf(AuthScheme("BearerAuth", AuthPlacement.BEARER, "Authorization", auth?.bearerAuth)))`);
+    expect(a).toContain("resolveAuth(this@AClient.authPlan1)");
     expect(a.match(/resolveAuth/g)).toHaveLength(1);
     expect(outputs[`${DIR}/SApiClient.kt`]).not.toContain("digest");
   });
@@ -172,9 +170,8 @@ class ShopAuth(
         @route("/a") op a(@query auth: string, @query credentials: string): void;
       `)
     ).outputs[`${DIR}/SClient.kt`];
-    expect(items).toContain(
-      `        val authCredentials = resolveAuth(listOf(listOf(AuthScheme("BearerAuth", AuthPlacement.BEARER, "Authorization", this@SClient.auth?.bearerAuth))))\n`,
-    );
+    expect(items).toContain(`AuthScheme("BearerAuth", AuthPlacement.BEARER, "Authorization", this@SClient.auth?.bearerAuth)`);
+    expect(items).toContain("        val authCredentials = resolveAuth(this@SClient.authPlan1)\n");
     expect(items).toContain("            applyAuth(authCredentials)\n");
   });
 
@@ -188,7 +185,7 @@ class ShopAuth(
     ).outputs[`${DIR}/SClient.kt`];
     expect(feed).toContain(`    fun feed(): Flow<Ticks> = flow {
         val json = http.apiJson
-        val credentials = resolveAuth(listOf(listOf(AuthScheme("BearerAuth", AuthPlacement.BEARER, "Authorization", auth?.bearerAuth))))
+        val credentials = resolveAuth(this@SClient.authPlan1)
         http.prepareRequest {
             expectSuccess = false
             method = HttpMethod.Get

@@ -31,7 +31,8 @@ only inherit the `features` key from their enclosing namespaces; any other key s
 on them. `wrap`, `routeSet` and `features.nest-routes` require `routing-style: dsl`; with any other style the
 target fails (a hard error, not a warning) rather than dropping guards. `features` objects merge key by key
 across scopes and levels.
-Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass through untouched):
+`webSocket` metadata and handshake shapes are validated as hard errors.
+Other built-in keys produce an `invalid-meta` warning for wrong types; unknown keys pass through untouched:
 
 | Scope | Key | On | Effect |
 |---|---|---|---|
@@ -43,6 +44,7 @@ Built-in keys (wrong types produce an `invalid-meta` warning; unknown keys pass 
 | `kotlin` | `scalarStyle: "inline" \| "typealias" \| "value-class"` | scalars | override `scalar-style` |
 | `kotlin` / `typescript` (or `*`) | `notBlank: boolean` | string properties | an `x.isNotBlank()` check, emitted with or without `features.validation`; `@minLength(1)` alone only checks `isNotEmpty()`, matching the wire contract; TypeScript: `.regex(/\S/)` on the zod schema |
 | `kotlin:ktor-server` | `authenticate: string \| string[]` | operations, groups | route wrapped in `authenticate(...) { }` (install Ktor `Authentication`); replaces the wrapper generated from `@useAuth` |
+| `kotlin:ktor-client` | `webSocket: boolean` | GET operations, groups, namespaces | generate a scoped WebSocket session callback instead of a buffered HTTP method; see [Kotlin](kotlin.md#websocket-client-operations) |
 | `kotlin:ktor-server` / `kotlin:ktor-client` | `annotations: string[]` | operations, groups | annotations on service / client methods |
 | `kotlin:ktor-server` | `wrap: string[]` | namespaces, groups, operations | route-builder calls wrapped around routes, outermost first (dsl style); duplicates within one chain are dropped and shared prefixes share one block |
 | `kotlin:ktor-server` | `imports: string[]` | namespaces, groups, operations | imports added to the routes file (for names used in `wrap`/`context`; a `wrap` call to `authenticate(...)` needs `io.ktor.server.auth.authenticate` here — only the `authenticate` key adds it automatically) |

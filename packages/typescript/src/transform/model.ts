@@ -175,7 +175,7 @@ export interface TsEvent {
   data: "json" | "text" | "number" | "boolean";
   /** Wire `data:` of a literal payload: the event is recognized by it and carries `value`. */
   literal?: string;
-  value?: string | number | boolean;
+  value?: string | number | boolean | null;
   terminal: boolean;
 }
 

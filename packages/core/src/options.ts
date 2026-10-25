@@ -1,6 +1,7 @@
 import { movedOptionSchemas, type MovedOptions } from "./moved-options.js";
+import type { SelectionOptions } from "./ir/selection.js";
 
-export interface CoreEmitterOptions {
+export interface CoreEmitterOptions extends SelectionOptions {
   "template-dir"?: string;
   plugins?: string[];
   "models-output-dir"?: string;
@@ -18,6 +19,19 @@ export const coreMovedOptions: MovedOptions = { generics: "features.generics" };
 
 /** JSON-schema property fragments every language emitter should include in its options schema. */
 export const coreEmitterOptionsSchemaProperties = {
+  "model-collection": {
+    type: "string",
+    enum: ["all", "reachable"],
+    default: "all",
+    description: "Generate all declarations, or only the transitive types of selected operations and include-types.",
+  },
+  ...Object.fromEntries(
+    ["include-services", "include-operations", "include-types"].map((key) => [key, {
+      type: "array",
+      items: { type: "string" },
+      description: "Exact fully qualified TypeSpec ids to include. Unknown ids are errors.",
+    }]),
+  ),
   "template-dir": {
     type: "string",
     nullable: true,

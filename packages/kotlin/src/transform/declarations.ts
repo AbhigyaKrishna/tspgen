@@ -22,6 +22,7 @@ import {
   type ResolvedFeatures,
 } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program } from "@typespec/compiler";
+import { qualifyText } from "../imports.js";
 import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { camel, identifier, typeName, upperSnake } from "../naming.js";
@@ -41,6 +42,7 @@ import type {
   KtValueClass,
   ScalarStyle,
 } from "./model.js";
+import { jsonShape } from "./json-shape.js";
 import { mappedPackage } from "./packages.js";
 import {
   fqnTypeUse,
@@ -55,7 +57,7 @@ import {
   type DecimalMapping,
 } from "./type-map.js";
 
-type UnionShape = "enum" | "string-alias" | "sealed-interface" | "json";
+type UnionShape = "enum" | "string-alias" | "sealed-interface" | "untagged" | "json";
 
 export interface DeclarationOptions {
   modelsPackage: string;
@@ -103,6 +105,9 @@ export class DeclarationBuilder {
   private usesSseMessage = false;
   private usesULongAsString = false;
   private usesModelCheck = false;
+  private usesPresence = false;
+
+  get presenceUsed(): boolean { return this.usesPresence; }
   /** Value-class scalars used with a property's own `@encode(string)`: their generated `<Name>AsStringSerializer`. */
   private readonly usedValueClassAsString = new Map<string, { name: string; fqn: string; wraps: "Long" | "ULong" }>();
 
@@ -248,6 +253,7 @@ export class DeclarationBuilder {
         return base;
       }
       case "literal":
+        if (ref.value === null) return { text: "JsonNull", imports: ["kotlinx.serialization.json.JsonNull"], nullable: false };
         return scalarTypeUse(
           typeof ref.value === "string"
             ? "string"
@@ -394,6 +400,8 @@ export class DeclarationBuilder {
             return { ...base, kind: "enum", members: [] };
           case "sealed-interface":
             return { ...base, kind: "sealed-interface", discriminator: t.discriminator!.property, properties: [], implements: [...implementsMeta], variants: [] };
+          case "untagged":
+            return { ...base, kind: "untagged-union", variants: [] };
           default:
             return { ...base, kind: "typealias", target: JSON_ELEMENT };
         }
@@ -459,7 +467,7 @@ export class DeclarationBuilder {
     ) {
       return "sealed-interface";
     }
-    return "json";
+    return this.options.features?.values["untagged-unions"] ? "untagged" : "json";
   }
 
   private memberName(name: string): string {
@@ -495,6 +503,23 @@ export class DeclarationBuilder {
       return;
     }
     const shape = this.unionShape(u);
+    if (decl.kind === "untagged-union") {
+      const names = new Set(["Serializer"]);
+      decl.variants = u.variants.map((v, index) => {
+        const base = typeName(v.name ?? (v.type.kind === "named" ? this.types.get(v.type.id)?.name : undefined) ?? `Variant${index + 1}`);
+        let name = base;
+        for (let suffix = 2; names.has(name); suffix++) name = `${base}${suffix}`;
+        names.add(name);
+        return { name, type: this.typeUse(v.type), guard: jsonShape(v.type, this.types), ...(v.type.kind === "literal" ? { literal: JSON.stringify(v.type.value) } : {}) };
+      });
+      const nested = new Set(["Serializer", ...decl.variants.map((v) => v.name)]);
+      for (const variant of decl.variants) {
+        const collisions = variant.type.imports.filter((fqn) => nested.has(fqn.slice(fqn.lastIndexOf(".") + 1)));
+        variant.type = { ...variant.type, text: qualifyText(variant.type.text, collisions),
+          ...(variant.type.serialText ? { serialText: qualifyText(variant.type.serialText, collisions) } : {}) };
+      }
+      return;
+    }
     if (decl.kind === "enum") {
       decl.members = u.variants.map((v) => {
         const value = v.type.kind === "literal" ? String(v.type.value) : "";
@@ -714,6 +739,16 @@ export class DeclarationBuilder {
       prop.default = defaultValue;
       if (!p.optional && !this.multipartModels.has(owner)) prop.encodeDefault = true;
     } else if (p.optional) prop.default = "null";
+    if (p.optional && p.type.kind === "nullable" && !this.multipartModels.has(owner) && this.options.features?.values["optional-presence"]) {
+      this.usesPresence = true;
+      prop.presence = type;
+      const inner = prop.serialType ?? (type.serializer ? `@Serializable(with = ${type.serializer}::class) ${type.text}` : type.text);
+      prop.annotations = prop.annotations.filter((a) => a !== `@Serializable(with = ${type.serializer}::class)`);
+      prop.serialType = `OptionalValue<${inner}>`;
+      prop.type = { text: `OptionalValue<${type.text}>`, imports: [...type.imports, `${this.options.modelsPackage}.OptionalValue`], nullable: false };
+      prop.default = "OptionalValue.Absent";
+      prop.annotations.push("@EncodeDefault(EncodeDefault.Mode.NEVER)");
+    }
     return prop;
   }
 
@@ -723,6 +758,10 @@ export class DeclarationBuilder {
    * as their base type; value-class scalars through `.value`, minus the constraints the class checks itself.
    */
   private checks(p: PropertyIR, prop: KtProperty, where: string): string[] {
+    if (prop.presence) {
+      const inner = this.checks(p, { ...prop, presence: undefined, name: `${prop.name}.value`, type: prop.presence }, where);
+      return inner.length ? [`if (${prop.name} is OptionalValue.Present) {`, ...inner.map((line) => `    ${line}`), "}"] : [];
+    }
     const notBlank = metaBoolean(this.program, resolveMeta(prop.meta, "kotlin"), "notBlank", where) === true;
     let c = this.options.validation ? p.constraints : undefined;
     let expr = prop.name;

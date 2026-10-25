@@ -82,13 +82,14 @@ describe("ktor client error handling", () => {
   it("disables expectSuccess per request and reads a problem's detail as the ApiException message", async () => {
     const { outputs } = await client().compile(spec);
     const pets = outputs[`${DIR}/PetsClient.kt`];
-    expect(pets).toContain("        val response = http.request {\n            expectSuccess = false\n            method = HttpMethod.Get\n");
-    expect(pets).toContain("import io.ktor.client.plugins.expectSuccess\n");
-    expect(pets).toContain("            else -> ApiException(response.status.value, response.errorMessage())\n");
+    expect(pets).toContain("return executeApiRequest(http, baseUrl, HttpMethod.Get,");
+    expect(pets).toContain("                else -> ApiException(response.status.value, response.errorMessage())\n");
     expect(pets).not.toContain("bodyAsText");
     // No typed error body: nothing to guard.
     expect(pets).not.toContain("isProblem");
     const support = outputs[`${DIR}/ClientSupport.kt`];
+    expect(support).toContain("import io.ktor.client.plugins.expectSuccess\n");
+    expect(support).toContain("http.prepareRequest {\n    expectSuccess = false\n    this.method = method\n");
     expect(support).toContain(
       "internal fun HttpResponse.isProblem(): Boolean = contentType()?.match(ContentType.Application.ProblemJson) == true\n",
     );
@@ -109,9 +110,9 @@ describe("ktor client error handling", () => {
       }
     `);
     const pets = outputs[`${DIR}/PetsClient.kt`];
-    expect(pets).toContain(`        if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
-        throw when (response.status.value) {
-            400 -> BadInputException(response.body(), response.status.value)
+    expect(pets).toContain(`            if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
+            throw when (response.status.value) {
+                400 -> BadInputException(response.body(), response.status.value)
 `);
   });
 });

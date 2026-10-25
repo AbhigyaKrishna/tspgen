@@ -31,6 +31,11 @@
  * Installs JSON content negotiation compatible with the generated models.
  */
 <%= it.h.visibility(it) %>fun HttpClientConfig<*>.<%= it.defaultsFn %>(format: Json = <%= it.jsonName %>) {
+<% if (it.webSockets) { -%>
+    install(WebSockets) {
+        contentConverter = KotlinxWebsocketSerializationConverter(format)
+    }
+<% } -%>
     install(ContentNegotiation) {
         json(format)
     }

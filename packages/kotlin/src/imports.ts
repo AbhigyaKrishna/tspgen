@@ -1,3 +1,4 @@
+import { serializerImports } from "./transform/type-map.js";
 import { kotlinxImports } from "./serialization/kotlinx.js";
 import type { KtApiDecl, KtDataClass, KtDecl, KtTypeUse } from "./transform/model.js";
 
@@ -44,6 +45,7 @@ export function qualifyText(text: string, fqns: readonly string[]): string {
 }
 
 function declImportCandidates(decl: KtDecl): string[] {
+  if (decl.kind === "untagged-union") return [...decl.variants.flatMap((v) => [...v.type.imports, ...(v.type.serialImports ?? []), ...serializerImports(v.type)]), ...decl.imports, ...kotlinxImports(decl)];
   if (decl.kind === "value-class") {
     return [...decl.value.imports, ...(decl.value.serialImports ?? []), ...decl.imports, ...kotlinxImports(decl)];
   }
@@ -89,6 +91,8 @@ export function qualifyDecl(decl: KtDecl, qualified: readonly string[]): KtDecl 
     };
   };
   switch (decl.kind) {
+    case "untagged-union":
+      return { ...decl, variants: decl.variants.map((v) => ({ ...v, type: fix(v.type) })) };
     case "typealias":
       return { ...decl, target: fix(decl.target) };
     case "enum":

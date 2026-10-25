@@ -1,0 +1,19 @@
+/** Presence of an optional field: Absent omits its key; Present(null) explicitly clears it. */
+@Serializable(with = OptionalValueSerializer::class)
+<%= it.h.visibility(it) %>sealed class OptionalValue<out T> {
+    data object Absent : OptionalValue<Nothing>()
+    data class Present<T>(val value: T) : OptionalValue<T>()
+}
+
+<%= it.h.visibility(it) %>class OptionalValueSerializer<T>(private val valueSerializer: KSerializer<T>) : KSerializer<OptionalValue<T>> {
+    override val descriptor: SerialDescriptor = valueSerializer.descriptor
+
+    override fun serialize(encoder: Encoder, value: OptionalValue<T>) {
+        when (value) {
+            OptionalValue.Absent -> throw SerializationException("Absent fields must be omitted")
+            is OptionalValue.Present -> valueSerializer.serialize(encoder, value.value)
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): OptionalValue<T> = OptionalValue.Present(valueSerializer.deserialize(decoder))
+}

@@ -87,6 +87,14 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
       }
     }
   }
+  if (builder.presenceUsed) {
+    const reserved = new Set([`${modelsPackage}.OptionalValue`, `${modelsPackage}.OptionalValueSerializer`]);
+    for (const declaration of declarations) {
+      if (reserved.has(declaration.fqn)) reportDiagnostic(program, {
+        code: "duplicate-type-name", format: { fqn: declaration.fqn, first: declaration.id, second: "$runtime.OptionalValue" }, target: NoTarget,
+      });
+    }
+  }
   return {
     basePackage: options.package,
     modelsPackage,
@@ -96,6 +104,7 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     services,
     api,
     serializers,
+    ...(builder.presenceUsed ? { optionalValue: `${modelsPackage}.OptionalValue` } : {}),
     apiVersions: options.apiVersion === false ? [] : apiVersionConstants(api),
     ...(builder.fileUsed ? { httpFile: builder.httpFileFqn } : {}),
     ...(builder.sseMessageUsed ? { sseMessage: builder.sseMessageFqn } : {}),
@@ -116,6 +125,7 @@ function usedSerializers(declarations: KtDecl[], services: KtService[]): string[
     // Event payloads are encoded with the models' Json: a java.time payload needs its serializer.
     if (d.kind === "events") types.push(...d.events.flatMap((e) => (e.data ? [e.data] : [])));
     if (d.kind === "value-class") types.push(d.value);
+    if (d.kind === "untagged-union") types.push(...d.variants.map((v) => v.type));
   };
   declarations.forEach(addDecl);
   for (const op of services.flatMap((s) => s.groups.flatMap((g) => g.operations))) {

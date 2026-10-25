@@ -15,6 +15,14 @@ export type EnumMemberNaming = "UPPER_SNAKE" | "PascalCase";
 export const KOTLIN_EMITTER = "@abhigyakrishna/tspgen-kotlin";
 
 export const kotlinFeatures = defineFeatures({
+  "optional-presence": {
+    default: false,
+    description: "Represent optional nullable model fields as OptionalValue<T>, distinguishing absent from explicit null.",
+  },
+  "untagged-unions": {
+    default: false,
+    description: "Generate sealed wrappers with JSON serializers for untagged unions. Ambiguous JSON is rejected.",
+  },
   ...coreFeatures,
   validation: {
     default: true,

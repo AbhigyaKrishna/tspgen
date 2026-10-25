@@ -1,5 +1,5 @@
 <% const d = it.decl; const sup = d.implements.length ? " : " + d.implements.map((f) => it.h.ref(f, it.qualified)).join(", ") : ""; const tp = d.typeParameters?.length ? "<" + d.typeParameters.join(", ") + ">" : ""; %>
-<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><% if (!d.plain && d.properties.some((p) => p.encodeDefault)) { %>@OptIn(ExperimentalSerializationApi::class) // @EncodeDefault
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><% if (!d.plain && d.properties.some((p) => p.encodeDefault || p.presence)) { %>@OptIn(ExperimentalSerializationApi::class) // @EncodeDefault
 <% } %><% if (!d.plain) { %>@Serializable
 <% } %><% if (d.serialName !== undefined) { %>@SerialName(<%~ it.h.str(d.serialName) %>)
 <% } %><% if (d.properties.length === 0) { %><%= it.h.visibility(it) %>class <%= d.name %><%= tp %><%= sup %>

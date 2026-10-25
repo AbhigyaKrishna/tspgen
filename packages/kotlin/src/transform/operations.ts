@@ -1,4 +1,4 @@
-import { isDefaultStatus, isFixedStatus, mergeScopes, metaScopes, type ApiIR, type MetaScopes, type OperationIR, type StatusCodes } from "@abhigyakrishna/tspgen-core";
+import { isDefaultStatus, isFixedStatus, mergeScopes, metaScopes, type ApiIR, type MetaScopes, type OperationIR, type TypeRef, type StatusCodes } from "@abhigyakrishna/tspgen-core";
 import { camel, identifier, typeName } from "../naming.js";
 import type { DeclarationBuilder } from "./declarations.js";
 import { decoratorArg } from "./decorators.js";
@@ -16,7 +16,7 @@ import type {
   KtService,
   KtTypeUse,
 } from "./model.js";
-import { nullable } from "./type-map.js";
+import { isJsonContentType, nullable } from "./type-map.js";
 
 const UNIT: KtTypeUse = { text: "Unit", imports: [], nullable: false };
 const FLOW = "kotlinx.coroutines.flow.Flow";
@@ -186,7 +186,7 @@ export class ApiBuilder {
     if (op.body) {
       const taken = new Set(params.map((p) => p.name));
       const preferred = identifier(camel(op.body.name ?? "body"));
-      const type = this.types.typeUse(op.body.type);
+      const type = this.wireBodyType(op.body.type, op.body.contentTypes[0] ?? "application/json");
       const body = op.body;
       result.body = {
         name: taken.has(preferred) ? "requestBody" : preferred,
@@ -213,9 +213,17 @@ export class ApiBuilder {
     return result;
   }
 
+  private wireBodyType(ref: TypeRef, contentType: string): KtTypeUse {
+    if (ref.kind === "nullable") return nullable(this.wireBodyType(ref.of, contentType));
+    if (ref.kind === "scalar" && ref.name === "bytes" && !decoratorArg(ref.custom?.decorators, "Kotlin.type") && !isJsonContentType(contentType)) {
+      return { text: "ByteArray", imports: [], nullable: false };
+    }
+    return this.types.typeUse(ref);
+  }
+
   private responseBody(body: NonNullable<OperationIR["responses"][number]["body"]>): Pick<KtResponse, "body" | "contentType" | "stream"> {
     const contentType = body.contentTypes[0] ?? "application/json";
-    if (!body.stream) return { body: this.types.typeUse(body.type), contentType };
+    if (!body.stream) return { body: this.wireBodyType(body.type, contentType), contentType };
     const stream = this.types.stream(body.stream, body.type);
     return { body: stream.type, contentType, stream };
   }

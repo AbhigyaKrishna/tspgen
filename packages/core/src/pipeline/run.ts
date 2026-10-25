@@ -71,7 +71,8 @@ export async function runPipeline<L>(input: PipelineOptions<L>): Promise<void> {
   if (resolution.failed) return;
   // Without the SSE libraries, event streams are untyped (the operations report sse-libraries-missing).
   const sse = usesSseLibraries(program) ? await loadSseLibraries() : undefined;
-  const api = buildFeaturedApiIR(program, features, language.name, resolution.services, sse);
+  const api = buildFeaturedApiIR(program, features, language.name, resolution.services, sse, emitterOptions);
+  if (program.diagnostics.some((diagnostic) => diagnostic.severity === "error")) return;
   let ir = language.transform(api, { program, options: emitterOptions, features });
   for (const plugin of plugins) {
     if (!plugin.transformIR) continue;

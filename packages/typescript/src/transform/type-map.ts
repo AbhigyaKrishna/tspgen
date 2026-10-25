@@ -93,7 +93,8 @@ function codecOf(uses: readonly TsTypeUse[]): { codec?: true } {
   return uses.some((u) => u.codec) ? { codec: true } : {};
 }
 
-export function literalUse(value: string | number | boolean): TsTypeUse {
+export function literalUse(value: string | number | boolean | null): TsTypeUse {
+  if (value === null) return simple("null", "z.null()", "Schema.Null");
   const literal = typeof value === "string" ? JSON.stringify(value) : String(value);
   return simple(literal, `z.literal(${literal})`, `Schema.Literal(${literal})`);
 }

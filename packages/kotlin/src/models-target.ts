@@ -5,6 +5,7 @@ import { SERIALIZED_CLASSES, serializedIn } from "./transform/type-map.js";
 
 /** Property types of a declaration, including those of variants nested in it. */
 function declTypes(decl: KtDecl): KtTypeUse[] {
+  if (decl.kind === "untagged-union") return decl.variants.map((v) => v.type);
   if (decl.kind === "value-class") return [decl.value];
   // Events classes are not serialized: their payloads are encoded by the server and client routes.
   if (decl.kind === "typealias" || decl.kind === "enum" || decl.kind === "events") return [];
@@ -113,6 +114,18 @@ function modelCheckFile(ir: KotlinIR): FileSpec[] {
   ];
 }
 
+function presenceFile(ir: KotlinIR): FileSpec[] {
+  if (!ir.optionalValue) return [];
+  return [{
+    path: `models/${ir.modelsPackage.replaceAll(".", "/")}/OptionalValue.kt`,
+    template: "kotlin/file",
+    data: { package: ir.modelsPackage, body: "kotlin/model/optional-value", imports: [
+      "kotlinx.serialization.Serializable", "kotlinx.serialization.KSerializer", "kotlinx.serialization.SerializationException",
+      "kotlinx.serialization.descriptors.SerialDescriptor", "kotlinx.serialization.encoding.Decoder", "kotlinx.serialization.encoding.Encoder",
+    ] },
+  }];
+}
+
 /** Built-in target: one Kotlin file per declaration under `models/`. */
 export const modelsTarget: Target<KotlinIR> = {
   name: "kotlin-models",
@@ -146,7 +159,7 @@ export const modelsTarget: Target<KotlinIR> = {
         },
       };
     });
-    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...modelCheckFile(ir), ...modelSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
+    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...modelCheckFile(ir), ...presenceFile(ir), ...modelSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
   },
 };
 

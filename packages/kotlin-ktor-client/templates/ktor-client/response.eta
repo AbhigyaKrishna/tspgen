@@ -1,12 +1,12 @@
 <% const r = it.op.result; const c = it.h.ktorClient; -%>
 <% if (r.kind === "single") { -%>
         if (response.status.isSuccess()) {
-            return<%~ r.type.text === "Unit" ? "" : " " + c.bodyRead(r.type) %>
+            return<%= it.returnLabel ?? "" %><%~ r.type.text === "Unit" ? "" : " " + c.bodyRead(r.type, it.bounded) %>
         }
 <% } else { -%>
         when (response.status.value) {
 <% for (const v of r.decl.variants) { -%>
-            <%= c.statusMatch(v.statusCodes) %> -> return <%= r.decl.name %>.<%= v.name %><%~ c.variantArgs(v) %>
+            <%= c.statusMatch(v.statusCodes) %> -> return<%= it.returnLabel ?? "" %> <%= r.decl.name %>.<%= v.name %><%~ c.variantArgs(v, it.bounded) %>
 <% } -%>
         }
 <% } -%>
@@ -14,7 +14,7 @@
         if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
 <% } -%>
         throw when (response.status.value) {
-<% for (const e of c.errorBranches(it.op)) { -%>
+<% for (const e of c.errorBranches(it.op, it.bounded)) { -%>
             <%= e.match %> -> <%~ e.expr %>
 <% } -%>
         }

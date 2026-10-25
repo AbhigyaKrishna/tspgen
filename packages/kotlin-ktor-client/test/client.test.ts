@@ -32,40 +32,32 @@ import com.acme.models.Kind
 import com.acme.models.Pet
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.plugins.expectSuccess
 import io.ktor.client.request.header
-import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
-import io.ktor.http.appendPathSegments
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import io.ktor.http.takeFrom
 
 class PetsClient(
     private val http: HttpClient,
     private val baseUrl: String,
 ) {
     suspend fun get(petId: Long, trace: String? = null): Pet {
-        val response = http.request {
-            expectSuccess = false
-            method = HttpMethod.Get
-            url {
-                takeFrom(baseUrl)
-                appendPathSegments("pets", petId.toString())
-            }
+        return executeApiRequest(http, baseUrl, HttpMethod.Get, listOf("pets", petId.toString()), {
             trace?.let { header("x-trace", it) }
-        }
-        if (response.status.isSuccess()) {
-            return response.body()
-        }
-        if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
-        throw when (response.status.value) {
-            404 -> NotFoundException(response.body(), response.status.value)
-            else -> ApiErrorException(response.body(), response.status.value)
-        }
+        }, { response ->
+            if (response.status.isSuccess()) {
+                return@executeApiRequest response.body()
+            }
+            if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
+            throw when (response.status.value) {
+                404 -> NotFoundException(response.body(), response.status.value)
+                else -> ApiErrorException(response.body(), response.status.value)
+            }
+        })
     }
+
 `)).toBe(true);
   });
 
@@ -73,24 +65,20 @@ class PetsClient(
     const { outputs } = await client().compile(spec);
     expect(outputs[`${DIR}/PetsClient.kt`]).toContain(`
     suspend fun create(pet: Pet): CreateResult {
-        val response = http.request {
-            expectSuccess = false
-            method = HttpMethod.Post
-            url {
-                takeFrom(baseUrl)
-                appendPathSegments("pets")
-            }
+        return executeApiRequest(http, baseUrl, HttpMethod.Post, listOf("pets"), {
             contentType(ContentType.parse("application/json"))
             setBody(pet)
-        }
-        when (response.status.value) {
-            201 -> return CreateResult.Created(response.body(), (response.headers["location"] ?: throw ApiException(response.status.value, "missing header location")))
-            200 -> return CreateResult.Ok(response.body())
-        }
-        throw when (response.status.value) {
-            else -> ApiException(response.status.value, response.errorMessage())
-        }
+        }, { response ->
+            when (response.status.value) {
+                201 -> return@executeApiRequest CreateResult.Created(response.body(), (response.headers["location"] ?: throw ApiException(response.status.value, "missing header location")))
+                200 -> return@executeApiRequest CreateResult.Ok(response.body())
+            }
+            throw when (response.status.value) {
+                else -> ApiException(response.status.value, response.errorMessage())
+            }
+        })
     }
+
 `);
   });
 
@@ -101,9 +89,9 @@ class PetsClient(
     expect(pets).toContain(`parameters.append("ids", ids.joinToString(",") { it.toString() })`);
     expect(pets).toContain(`tags?.forEach { parameters.append("tags", it) }`);
     expect(pets).toContain(`    suspend fun remove(petId: Long) {`);
-    expect(pets).toContain(`        if (response.status.isSuccess()) {
-            return
-        }`);
+    expect(pets).toContain(`            if (response.status.isSuccess()) {
+                return@executeApiRequest
+            }`);
   });
 
   it("writes and parses java.time parameters and headers as ISO-8601", async () => {
@@ -177,5 +165,88 @@ fun HttpClientConfig<*>.petStoreDefaults(format: Json = PetStoreJson) {
     const api = outputs[`${DIR}/PetStoreApiClient.kt`];
     expect(api).toContain("\ninternal class PetStoreApiClient(http: HttpClient, baseUrl: String) {");
     expect(api).toMatch(/\ninternal fun HttpClientConfig<\*>\.\w+\(/);
+  });
+});
+
+describe("Kotlin client wire behavior", () => {
+  it("uses raw bytes for binary HTTP bodies and keeps JSON bytes as base64 strings", async () => {
+    const { outputs } = await client().compile(`
+      @service namespace S;
+      model Encoded { value: bytes }
+      @get @route("/binary") op binary(): { @header contentType: "application/octet-stream"; @body body: bytes; };
+      @put @route("/binary") op upload(@header contentType: "application/octet-stream", @body body: bytes): void;
+      @get @route("/encoded") op encoded(): Encoded;
+    `);
+    expect(outputs[`${DIR}/SClient.kt`]).toContain(
+      "suspend fun binary(): ByteArray",
+    );
+    expect(outputs[`${DIR}/SClient.kt`]).toContain(
+      "suspend fun upload(contentType: String, body: ByteArray)",
+    );
+    expect(outputs["models/com/acme/models/Encoded.kt"]).toContain(
+      "val value: String",
+    );
+  });
+
+  it("shares transport and authentication plans while resolving providers per call", async () => {
+    const { outputs } = await client().compile(`
+      @service @useAuth(BearerAuth) namespace S;
+      @get @route("/a") op a(): string;
+      @get @route("/b") op b(): string;
+    `);
+    const group = outputs[`${DIR}/SClient.kt`];
+    expect(group).toContain("private val authPlan1 = listOf(");
+    expect(group).not.toContain("private val authPlan2");
+    expect(group.match(/resolveAuth\(this@SClient.authPlan1\)/g)).toHaveLength(
+      2,
+    );
+    expect(group.match(/return executeApiRequest/g)).toHaveLength(2);
+    expect(group).toContain("return@executeApiRequest response.body()");
+    expect(outputs[`${DIR}/ClientSupport.kt`]).toContain(
+      "}.execute { response -> decode(response) }",
+    );
+  });
+
+  it("adds scoped binary streaming without changing the buffered method", async () => {
+    const { outputs } = await client({ features: { streaming: true } })
+      .compile(`
+      @service namespace S;
+      @get @route("/binary") op binary(): { @header contentType: "application/octet-stream"; @body body: bytes; };
+    `);
+    const group = outputs[`${DIR}/SClient.kt`];
+    expect(group).toContain("suspend fun binary(): ByteArray");
+    expect(group).toContain(
+      "suspend fun <StreamResult> binaryStream(consume: suspend (ByteReadChannel) -> StreamResult)",
+    );
+    expect(group).toContain("return@execute consume(response.bodyAsChannel())");
+  });
+
+  it("enforces configured byte limits inside scoped requests, including chunked errors", async () => {
+    const { outputs } = await client({
+      "max-response-size": 64,
+      "max-error-size": 32,
+    }).compile(`
+      @service namespace S; @get op value(): string;
+    `);
+    expect(outputs[`${DIR}/SClient.kt`]).toContain(
+      "http.readApiBody<String>(response)",
+    );
+    const runtime = outputs[`${DIR}/ClientSupport.kt`];
+    expect(runtime).toContain("if (status.isSuccess()) 64 else 32");
+    expect(runtime).toContain("readRemaining(limit.toLong() + 1)");
+    expect(runtime).toContain("throw ApiException(status.value");
+  });
+
+  it("disambiguates streaming methods and preserves strings containing return", async () => {
+    const { outputs } = await client({ features: { streaming: true } })
+      .compile(`
+      @service namespace S;
+      @get @route("/bytes") op binary(): { @header contentType: "application/octet-stream"; @body body: bytes; };
+      @get @route("/existing") op binaryStream(): { @header("return") value: string; };
+    `);
+    const code = outputs[`${DIR}/SClient.kt`];
+    expect(code).toContain("suspend fun <StreamResult> binaryStream2(");
+    expect(code).toContain("missing header return");
+    expect(code).not.toContain("missing header return@executeApiRequest");
   });
 });

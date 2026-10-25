@@ -15,7 +15,7 @@ export function kotlinxImports(decl: KtDecl): string[] {
         ...(decl.serialName !== undefined || decl.properties.some((p) => p.serialName !== undefined)
           ? ["kotlinx.serialization.SerialName"]
           : []),
-        ...(decl.properties.some((p) => p.encodeDefault)
+        ...(decl.properties.some((p) => p.encodeDefault || p.presence)
           ? ["kotlinx.serialization.EncodeDefault", "kotlinx.serialization.ExperimentalSerializationApi"]
           : []),
       ];
@@ -44,6 +44,13 @@ export function kotlinxImports(decl: KtDecl): string[] {
           ];
     case "value-class":
       return ["kotlinx.serialization.Serializable"];
+    case "untagged-union":
+      return ["kotlinx.serialization.Serializable", "kotlinx.serialization.KSerializer", "kotlinx.serialization.SerializationException",
+        "kotlinx.serialization.descriptors.buildClassSerialDescriptor", "kotlinx.serialization.encoding.Decoder", "kotlinx.serialization.encoding.Encoder",
+        "kotlinx.serialization.json.JsonDecoder", "kotlinx.serialization.json.JsonEncoder", "kotlinx.serialization.json.Json",
+        "kotlinx.serialization.json.decodeFromJsonElement", "kotlinx.serialization.json.encodeToJsonElement",
+        "kotlinx.serialization.json.JsonObject", "kotlinx.serialization.json.JsonArray", "kotlinx.serialization.json.JsonPrimitive",
+        "kotlinx.serialization.json.JsonNull", "kotlinx.serialization.json.booleanOrNull", "kotlinx.serialization.json.doubleOrNull"];
     case "typealias":
     case "events":
       return [];

@@ -27,13 +27,7 @@ describe("ktor client uploads", () => {
     const { outputs } = await client().compile(uploadSpec);
     const uploads = outputs[`${DIR}/UploadsClient.kt`];
     expect(uploads).toContain(`    suspend fun upload(body: Upload) {
-        val response = http.request {
-            expectSuccess = false
-            method = HttpMethod.Post
-            url {
-                takeFrom(baseUrl)
-                appendPathSegments("uploads")
-            }
+        return executeApiRequest(http, baseUrl, HttpMethod.Post, listOf("uploads"), {
             setBody(
                 MultiPartFormDataContent(
                     formData {
@@ -47,7 +41,7 @@ describe("ktor client uploads", () => {
                     },
                 ),
             )
-        }`);
+        }, { response ->`);
     expect(uploads).toContain("import io.ktor.client.request.forms.MultiPartFormDataContent\n");
     expect(uploads).toContain("import io.ktor.client.request.forms.formData\n");
   });
@@ -55,17 +49,11 @@ describe("ktor client uploads", () => {
   it("sends file bodies as bytes with their content type and filename", async () => {
     const { outputs } = await client().compile(uploadSpec);
     expect(outputs[`${DIR}/UploadsClient.kt`]).toContain(`    suspend fun file(file: HttpFile) {
-        val response = http.request {
-            expectSuccess = false
-            method = HttpMethod.Put
-            url {
-                takeFrom(baseUrl)
-                appendPathSegments("uploads", "file")
-            }
+        return executeApiRequest(http, baseUrl, HttpMethod.Put, listOf("uploads", "file"), {
             contentType(ContentType.parse(file.contentType ?: "image/png"))
             file.filename?.let { header(HttpHeaders.ContentDisposition, ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, it).toString()) }
             setBody(file.bytes)
-        }`);
+        }, { response ->`);
   });
 
   it("adds the multipart helpers to ClientSupport.kt only when needed", async () => {

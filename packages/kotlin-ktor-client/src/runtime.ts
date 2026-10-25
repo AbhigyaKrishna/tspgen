@@ -7,6 +7,9 @@ export interface ClientRuntime {
   encodeDefaults: boolean;
   auth: boolean;
   sseMaxSize: number;
+  streaming?: boolean;
+  maxResponseSize?: number;
+  maxErrorSize?: number;
 }
 
 export const DEFAULT_CLIENT_RUNTIME: ClientRuntime = {
@@ -24,6 +27,9 @@ export function clientRuntime(options: KtorClientOptions): ClientRuntime {
     encodeDefaults: features["encode-defaults"] ?? false,
     auth: features.auth ?? true,
     sseMaxSize: options["sse-max-size"] ?? 1048576,
+    streaming: features.streaming ?? false,
+    maxResponseSize: options["max-response-size"] ?? 0,
+    maxErrorSize: options["max-error-size"] ?? 0,
   };
 }
 

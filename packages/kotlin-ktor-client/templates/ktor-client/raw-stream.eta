@@ -1,0 +1,48 @@
+<%
+const op = it.op;
+const c = it.h.ktorClient;
+const auth = it.extras[op.id].auth;
+const segments = c.pathSegments(op);
+const signature = c.signature(op);
+const taken = new Set([...op.params.map((p) => p.name), op.body?.name]);
+const typeNames = new Set([...op.params.flatMap((p) => p.type.imports), ...(op.body?.type.imports ?? [])].map((fqn) => fqn.slice(fqn.lastIndexOf(".") + 1)));
+let resultType = "StreamResult";
+while (typeNames.has(resultType)) resultType += "Result";
+let consumer = "consume";
+while (taken.has(consumer)) consumer += "Stream";
+-%>
+    /** Streams response bytes within [<%= consumer %>]; the channel must not escape the callback. */
+    suspend fun <<%= resultType %>> <%= it.extras[op.id].streamName %>(<%= signature %><%= signature ? ", " : "" %><%= consumer %>: suspend (ByteReadChannel) -> <%= resultType %>): <%= resultType %> {
+<% if (auth) { -%>
+        val <%= auth.variable %> = resolveAuth(<%~ auth.alternatives %>)
+<% } -%>
+        return http.prepareRequest {
+            expectSuccess = false
+            method = HttpMethod.<%= c.method(op.verb) %>
+            url {
+                takeFrom(baseUrl)
+<% if (segments) { -%>
+                appendPathSegments(<%~ segments %>)
+<% } -%>
+<% for (const line of c.queryLines(op)) { -%>
+                <%~ line %>
+<% } -%>
+            }
+<% for (const line of c.requestLines(op)) { -%>
+            <%~ line %>
+<% } -%>
+<% if (auth) { -%>
+            applyAuth(<%= auth.variable %>)
+<% } -%>
+        }.execute { response ->
+            if (response.status.isSuccess()) return@execute <%= consumer %>(response.bodyAsChannel())
+<% if (c.typedErrors(op)) { -%>
+            if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
+<% } -%>
+            throw when (response.status.value) {
+<% for (const error of c.errorBranches(op, it.bounded)) { -%>
+                <%= error.match %> -> <%~ error.expr %>
+<% } -%>
+            }
+        }
+    }

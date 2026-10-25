@@ -10,7 +10,7 @@ describe("ktor client type mapping", () => {
       @route("/counters/{id}") op get(@path id: uint64, @query ids?: uint64[]): { @header total: uint64 };
     `);
     const code = outputs[`${DIR}/SClient.kt`];
-    expect(code).toContain(`appendPathSegments("counters", id.toString())`);
+    expect(code).toContain(`listOf("counters", id.toString())`);
     expect(code).toContain(`ids?.let { values -> parameters.append("ids", values.joinToString(",") { it.toString() }) }`);
     expect(code).toContain(`response.headers["total"] ?: throw ApiException(response.status.value, "missing header total")).toULong()`);
   });
@@ -32,7 +32,7 @@ describe("ktor client type mapping", () => {
       @route("/pets/{id}") op get(@path id: PetId, @query ids?: PetId[]): void;
     `);
     const code = outputs[`${DIR}/SClient.kt`];
-    expect(code).toContain(`appendPathSegments("pets", id.value)`);
+    expect(code).toContain(`listOf("pets", id.value)`);
     expect(code).toContain(`ids?.let { values -> parameters.append("ids", values.joinToString(",") { it.value }) }`);
   });
 
@@ -96,20 +96,20 @@ describe("ktor client type mapping", () => {
       it(`${style}: writes and reads bodies through the explicit serializer and the API client's Json`, async () => {
         const { outputs } = await client({}, { "scalar-style": style }).compile(spec);
         const code = outputs[`${DIR}/IdsClient.kt`];
-        expect(code).toContain("return http.apiJson.decodeFromString(ListSerializer(LongAsStringSerializer), response.bodyAsText())");
+        expect(code).toContain("return@executeApiRequest http.apiJson.decodeFromString(ListSerializer(LongAsStringSerializer), response.bodyAsText())");
         expect(code).toContain(
           'setBody(TextContent(http.apiJson.encodeToString(ListSerializer(LongAsStringSerializer), ids), ContentType.parse("application/json")))',
         );
         expect(code).toContain(
           'setBody(TextContent(http.apiJson.encodeToString(LongAsStringSerializer.nullable, id), ContentType.parse("application/json")))',
         );
-        expect(code).toContain("200 -> return EitherResult.Ok(http.apiJson.decodeFromString(ListSerializer(LongAsStringSerializer), response.bodyAsText()))");
+        expect(code).toContain("200 -> return@executeApiRequest EitherResult.Ok(http.apiJson.decodeFromString(ListSerializer(LongAsStringSerializer), response.bodyAsText()))");
         const exception = style === "inline" ? "LongException" : "BigIdException";
         expect(code).toContain(`404 -> ${exception}(http.apiJson.decodeFromString(LongAsStringSerializer, response.bodyAsText()), response.status.value)`);
         // A text/plain scalar body is no JSON: unchanged.
         expect(code).toContain('contentType(ContentType.parse("text/plain"))');
         // Values without an @encode(string) inside keep content negotiation.
-        expect(code).toContain("return response.body()");
+        expect(code).toContain("return@executeApiRequest response.body()");
         expect(code).toContain("import io.ktor.http.content.TextContent\n");
         expect(code).toContain("import io.ktor.client.statement.bodyAsText\n");
         expect(code).toContain("import kotlinx.serialization.builtins.ListSerializer\n");

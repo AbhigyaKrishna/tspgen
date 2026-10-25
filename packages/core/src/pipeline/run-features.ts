@@ -1,3 +1,4 @@
+import { selectApi, type SelectionOptions } from "../ir/selection.js";
 import type { Model, Program } from "@typespec/compiler";
 import { defaultHeaderText } from "../comments.js";
 import { coreFeatures, defineFeatures, emitterFeatures, type ResolvedFeatures } from "../features.js";
@@ -40,8 +41,9 @@ export function buildFeaturedApiIR(
   language: string,
   services: ResolvedService[],
   sse?: SseLibraries,
+  selection: SelectionOptions = {},
 ): ApiIR {
-  const api = buildApiIR(program, {
+  const api = selectApi(program, buildApiIR(program, {
     generics: (declaration: Model) =>
       features.at(
         "generics",
@@ -50,7 +52,7 @@ export function buildFeaturedApiIR(
       ),
     services,
     ...(sse ? { sse } : {}),
-  });
+  }), selection);
   checkMetaFeatures(program, api, features, language);
   stripDocs(api, features, language);
   return api;

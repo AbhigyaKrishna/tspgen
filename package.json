@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@12.5.1",
   "scripts": {
+    "benchmark:kotlin": "pnpm build && node scripts/benchmark-kotlin-client.mjs",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "docs:options": "pnpm -r build && node scripts/docs-options.mjs",

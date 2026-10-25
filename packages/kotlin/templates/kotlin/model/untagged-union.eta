@@ -1,0 +1,49 @@
+<% const d = it.decl; -%>
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable(with = <%= d.name %>.Serializer::class)
+<%= it.h.visibility(it) %>sealed interface <%= d.name %> {
+<% for (const v of d.variants) { -%>
+    data class <%= v.name %>(val value: <%= v.type.serialText ?? v.type.text %>) : <%= d.name %>
+<% } -%>
+
+    object Serializer : KSerializer<<%= d.name %>> {
+        override val descriptor = buildClassSerialDescriptor(<%~ it.h.str(d.fqn) %>)
+
+        override fun deserialize(decoder: Decoder): <%= d.name %> {
+            val input = decoder as? JsonDecoder ?: throw SerializationException("Untagged unions require JSON")
+            val element = input.decodeJsonElement()
+            val matches = mutableListOf<<%= d.name %>>()
+<% for (const v of d.variants) { -%>
+            if (<%~ v.guard %>) try {
+<% if (v.literal !== undefined) { -%>
+                if (element == Json.parseToJsonElement(<%~ it.h.str(v.literal) %>)) {
+                    matches += <%= v.name %>(input.json.decodeFromJsonElement<%= it.h.serializerExpr(v.type) ? "" : "<" + v.type.text + ">" %>(<%~ it.h.serializerExpr(v.type) ? it.h.serializerExpr(v.type) + ", " : "" %>element))
+                }
+<% } else { -%>
+                matches += <%= v.name %>(input.json.decodeFromJsonElement<%= it.h.serializerExpr(v.type) ? "" : "<" + v.type.text + ">" %>(<%~ it.h.serializerExpr(v.type) ? it.h.serializerExpr(v.type) + ", " : "" %>element))
+<% } -%>
+            } catch (_: SerializationException) {
+                // This variant does not accept the JSON value.
+            } catch (_: IllegalArgumentException) {
+                // A generated model constraint rejected the value.
+            }
+<% } -%>
+            if (matches.size != 1) throw SerializationException("Expected exactly one matching variant of <%= d.name %>")
+            return matches.single()
+        }
+
+        override fun serialize(encoder: Encoder, value: <%= d.name %>) {
+            val output = encoder as? JsonEncoder ?: throw SerializationException("Untagged unions require JSON")
+            when (value) {
+<% for (const v of d.variants) { -%>
+                is <%= v.name %> -> {
+                    val element = output.json.encodeToJsonElement<%= it.h.serializerExpr(v.type) ? "" : "<" + v.type.text + ">" %>(<%~ it.h.serializerExpr(v.type) ? it.h.serializerExpr(v.type) + ", " : "" %>value.value)
+<% if (v.literal !== undefined) { -%>
+                    if (element != Json.parseToJsonElement(<%~ it.h.str(v.literal) %>)) throw SerializationException("Invalid literal variant")
+<% } -%>
+                    output.encodeJsonElement(element)
+                }
+<% } -%>
+            }
+        }
+    }
+}

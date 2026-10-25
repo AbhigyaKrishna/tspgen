@@ -1,13 +1,18 @@
 import { defineFeatures } from "@abhigyakrishna/tspgen-core";
 
 export const ktorClientFeatures = defineFeatures({
+  streaming: {
+    default: false,
+    description: "Add scoped Stream methods for single raw binary responses, with a ByteReadChannel consumer.",
+  },
   "ignore-unknown-keys": {
     default: true,
     description: "Ignore response fields the models don't declare (false: they fail decoding with SerializationException).",
   },
   "encode-defaults": {
     default: false,
-    description: "Write optional properties equal to their default in request bodies (kotlinx's encodeDefaults); required ones are always written.",
+    description:
+      "Write optional properties equal to their default in request bodies (kotlinx's encodeDefaults); required ones are always written.",
   },
   auth: {
     default: true,
@@ -20,6 +25,8 @@ export type KtorClientFeatures = Record<keyof typeof ktorClientFeatures.defs, bo
 export interface KtorClientOptions {
   package?: string;
   "sse-max-size": number;
+  "max-response-size"?: number;
+  "max-error-size"?: number;
   /** On/off gates; every key is filled from its default by core's loadTargets. */
   features: KtorClientFeatures;
 }
@@ -28,13 +35,30 @@ export const ktorClientOptionsSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    package: { type: "string", description: 'Client package (default "<package>.client").' },
+    package: {
+      type: "string",
+      description: 'Client package (default "<package>.client").',
+    },
+    ...Object.fromEntries(
+      ["max-response-size", "max-error-size"].map((key) => [
+        key,
+        {
+          type: "integer",
+          minimum: 0,
+          maximum: 2147483646,
+          default: 0,
+          description:
+            "Maximum buffered body bytes (0: unlimited). Streaming successes are not buffered. Oversize bodies raise ApiException with the HTTP status.",
+        },
+      ]),
+    ),
     "sse-max-size": {
       type: "integer",
       minimum: 1024,
       maximum: 2147483647,
       default: 1048576,
-      description: "Longest server-sent event line and event data the client accepts, in bytes (MAX_SSE_SIZE); longer ones fail the stream.",
+      description:
+        "Longest server-sent event line and event data the client accepts, in bytes (MAX_SSE_SIZE); longer ones fail the stream.",
     },
   },
 };

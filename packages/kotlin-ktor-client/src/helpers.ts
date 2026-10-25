@@ -18,6 +18,19 @@ import {
 } from "@abhigyakrishna/tspgen-kotlin";
 import { emitLines, preludeLines, streamOf } from "./sse.js";
 
+const BRACKET_QUERY_NAME = /^[^\[\]]+(?:\[[^\[\]]*\])+$/;
+
+/** Brackets denote nested query fields for decoders such as serde_qs. */
+export function hasBracketQuery(op: KtOperation): boolean {
+  return op.params.some((param) => param.location === "query" && BRACKET_QUERY_NAME.test(param.wireName));
+}
+
+function appendQuery(name: string, value: string): string {
+  if (!BRACKET_QUERY_NAME.test(name)) return `parameters.append(${str(name)}, ${value})`;
+  const key = encodeURIComponent(name).replaceAll("%5B", "[").replaceAll("%5D", "]");
+  return `encodedParameters.append(${str(key)}, ${value}.encodeURLParameter())`;
+}
+
 const METHODS = { get: "Get", put: "Put", post: "Post", patch: "Patch", delete: "Delete", head: "Head" } as const;
 
 /** Kotlin expression turning a value into its wire string. */
@@ -34,14 +47,16 @@ export function decode(expr: string, type: KtTypeUse): string {
  * Kotlin expression reading the response body as `type`: through its explicit serializer and the API client's Json when
  * its JSON form needs one (see `serializerExpr`), else `response.body()` (content negotiation).
  */
-function bodyRead(type: KtTypeUse): string {
+function bodyRead(type: KtTypeUse, bounded = false): string {
   const serializer = serializerExpr(type);
-  return serializer ? `http.apiJson.decodeFromString(${serializer}, response.bodyAsText())` : "response.body()";
+  return serializer ? `http.apiJson.decodeFromString(${serializer}, ${bounded ? "response.apiBodyText()" : "response.bodyAsText()"})` : bounded ? `http.readApiBody<${type.text}>(response)` : "response.body()";
 }
 
 /** A single JSON request body whose JSON form needs an explicit serializer (see `serializerExpr`). */
 function jsonBody(body: KtBody): boolean {
-  return body.kind !== "multipart" && body.kind !== "file" && isJsonContentType(body.contentType) && serializerExpr(body.type) !== undefined;
+  return (
+    body.kind !== "multipart" && body.kind !== "file" && isJsonContentType(body.contentType) && serializerExpr(body.type) !== undefined
+  );
 }
 
 /** Bodies of an operation written or read with an explicit serializer: request, success and typed error bodies, JSON parts. */
@@ -67,7 +82,10 @@ export function usesSerializers(op: KtOperation): boolean {
 export function serializerCallImports(op: KtOperation): string[] {
   const types = serializedTypes(op);
   if (types.length === 0) return [];
-  const read = [...(op.result.kind === "sealed" ? op.result.decl.variants.flatMap((v) => (v.body ? [v.body] : [])) : [op.result.type]), ...op.errors.flatMap((e) => (e.body ? [e.body] : []))];
+  const read = [
+    ...(op.result.kind === "sealed" ? op.result.decl.variants.flatMap((v) => (v.body ? [v.body] : [])) : [op.result.type]),
+    ...op.errors.flatMap((e) => (e.body ? [e.body] : [])),
+  ];
   return [
     ...types.flatMap(serializerImports),
     ...(read.some((t) => serializerExpr(t)) ? ["io.ktor.client.statement.bodyAsText"] : []),
@@ -150,7 +168,9 @@ function bodyLines(body: KtBody): string[] {
       const serializer = jsonBody(body) ? serializerExpr(body.type) : undefined;
       if (serializer) {
         // The serializer's JSON as the body: content negotiation would write the value with its type's own serializer.
-        return [`setBody(TextContent(http.apiJson.encodeToString(${serializer}, ${body.name}), ContentType.parse(${str(body.contentType)})))`];
+        return [
+          `setBody(TextContent(http.apiJson.encodeToString(${serializer}, ${body.name}), ContentType.parse(${str(body.contentType)})))`,
+        ];
       }
       return [`contentType(ContentType.parse(${str(body.contentType)}))`, `setBody(${body.name})`];
     }
@@ -186,19 +206,18 @@ export const ktorClientHelpers = {
     return op.params
       .filter((p) => p.location === "query")
       .map((p) => {
-        const wire = str(p.wireName);
         const item = listElement(p.type);
         if (item && p.explode) {
-          return `${p.name}${p.optional ? "?" : ""}.forEach { parameters.append(${wire}, ${encode("it", item)}) }`;
+          return `${p.name}${p.optional ? "?" : ""}.forEach { ${appendQuery(p.wireName, encode("it", item))} }`;
         }
         if (item) {
           return p.optional
-            ? `${p.name}?.let { values -> parameters.append(${wire}, ${valueExpr("values", p.type)}) }`
-            : `parameters.append(${wire}, ${valueExpr(p.name, p.type)})`;
+            ? `${p.name}?.let { values -> ${appendQuery(p.wireName, valueExpr("values", p.type))} }`
+            : appendQuery(p.wireName, valueExpr(p.name, p.type));
         }
         return p.optional
-          ? `${p.name}?.let { parameters.append(${wire}, ${encode("it", p.type)}) }`
-          : `parameters.append(${wire}, ${encode(p.name, p.type)})`;
+          ? `${p.name}?.let { ${appendQuery(p.wireName, encode("it", p.type))} }`
+          : appendQuery(p.wireName, encode(p.name, p.type));
       });
   },
 
@@ -224,22 +243,22 @@ export const ktorClientHelpers = {
   statusMatch,
   bodyRead,
 
-  variantArgs(v: KtResultVariant): string {
+  variantArgs(v: KtResultVariant, bounded = false): string {
     const args = [
       ...(v.status === undefined ? ["response.status.value"] : []),
-      ...(v.body ? [bodyRead(v.body)] : []),
+      ...(v.body ? [bodyRead(v.body, bounded)] : []),
       ...v.headers.map(headerExpr),
     ];
     return args.length > 0 ? `(${args.join(", ")})` : "";
   },
 
-  errorBranches(op: KtOperation): { match: string; expr: string }[] {
+  errorBranches(op: KtOperation, bounded = false): { match: string; expr: string }[] {
     const fallback = "ApiException(response.status.value, response.errorMessage())";
     const branches = [...op.errors]
       .sort((a, b) => statusRank(a.statusCodes) - statusRank(b.statusCodes))
       .map((e) => ({
         match: statusMatch(e.statusCodes),
-        expr: e.body ? `${e.exception.text}(${bodyRead(e.body)}, response.status.value)` : fallback,
+        expr: e.body ? `${e.exception.text}(${bodyRead(e.body, bounded)}, response.status.value)` : fallback,
       }));
     if (!branches.some((b) => b.match === "else")) branches.push({ match: "else", expr: fallback });
     return branches;

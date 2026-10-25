@@ -4,8 +4,9 @@ import { camel, codecImports, organizeImports, serializerExpr, type KotlinIR, ty
 import { serviceAuth, type ServiceAuth } from "./auth.js";
 import type { KtorClientOptions } from "./options.js";
 import { clientJsonExpr, DEFAULT_CLIENT_RUNTIME, type ClientRuntime } from "./runtime.js";
-import { serializerCallImports, usesSerializers } from "./helpers.js";
+import { hasBracketQuery, serializerCallImports, usesSerializers } from "./helpers.js";
 import { eventFunctions, streamOf, streamsOf, supportImports, usesJson } from "./sse.js";
+import { webSocketOperation } from "./websocket.js";
 
 const SUPPORT_IMPORTS = [
   "io.ktor.client.statement.HttpResponse",
@@ -29,18 +30,21 @@ const API_CLIENT_IMPORTS = [
   "kotlinx.serialization.json.Json",
 ];
 
-function groupImports(ir: KotlinIR, group: KtGroup): string[] {
+function groupImports(ir: KotlinIR, group: KtGroup, runtime: ClientRuntime, webSockets: Set<string>): string[] {
   const ops = group.operations;
+  const httpOperations = ops.filter((op) => !webSockets.has(op.id));
+  const rawStreams = runtime.streaming && ops.some((op) => op.result.kind === "single" && op.result.type.text === "ByteArray");
+  const scopedStreams = rawStreams || ops.some((op) => streamOf(op));
+  const bounded = (runtime.maxResponseSize ?? 0) > 0 || (runtime.maxErrorSize ?? 0) > 0;
   return [
+    ...(bounded ? ops.flatMap((op) => op.responses.flatMap((response) => response.body?.imports ?? [])) : []),
+    ...(scopedStreams ? ["io.ktor.client.request.prepareRequest", "io.ktor.client.statement.bodyAsChannel"] : []),
+    ...(rawStreams ? ["io.ktor.utils.io.ByteReadChannel"] : []),
     "io.ktor.client.HttpClient",
-    "io.ktor.client.call.body",
-    "io.ktor.client.plugins.expectSuccess",
-    "io.ktor.client.request.request",
-    "io.ktor.http.HttpMethod",
-    "io.ktor.http.appendPathSegments",
-    "io.ktor.http.takeFrom",
-    `${ir.apiPackage}.ApiException`,
-    ...(ops.some((o) => o.result.kind === "single") ? ["io.ktor.http.isSuccess"] : []),
+    ...(ops.some(hasBracketQuery) ? ["io.ktor.http.encodeURLParameter"] : []),
+    ...(httpOperations.length > 0 ? ["io.ktor.client.call.body", "io.ktor.http.HttpMethod", `${ir.apiPackage}.ApiException`] : []),
+    ...(scopedStreams ? ["io.ktor.client.plugins.expectSuccess", "io.ktor.http.appendPathSegments", "io.ktor.http.takeFrom"] : []),
+    ...(httpOperations.some((o) => o.result.kind === "single") ? ["io.ktor.http.isSuccess"] : []),
     ...(ops.some((o) => o.params.some((p) => p.location === "header") || o.body?.kind === "file" || streamOf(o))
       ? ["io.ktor.client.request.header"]
       : []),
@@ -90,11 +94,13 @@ export function planClientFiles(
   const fileParts = multipartBodies.some((b) => (b.parts ?? []).some((p) => p.kind === "file"));
   const streams = streamsOf(services.flatMap((s) => s.groups.flatMap((g) => g.operations)));
   const allOps = services.flatMap((s) => s.groups.flatMap((g) => g.operations));
+  const webSockets = new Set(allOps.filter(webSocketOperation).map((op) => op.id));
   // Bodies (and parts) whose JSON form needs an explicit serializer (`@encode(string)` values).
+  const bounded = (runtime.maxResponseSize ?? 0) > 0 || (runtime.maxErrorSize ?? 0) > 0;
   const serializers = allOps.some(usesSerializers);
   const jsonPartSerializers = multipartBodies.some((b) => (b.parts ?? []).some((p) => p.kind === "json" && serializerExpr(p.type)));
   // Multipart JSON parts, JSON events and explicitly serialized bodies read the defaults' Json from the client (apiJson).
-  const apiJson = multipart || streams.events.some(usesJson) || serializers;
+  const apiJson = bounded || multipart || streams.events.some(usesJson) || serializers;
   const auths = new Map<string, ServiceAuth | undefined>(services.map((s) => [s.id, runtime.auth ? serviceAuth(program, s) : undefined]));
   const used = [...auths.values()].filter((a): a is ServiceAuth => a !== undefined);
   const basic = used.some((a) => a.basic);
@@ -107,6 +113,34 @@ export function planClientFiles(
         imports: organizeImports(
           [
             ...SUPPORT_IMPORTS,
+            ...(webSockets.size > 0
+              ? [
+                  "io.ktor.client.plugins.websocket.DefaultClientWebSocketSession",
+                  "io.ktor.client.plugins.websocket.webSocket",
+                  "io.ktor.http.URLProtocol",
+                ]
+              : []),
+            "io.ktor.client.HttpClient",
+            "io.ktor.client.request.HttpRequestBuilder",
+            "io.ktor.client.request.prepareRequest",
+            "io.ktor.client.plugins.expectSuccess",
+            "io.ktor.http.HttpMethod",
+            "io.ktor.http.appendPathSegments",
+            "io.ktor.http.takeFrom",
+            ...(bounded
+              ? [
+                  "io.ktor.client.statement.bodyAsChannel",
+                  "io.ktor.client.call.body",
+                  "io.ktor.http.isSuccess",
+                  "io.ktor.utils.io.readRemaining",
+                  "kotlinx.io.readByteArray",
+                  "kotlinx.io.Buffer",
+                  "io.ktor.http.charset",
+                  "io.ktor.utils.io.charsets.Charsets",
+                  "io.ktor.utils.io.charsets.decode",
+                  `${ir.apiPackage}.ApiException`,
+                ]
+              : []),
             ...(multipart ? ["io.ktor.http.Headers", "io.ktor.http.HttpHeaders", "io.ktor.http.headersOf"] : []),
             ...(fileParts ? [`${ir.modelsPackage}.HttpFile`, "io.ktor.http.ContentDisposition", "io.ktor.http.quote"] : []),
             ...supportImports(streams),
@@ -118,14 +152,20 @@ export function planClientFiles(
                   "io.ktor.util.AttributeKey",
                 ]
               : []),
-            ...(used.length > 0 ? ["io.ktor.client.request.HttpRequestBuilder", "io.ktor.client.request.cookie", "io.ktor.http.HttpHeaders"] : []),
+            ...(used.length > 0
+              ? ["io.ktor.client.request.HttpRequestBuilder", "io.ktor.client.request.cookie", "io.ktor.http.HttpHeaders"]
+              : []),
             ...(basic ? ["io.ktor.util.encodeBase64"] : []),
             ...(jsonPartSerializers ? ["kotlinx.serialization.KSerializer"] : []),
           ],
           pkg,
         ),
         body: "ktor-client/support",
+        webSockets: webSockets.size > 0,
         multipart,
+        bounded,
+        maxResponseSize: runtime.maxResponseSize ?? 0,
+        maxErrorSize: runtime.maxErrorSize ?? 0,
         jsonPartSerializers,
         fileParts,
         apiJson,
@@ -151,19 +191,44 @@ export function planClientFiles(
           op.id,
           {
             annotations: metaStrings(program, op.meta["kotlin:ktor-client"] ?? {}, "annotations", op.id),
+            webSocket: webSockets.has(op.id),
+            streamName: `${op.name.replaceAll("`", "")}Stream`,
             ...(auth ? { auth: auth.op(op, `${group.name}Client`) } : {}),
           },
         ]),
       );
+      const takenMethods = new Set(group.operations.map((op) => op.name.replaceAll("`", "")));
+      for (const extra of Object.values(extras)) {
+        const preferred = extra.streamName;
+        for (let suffix = 2; takenMethods.has(extra.streamName); suffix++) extra.streamName = `${preferred}${suffix}`;
+        takenMethods.add(extra.streamName);
+      }
+      const authPlans: { name: string; alternatives: string }[] = [];
+      for (const extra of Object.values(extras)) {
+        if (!extra.auth) continue;
+        const alternatives = extra.auth.alternatives;
+        let plan = authPlans.find((p) => p.alternatives === alternatives);
+        if (!plan) {
+          plan = {
+            name: `authPlan${authPlans.length + 1}`,
+            alternatives,
+          };
+          authPlans.push(plan);
+        }
+        extra.auth.alternatives = `this@${group.name}Client.${plan.name}`;
+      }
       files.push({
         path: `${dir}/${group.name}Client.kt`,
         template: "kotlin/file",
         data: {
           package: pkg,
-          imports: organizeImports(groupImports(ir, group), pkg),
+          imports: organizeImports(groupImports(ir, group, runtime, webSockets), pkg),
           body: "ktor-client/client",
           group,
           extras,
+          authPlans,
+          bounded,
+          streaming: runtime.streaming,
           auth: auth?.className,
         },
       });
@@ -173,8 +238,18 @@ export function planClientFiles(
       template: "kotlin/file",
       data: {
         package: pkg,
-        imports: organizeImports([...API_CLIENT_IMPORTS, ...(ir.serializersModule ? [ir.serializersModule] : [])], pkg),
+        imports: organizeImports(
+          [
+            ...API_CLIENT_IMPORTS,
+            ...(service.groups.some((group) => group.operations.some((op) => webSockets.has(op.id)))
+              ? ["io.ktor.client.plugins.websocket.WebSockets", "io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter"]
+              : []),
+            ...(ir.serializersModule ? [ir.serializersModule] : []),
+          ],
+          pkg,
+        ),
         body: "ktor-client/api-client",
+        webSockets: service.groups.some((group) => group.operations.some((op) => webSockets.has(op.id))),
         json: clientJsonExpr(ir, runtime),
         jsonName: `${service.name}Json`,
         apiJson,

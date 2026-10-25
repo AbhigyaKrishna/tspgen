@@ -3,6 +3,10 @@ import { createTypeSpecLibrary, paramMessage } from "@typespec/compiler";
 export const $lib = createTypeSpecLibrary({
   name: "@abhigyakrishna/tspgen-core",
   diagnostics: {
+    "invalid-selection": {
+      severity: "error",
+      messages: { default: paramMessage`Unknown ${"option"} id '${"id"}'.` },
+    },
     "unsupported-type": {
       severity: "warning",
       messages: {
