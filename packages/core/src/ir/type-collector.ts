@@ -86,6 +86,7 @@ interface CollectorOptions {
   multipartResponses?: boolean;
   jsonLines?: boolean;
   streamingResponses?: boolean;
+  rawStreams?: boolean;
   exactLiterals?: boolean;
   payloadVisibility?: boolean;
   wireEncodings?: boolean;
@@ -174,6 +175,7 @@ export class TypeCollector {
   get multipartResponses(): boolean { return this.options.multipartResponses === true; }
   get jsonLines(): boolean { return this.options.jsonLines === true; }
   get streamingResponses(): boolean { return this.options.streamingResponses === true; }
+  get rawStreams(): boolean { return this.options.rawStreams === true; }
   get tuples(): boolean { return this.options.tuples === true; }
 
   multipartRef(operation: string, hint: string, parts: PartIR[]): TypeRef {

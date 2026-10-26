@@ -46,6 +46,7 @@ export function buildFeaturedApiIR(
   const api = selectApi(program, buildApiIR(program, {
     ...(language === "kotlin" ? { tuples: true, fileResponses: true, multipartResponses: true, jsonLines: true, streamingResponses: true, exactLiterals: true, wireEncodings: true } : {}),
     ...(language === "kotlin" && features.values["lifecycle-models"] ? { payloadVisibility: true } : {}),
+    ...(language === "kotlin" && features.values["raw-streams"] ? { rawStreams: true } : {}),
     generics: (declaration: Model) =>
       features.at(
         "generics",

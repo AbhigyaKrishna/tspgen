@@ -18,7 +18,7 @@ import {
   type KtResultVariant,
   type KtTypeUse,
 } from "@abhigyakrishna/tspgen-kotlin";
-import { emitLines, preludeLines, responseFlow, scopedStream, streamConsumer, streamOf } from "./sse.js";
+import { emitLines, preludeLines, rawReader, responseFlow, scopedStream, streamConsumer, streamOf } from "./sse.js";
 
 const BRACKET_QUERY_NAME = /^[^\[\]]+(?:\[[^\[\]]*\])+$/;
 
@@ -190,6 +190,7 @@ function partLine(body: string, p: KtPart): string {
 
 /** Statements setting the request body. */
 function bodyLines(body: KtBody): string[] {
+  if (body.rawStream) return [`setBody(${body.rawStream === "bytes" ? "RawBytesContent" : "RawTextContent"}(${body.name}, ${str(body.contentType)}))`];
   if (body.jsonLines) return [`setBody(JsonLinesContent(${body.name}, ${jsonSerializer(body.jsonLines)}, http.apiJson, ${str(body.contentType)}))`];
   switch (body.kind) {
     case "multipart":
@@ -318,6 +319,7 @@ export const ktorClientHelpers = {
   },
 
   stream: streamOf,
+  rawReader,
   scopedStream,
   streamConsumer,
   scopedBranches(op: KtOperation, bounded = false): { condition: string; expression: string }[] {

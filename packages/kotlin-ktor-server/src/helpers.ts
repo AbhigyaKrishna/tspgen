@@ -189,6 +189,7 @@ export const ktorServerHelpers = {
   },
 
   bodyExpr(body: KtBody): string {
+    if (body.rawStream) return `call.${body.rawStream === "bytes" ? "receiveRawBytes" : "receiveRawText"}(${str(body.contentType)})`;
     if (body.jsonLines) return `call.receiveJsonLines(${jsonSerializer(body.jsonLines)})`;
     if (jsonBody(body)) return `call.receiveJson(${serializerExpr(body.type)})`;
     return body.optional

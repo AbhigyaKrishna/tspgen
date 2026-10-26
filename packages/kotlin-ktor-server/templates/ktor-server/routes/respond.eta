@@ -1,6 +1,8 @@
 <% const r = it.op.result; const s = it.h.ktorServer; -%>
 <% if (r.kind === "single") { -%>
-<% if (r.stream?.protocol === "jsonl") { -%>
+<% if (r.stream?.protocol === "bytes" || r.stream?.protocol === "text") { -%>
+        call.<%= r.stream.protocol === "bytes" ? "respondRawBytes" : "respondRawText" %>(<%~ s.status(r.status) %>, <%~ it.h.str(r.contentType) %>, <%= it.call %>)
+<% } else if (r.stream?.protocol === "jsonl") { -%>
         call.respondJsonLines(<%~ s.status(r.status) %>, <%~ it.h.str(r.contentType ?? "application/jsonl") %>, <%= it.call %>, <%~ it.h.jsonSerializer(r.stream.type) %>)
 <% } else if (it.op.sse) { -%>
 <% if (r.status !== 200) { -%>
@@ -21,7 +23,9 @@
                 <%~ s.headerWrite(h) %>
 <% } -%>
 <% const status = v.status === undefined ? "HttpStatusCode.fromValue(result.status)" : s.status(v.status); -%>
-<% if (v.stream?.protocol === "jsonl") { -%>
+<% if (v.stream?.protocol === "bytes" || v.stream?.protocol === "text") { -%>
+                call.<%= v.stream.protocol === "bytes" ? "respondRawBytes" : "respondRawText" %>(<%~ status %>, <%~ it.h.str(v.contentType) %>, result.body)
+<% } else if (v.stream?.protocol === "jsonl") { -%>
                 call.respondJsonLines(<%~ status %>, <%~ it.h.str(v.contentType ?? "application/jsonl") %>, result.body, <%~ it.h.jsonSerializer(v.stream.type) %>)
 <% } else if (v.stream) { -%>
                 call.response.status(<%~ status %>)

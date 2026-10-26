@@ -108,6 +108,7 @@ export function planClientFiles(
   const allOps = services.flatMap((s) => s.groups.flatMap((g) => g.operations));
   const multipartResponses = allOps.some((operation) => operation.responses.some((response) => response.body?.multipart));
   const jsonLines = allOps.some((operation) => operation.body?.jsonLines || responseStreams(operation).some(stream => stream.protocol === "jsonl"));
+  const rawStreams = allOps.some((operation) => operation.body?.rawStream || responseStreams(operation).some(stream => stream.protocol === "bytes" || stream.protocol === "text"));
   const webSockets = new Set(allOps.filter(webSocketOperation).map((op) => op.id));
   // Bodies (and parts) whose JSON form needs an explicit serializer (`@encode(string)` values).
   const bounded = (runtime.maxResponseSize ?? 0) > 0 || (runtime.maxErrorSize ?? 0) > 0;
@@ -127,6 +128,10 @@ export function planClientFiles(
         imports: organizeImports(
           [
             ...SUPPORT_IMPORTS,
+            ...(rawStreams ? [
+              "io.ktor.utils.io.readAvailable", "io.ktor.utils.io.writeFully",
+              "io.ktor.client.statement.bodyAsChannel", "kotlinx.coroutines.flow.collect",
+            ] : []),
             ...(multipartResponses ? ["io.ktor.client.call.body", "io.ktor.http.content.forEachPart", "io.ktor.utils.io.toByteArray"] : []),
             ...(jsonLines ? [
               "io.ktor.utils.io.ByteReadChannel", "io.ktor.utils.io.readLine", "io.ktor.utils.io.writeStringUtf8",
@@ -181,6 +186,7 @@ export function planClientFiles(
         ),
         body: "ktor-client/support",
         jsonLines,
+        rawStreams,
         webSockets: webSockets.size > 0,
         multipart,
         multipartResponses,

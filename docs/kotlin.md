@@ -102,9 +102,10 @@ features:
   strict-optionals: true    # OptionalValue for all optional fields; reject non-nullable nulls
   untagged-unions: true     # JSON wrappers; ambiguous input is rejected
   lifecycle-models: true    # separate HTTP request/response lifecycle shapes
+  raw-streams: true         # custom HTTP stream wire chunks; application owns record framing
 ```
 
-All seven default false to preserve existing generated APIs. With `lifecycle-models`, a read-only `id` is
+All eight default false to preserve existing generated APIs. With `lifecycle-models`, a read-only `id` is
 absent from create payloads and a create-only `password` is absent from read payloads. Projections follow
 HTTP request visibility and `@returnTypeVisibility`, including nested references and collection items.
 Templates requiring distinct shapes specialize per use. In TypeSpec 1.16, PATCH properties retain their

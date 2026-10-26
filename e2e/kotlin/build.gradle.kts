@@ -35,6 +35,9 @@ kotlin {
     }
     sourceSets.main {
         kotlin.srcDirs(
+            "build/generated/tspgen-raw-streams/models",
+            "build/generated/tspgen-raw-streams/client",
+            "build/generated/tspgen-raw-streams/server",
             "build/generated/tspgen-numeric-mapping/models",
             "build/generated/tspgen-lifecycle/models",
             "build/generated/tspgen-lifecycle/client",

@@ -1,0 +1,34 @@
+<%~ include("kotlin/http/raw-stream", it) %>
+
+internal abstract class RawStreamContent<T>(
+    protected val values: kotlinx.coroutines.flow.Flow<T>,
+    mediaType: String,
+) : io.ktor.http.content.OutgoingContent.WriteChannelContent() {
+    final override val contentType = io.ktor.http.ContentType.parse(mediaType)
+    private val written = java.util.concurrent.atomic.AtomicBoolean()
+
+    final override suspend fun writeTo(channel: io.ktor.utils.io.ByteWriteChannel) {
+        check(written.compareAndSet(false, true)) { "A raw request stream cannot be sent more than once" }
+        writeValues(channel)
+    }
+
+    protected abstract suspend fun writeValues(channel: io.ktor.utils.io.ByteWriteChannel)
+}
+
+internal class RawBytesContent(values: kotlinx.coroutines.flow.Flow<ByteArray>, mediaType: String) :
+    RawStreamContent<ByteArray>(values, mediaType) {
+    override suspend fun writeValues(channel: io.ktor.utils.io.ByteWriteChannel) {
+        values.collect { value -> channel.writeFully(value); channel.flush() }
+    }
+}
+
+internal class RawTextContent(values: kotlinx.coroutines.flow.Flow<String>, mediaType: String) :
+    RawStreamContent<String>(values, mediaType) {
+    override suspend fun writeValues(channel: io.ktor.utils.io.ByteWriteChannel) {
+        channel.writeRawText(values, contentType.rawStreamCharset())
+    }
+}
+
+internal suspend fun HttpResponse.readRawText(consume: suspend (String) -> Unit) {
+    bodyAsChannel().readRawText(contentType()?.rawStreamCharset() ?: Charsets.UTF_8, consume)
+}

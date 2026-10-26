@@ -1,0 +1,47 @@
+<%~ include("kotlin/http/raw-stream", it) %>
+
+private fun ApplicationCall.requireRawContentType(mediaType: String): io.ktor.http.ContentType {
+    val actual = request.contentType()
+    if (!actual.withoutParameters().match(io.ktor.http.ContentType.parse(mediaType).withoutParameters())) {
+        throw io.ktor.server.plugins.UnsupportedMediaTypeException(actual)
+    }
+    return actual
+}
+
+internal fun ApplicationCall.receiveRawBytes(mediaType: String): kotlinx.coroutines.flow.Flow<ByteArray> {
+    requireRawContentType(mediaType)
+    val collected = java.util.concurrent.atomic.AtomicBoolean()
+    return kotlinx.coroutines.flow.flow {
+        check(collected.compareAndSet(false, true)) { "A raw request stream can be collected only once" }
+        receiveChannel().readRawBytes { emit(it) }
+    }
+}
+
+internal fun ApplicationCall.receiveRawText(mediaType: String): kotlinx.coroutines.flow.Flow<String> {
+    val contentType = requireRawContentType(mediaType)
+    val charset = try { contentType.rawStreamCharset() } catch (cause: IllegalArgumentException) {
+        throw io.ktor.server.plugins.UnsupportedMediaTypeException(contentType)
+    }
+    val collected = java.util.concurrent.atomic.AtomicBoolean()
+    return kotlinx.coroutines.flow.flow {
+        check(collected.compareAndSet(false, true)) { "A raw request stream can be collected only once" }
+        try {
+            receiveChannel().readRawText(charset) { emit(it) }
+        } catch (cause: RawStreamDecodingException) {
+            throw BadRequestException("Malformed text stream", cause)
+        }
+    }
+}
+
+internal suspend fun ApplicationCall.respondRawBytes(status: HttpStatusCode, mediaType: String, values: kotlinx.coroutines.flow.Flow<ByteArray>) {
+    respondBytesWriter(io.ktor.http.ContentType.parse(mediaType), status) {
+        values.collect { value -> writeFully(value); flush() }
+    }
+}
+
+internal suspend fun ApplicationCall.respondRawText(status: HttpStatusCode, mediaType: String, values: kotlinx.coroutines.flow.Flow<String>) {
+    val contentType = io.ktor.http.ContentType.parse(mediaType)
+    respondBytesWriter(contentType, status) {
+        writeRawText(values, contentType.rawStreamCharset())
+    }
+}

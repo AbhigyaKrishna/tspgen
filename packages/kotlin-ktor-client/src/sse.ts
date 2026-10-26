@@ -24,10 +24,17 @@ export function streamConsumer(op: KtOperation): string {
 export function responseFlow(stream: KtStream, active: string): string {
   const guard = `check(${active}) { "The response stream must be collected inside its callback" }; check(collected.compareAndSet(false, true)) { "The response stream can be collected only once" }`;
   const prefix = "run { val collected = java.util.concurrent.atomic.AtomicBoolean(); ";
+  if (stream.protocol === "bytes" || stream.protocol === "text") {
+    return `${prefix}flow { ${guard}; ${rawReader(stream)} { emit(it) } } }`;
+  }
   if (stream.protocol === "jsonl") {
     return `${prefix}flow { ${guard}; response.bodyAsChannel().readJsonLines { line -> emit(http.apiJson.decodeFromString(${jsonSerializer(stream.type)}, line)) } } }`;
   }
   return `${prefix}flow { ${[guard, ...preludeLines(stream)].join("; ")}; response.bodyAsChannel().readSse { event -> ${emitLines(stream).join("; ")} } } }`;
+}
+
+export function rawReader(stream: KtStream): string {
+  return stream.protocol === "text" ? "response.readRawText" : "response.bodyAsChannel().readRawBytes";
 }
 
 /** `decode<Events>`: ClientSupport.kt's function turning a parsed event into an events value (null when unknown). */
@@ -95,7 +102,7 @@ export function streamsOf(ops: KtOperation[]): { events: KtEvents[]; untyped: bo
   let any = false;
   for (const op of ops) {
     for (const stream of responseStreams(op)) {
-      if (stream.protocol === "jsonl") continue;
+      if (stream.protocol && stream.protocol !== "sse") continue;
       any = true;
       if (stream.events) events.set(stream.events.fqn, stream.events);
       else untyped = true;

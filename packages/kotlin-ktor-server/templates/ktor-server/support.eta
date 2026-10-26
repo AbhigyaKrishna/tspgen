@@ -22,6 +22,7 @@ internal inline fun <T> String.convertParam(name: String, convert: (String) -> T
 @PublishedApi
 internal val paramJson: Json = Json { isLenient = true }
 <% if (it.jsonLines) { %><%~ include("ktor-server/json-lines", it) %><% } %>
+<% if (it.rawStreams) { %><%~ include("ktor-server/raw-stream", it) %><% } %>
 <% if (it.multipartResponses) { %><%~ include("ktor-server/multipart-response", it) %><% } %>
 <% if (it.webSocketValidation) { %>
 internal class WebSocketHandshakeConfig {

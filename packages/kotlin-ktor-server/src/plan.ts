@@ -165,7 +165,7 @@ const UPLOAD_SUPPORT: Record<SupportNeed, { imports: (ir: KotlinIR) => string[];
 const SUPPORT_NEEDS: readonly SupportNeed[] = ["limit", "parts", "json", "buffered", "files", "streaming", "channel", "file"];
 
 function withSse(program: Program, op: ServerOperation, options: KtorServerOptions): ServerOperation {
-  if (!op.responses.some((response) => !response.isError && response.stream && response.stream.protocol !== "jsonl")) return op;
+  if (!op.responses.some((response) => !response.isError && response.stream && (!response.stream.protocol || response.stream.protocol === "sse"))) return op;
   return { ...op, sse: sseMode(program, op, options.sse ?? "text-writer") };
 }
 
@@ -473,6 +473,7 @@ export function planServerFiles(
   const fileResponses = allOps.some((operation) => operation.responses.some((response) => response.body?.file));
   const multipartResponses = allOps.some((operation) => operation.responses.some((response) => response.body?.multipart));
   const jsonLines = allOps.some((operation) => operation.body?.jsonLines || operation.responses.some((response) => response.stream?.protocol === "jsonl"));
+  const rawStreams = allOps.some((operation) => operation.body?.rawStream || operation.responses.some((response) => response.stream?.protocol === "bytes" || response.stream?.protocol === "text"));
   const requestChecks = allOps.some((operation) => operation.params.some((parameter) => parameter.checks?.length) || !operation.upload && operation.body?.checks?.length);
   const sse = ssePlan(allOps);
   // Bodies whose JSON form needs an explicit serializer (`@encode(string)` values): ServerSupport's JSON helpers.
@@ -484,6 +485,7 @@ export function planServerFiles(
     ...(fileResponses ? ["respondFile"] : []),
     ...(multipartResponses ? ["respondMultipart", "MultipartValue", "serverJson"] : []),
     ...(jsonLines ? ["receiveJsonLines", "respondJsonLines"] : []),
+    ...(rawStreams ? ["receiveRawBytes", "receiveRawText", "respondRawBytes", "respondRawText"] : []),
     ...(requestChecks ? ["validRequest"] : []),
     ...(receiveJson ? ["receiveJson"] : []),
     ...(respondJson ? ["respondJson"] : []),
@@ -498,6 +500,10 @@ export function planServerFiles(
       imports: organizeImports(
         [
           ...SUPPORT_IMPORTS,
+          ...(rawStreams ? [
+            "io.ktor.utils.io.readAvailable", "io.ktor.utils.io.writeFully",
+            "io.ktor.server.request.receiveChannel", "io.ktor.server.response.respondBytesWriter", "kotlinx.coroutines.flow.collect",
+          ] : []),
           ...(multipartResponses ? ["io.ktor.server.response.respondBytesWriter", "io.ktor.utils.io.writeStringUtf8", "io.ktor.utils.io.writeFully"] : []),
           ...(jsonLines ? [
             "kotlinx.coroutines.flow.Flow", "kotlinx.coroutines.flow.flow", "kotlinx.coroutines.flow.collect", "kotlinx.serialization.KSerializer",
@@ -529,6 +535,7 @@ export function planServerFiles(
       fileResponses,
       multipartResponses,
       jsonLines,
+      rawStreams,
       requestChecks,
       respondJson,
       serverJson: serverJsonLines(ir, runtime).join("\n"),

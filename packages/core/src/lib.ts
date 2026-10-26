@@ -3,6 +3,14 @@ import { createTypeSpecLibrary, paramMessage } from "@typespec/compiler";
 export const $lib = createTypeSpecLibrary({
   name: "@abhigyakrishna/tspgen-core",
   diagnostics: {
+    "unsupported-request-stream": {
+      severity: "error",
+      messages: { default: paramMessage`Operation '${"operation"}' declares an SSE request stream. SSE-encoded uploads are not implemented; use a JSON-lines request stream or a JSON request with an SSE response.` },
+    },
+    "optional-raw-stream": {
+      severity: "error",
+      messages: { default: paramMessage`Operation '${"operation"}' declares an optional raw stream body. Raw stream request bodies must be required; an empty stream represents an empty body.` },
+    },
     "unsupported-json-lines": {
       severity: "error",
       messages: { default: paramMessage`JSON-lines operation '${"operation"}' requires one fixed-status success response without response headers.` },

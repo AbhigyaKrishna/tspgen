@@ -218,8 +218,9 @@ function buildOperation(
   const opName = op.operation.name;
   const base = pascal(opName);
   const body = op.parameters.body;
-  // Multipart boundaries and file content types are set by the HTTP runtime, not by a parameter.
-  const contentTypeParam = body && (body.bodyKind !== "single" || collector.jsonLines && isJsonLines(body.contentTypes)) ? body.contentTypeProperty : undefined;
+  // Upload and stream media types are set by the HTTP runtime, not by a parameter.
+  const contentTypeParam = body && (body.bodyKind !== "single" || collector.jsonLines && isJsonLines(body.contentTypes)
+    || collector.rawStreams && streamElement(program, body, sse)) ? body.contentTypeProperty : undefined;
   const params: ParamIR[] = op.parameters.parameters
     .filter((p) => p.param !== contentTypeParam)
     .map((p) => {
@@ -280,8 +281,16 @@ function buildOperation(
     if (body.bodyKind === "file") {
       ir.body.file = { isText: body.isText, contentTypes: declaredContentTypes(body.contentTypes) };
     }
-    const item = collector.jsonLines && isJsonLines(body.contentTypes) ? streamElement(program, body, sse) : undefined;
-    if (item) ir.body.jsonLines = collector.jsonLinesRef(item, `${base}Item`);
+    const inspectStream = collector.streamingResponses || collector.rawStreams || collector.jsonLines && isJsonLines(body.contentTypes);
+    const item = inspectStream ? streamElement(program, body, sse) : undefined;
+    if (item && (collector.streamingResponses || collector.rawStreams) && isEventStream(body.contentTypes)) {
+      reportDiagnostic(program, { code: "unsupported-request-stream", format: { operation: getTypeName(op.operation) }, target: op.operation });
+    } else if (item && collector.jsonLines && isJsonLines(body.contentTypes)) {
+      ir.body.jsonLines = collector.jsonLinesRef(item, `${base}Item`);
+    } else if (item && collector.rawStreams) {
+      ir.body.rawStream = isBytes(body.type) ? "bytes" : "text";
+      if (property?.optional) reportDiagnostic(program, { code: "optional-raw-stream", format: { operation: getTypeName(op.operation) }, target: op.operation });
+    }
   }
   return ir;
 }
@@ -536,6 +545,10 @@ function buildResponses(
       if (item) {
         if (!isError && streamable) ir.body.jsonLines = collector.jsonLinesRef(item, `${base}Item`);
         else reportDiagnostic(program, { code: "unsupported-json-lines", format: { operation: getTypeName(op.operation) }, target: op.operation });
+      }
+      if (collector.rawStreams && !isError && !eventStream && !isJsonLines(content.body.contentTypes)
+        && streamElement(program, content.body, streams.sse)) {
+        ir.body.rawStream = isBytes(content.body.type) ? "bytes" : "text";
       }
       if (stream) {
         const union = ir.body.type.kind === "named" ? collector.typeOf(ir.body.type.id) : undefined;

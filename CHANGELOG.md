@@ -8,6 +8,9 @@ are released together with the same version.
 
 ### Added
 
+- Kotlin `features.raw-streams`: custom HTTP request/response streams as raw byte or text flows, with
+  incremental charset codecs, streaming writes, response metadata and cancellation. Existing buffered APIs
+  remain the default; declared SSE request streams now fail with an explicit unsupported diagnostic.
 - Documented TypeSpec feature compatibility across Kotlin, TypeScript and Go, with implementation and test evidence.
 - Kotlin models: typed additional properties, tuple JSON codecs, object-envelope discriminated unions, nested and
   exact numeric defaults, and preserved encoded generic arguments. Opt-in numeric/mixed enums, open string enums,

@@ -1,0 +1,85 @@
+
+private const val RAW_STREAM_BUFFER_SIZE = 8192
+
+internal fun io.ktor.http.ContentType.rawStreamCharset(): java.nio.charset.Charset =
+    parameter("charset")?.let(java.nio.charset.Charset::forName) ?: Charsets.UTF_8
+
+internal class RawStreamDecodingException(cause: java.nio.charset.CharacterCodingException) :
+    IllegalArgumentException("Malformed text stream", cause)
+
+/** Chunk boundaries are transport details, not application record boundaries. */
+internal suspend fun io.ktor.utils.io.ByteReadChannel.readRawBytes(consume: suspend (ByteArray) -> Unit) {
+    val buffer = ByteArray(RAW_STREAM_BUFFER_SIZE)
+    while (true) {
+        val count = readAvailable(buffer, 0, buffer.size)
+        if (count < 0) return
+        if (count > 0) consume(buffer.copyOf(count))
+    }
+}
+
+/** Retains incomplete encoded characters between reads and rejects truncated final characters. */
+internal suspend fun io.ktor.utils.io.ByteReadChannel.readRawText(
+    charset: java.nio.charset.Charset,
+    consume: suspend (String) -> Unit,
+) {
+    val decoder = charset.newDecoder()
+    val input = java.nio.ByteBuffer.allocate(RAW_STREAM_BUFFER_SIZE)
+    val output = java.nio.CharBuffer.allocate(RAW_STREAM_BUFFER_SIZE)
+    var ended = false
+    while (!ended) {
+        val count = readAvailable(input.array(), input.position(), input.remaining())
+        ended = count < 0
+        if (!ended) input.position(input.position() + count)
+        input.flip()
+        do {
+            val result = decoder.decode(input, output, ended)
+            if (result.isError) {
+                try { result.throwException() } catch (cause: java.nio.charset.CharacterCodingException) {
+                    throw RawStreamDecodingException(cause)
+                }
+            }
+            output.flip()
+            if (output.hasRemaining()) consume(output.toString())
+            output.clear()
+        } while (result.isOverflow)
+        input.compact()
+    }
+    do {
+        val result = decoder.flush(output)
+        output.flip()
+        if (output.hasRemaining()) consume(output.toString())
+        output.clear()
+    } while (result.isOverflow)
+}
+
+/** Keeps one encoder for the whole stream, including surrogate pairs split between supplied strings. */
+internal suspend fun io.ktor.utils.io.ByteWriteChannel.writeRawText(
+    values: kotlinx.coroutines.flow.Flow<String>,
+    charset: java.nio.charset.Charset,
+) {
+    val encoder = charset.newEncoder()
+    val output = java.nio.ByteBuffer.allocate(RAW_STREAM_BUFFER_SIZE)
+    var pending = ""
+    suspend fun encode(input: java.nio.CharBuffer, ended: Boolean) {
+        do {
+            output.clear()
+            val result = encoder.encode(input, output, ended)
+            if (result.isError) result.throwException()
+            if (output.position() > 0) writeFully(output.array(), 0, output.position())
+        } while (result.isOverflow)
+    }
+    values.collect { value ->
+        val input = java.nio.CharBuffer.wrap(if (pending.isEmpty()) value else pending + value)
+        encode(input, false)
+        pending = input.toString()
+        flush()
+    }
+    encode(java.nio.CharBuffer.wrap(pending), true)
+    do {
+        output.clear()
+        val result = encoder.flush(output)
+        if (result.isError) result.throwException()
+        if (output.position() > 0) writeFully(output.array(), 0, output.position())
+    } while (result.isOverflow)
+    flush()
+}

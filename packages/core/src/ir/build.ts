@@ -17,6 +17,8 @@ export interface BuildOptions {
   jsonLines?: boolean;
   /** Preserve streams alongside response metadata and alternate success variants. */
   streamingResponses?: boolean;
+  /** Expose custom declared HTTP streams as raw byte or text chunks. */
+  rawStreams?: boolean;
   /** Preserve the text of numeric literals JavaScript numbers cannot represent exactly. */
   exactLiterals?: boolean;
   /** Generate context-specific HTTP payload models using lifecycle visibility and PATCH optionality. */
@@ -54,6 +56,7 @@ export function buildApiIR(program: Program, options: BuildOptions = {}): ApiIR 
     wireEncodings: options.wireEncodings,
     multipartResponses: options.multipartResponses,
     streamingResponses: options.streamingResponses,
+    rawStreams: options.rawStreams,
   });
   const resolved = options.services ?? resolveServices(program, options.versioning, options.version).services;
   const services = buildServices(program, collector, resolved, options.sse);

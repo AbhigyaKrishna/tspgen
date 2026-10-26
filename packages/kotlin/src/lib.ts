@@ -15,6 +15,10 @@ export type EnumMemberNaming = "UPPER_SNAKE" | "PascalCase";
 export const KOTLIN_EMITTER = "@abhigyakrishna/tspgen-kotlin";
 
 export const kotlinFeatures = defineFeatures({
+  "raw-streams": {
+    default: false,
+    description: "Expose custom declared HTTP streams as flows of byte arrays or text chunks; application code owns record framing.",
+  },
   "lifecycle-models": {
     default: false,
     description: "Generate lifecycle-specific request/read payloads, including PATCH optionality. Template models are specialized per instance.",

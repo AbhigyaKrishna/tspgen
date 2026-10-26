@@ -40,7 +40,7 @@
                 <%~ line %>
 <% } -%>
             }
-            header(HttpHeaders.Accept, <%~ it.h.str(stream.protocol === "jsonl" ? (op.result.contentType ?? "application/jsonl") : "text/event-stream") %>)
+            header(HttpHeaders.Accept, <%~ it.h.str(op.result.contentType ?? (stream.protocol === "jsonl" ? "application/jsonl" : "text/event-stream")) %>)
 <% for (const line of c.requestLines(op)) { -%>
             <%~ line %>
 <% } -%>
@@ -58,7 +58,9 @@
 <% } -%>
                 }
             }
-<% if (stream.protocol === "jsonl") { -%>
+<% if (stream.protocol === "bytes" || stream.protocol === "text") { -%>
+            <%~ c.rawReader(stream) %> { emit(it) }
+<% } else if (stream.protocol === "jsonl") { -%>
             response.bodyAsChannel().readJsonLines { line ->
                 emit(http.apiJson.decodeFromString(<%~ it.h.jsonSerializer(stream.type) %>, line))
             }

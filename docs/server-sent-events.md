@@ -92,7 +92,7 @@ that use it; used as a regular JSON type (a model property, a request or JSON re
 - In TypeScript, only the single success response of an operation can stream: a `text/event-stream` response next to other
   success responses or with response headers warns `unsupported-sse-response` and is treated as a text body.
 - Kotlin responses with headers or multiple success variants use the scoped callback API below. TypeScript
-  does not support JSON Lines. Neither language implements SSE request bodies, arbitrary stream framing,
+  does not support JSON Lines. Neither language implements SSE request bodies or automatic custom record framing,
   reconnection / `Last-Event-ID` (the clients report `id:` on `SseMessage` only), or sending `id:` / `retry:` from
   typed events. In Kotlin, a model of your own named `SseMessage` in the models package clashes with the untyped
   message class (`sse-message-conflict`), as does a TypeScript type named `SseMessage`; rename it with
@@ -119,7 +119,7 @@ As with SSE, an exception after response streaming starts terminates that stream
 
 ## Kotlin response headers and alternate successes
 
-A single fixed success response without headers keeps the cold client `Flow<T>` API. SSE and JSON Lines
+A single fixed success response without headers keeps the cold client `Flow<T>` API. SSE, JSON Lines and raw
 responses with headers, several success variants or non-fixed statuses return their generated result through
 a suspend callback. Each streaming variant carries `body: Flow<T>` and its declared headers:
 
@@ -151,3 +151,45 @@ variants are decoded before the callback. Declared errors use the usual typed ex
 a status are selected by their declared content type. The service returns the same result type with a
 streaming body; the server writes its status and headers before collecting that body. Both SSE writer
 modes support these results.
+
+## Raw HTTP streams (Kotlin)
+
+Enable `features.raw-streams: true` on the Kotlin emitter to expose custom declared streams without
+buffering their entire bodies. The feature defaults to false, preserving existing buffered APIs.
+
+```tsp
+import "@typespec/http/streams";
+using TypeSpec.Http.Streams;
+
+@route("/transfer") interface Transfer {
+  @get download(): HttpStream<bytes, "application/octet-stream", bytes>;
+  @post upload(...HttpStream<bytes, "application/octet-stream", bytes>): int32;
+  @get @route("/logs") logs(): HttpStream<string, "text/plain">;
+}
+```
+
+The service and client use `Flow<ByteArray>` for a wire body of `bytes`, and `Flow<String>` for a wire
+body of `string`. A simple response is a cold client flow: collecting it opens a request, and stopping
+collection closes the response. Headers and alternate successes use the scoped callback API above.
+Request flows stream while they are collected by the transport/service. Raw request bodies must be
+required (`optional-raw-stream` otherwise); empty flows produce empty bodies. Each received request flow
+can be collected once, and outgoing request content rejects replay instead of silently resending a
+partially consumed source. The generated client adds no retries.
+
+Chunks are arbitrary transport segments. Their sizes and boundaries can change between sender and
+receiver. A custom `HttpStream<Item, ContentType, BodyType>` exposes `BodyType` chunks; it does not infer
+record framing or deserialize logical `Item` values. Add application decoding for protocols such as
+JSON text sequences. The built-in JSON Lines and SSE codecs keep their existing behavior regardless
+of this feature.
+
+Text defaults to UTF-8 and honors the request/response charset. Incremental codecs retain characters
+split across reads and surrogate pairs split across outgoing strings; a single encoder also avoids
+repeating a BOM on each chunk. Wrong request media types and unsupported charsets answer 415, and
+malformed request text answers 400 when collected before the response starts. Malformed response text
+fails collection; errors after response streaming starts terminate that stream. Charset conversion
+uses bounded internal buffers, and writes suspend with channel backpressure. Explicit stream successes
+bypass buffered response-size limits; error responses retain their normal bounded reader.
+
+SSE-encoded uploads remain unsupported. Declared SSE request streams fail with
+`unsupported-request-stream`. A POST with a JSON request and an SSE response is supported and does
+not need an SSE-encoded upload.

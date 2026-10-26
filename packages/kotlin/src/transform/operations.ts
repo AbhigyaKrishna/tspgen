@@ -192,7 +192,8 @@ export class ApiBuilder {
       const taken = new Set(params.map((p) => p.name));
       const preferred = identifier(camel(op.body.name ?? "body"));
       const item = op.body.jsonLines ? this.types.typeUse(op.body.jsonLines) : undefined;
-      const type = item ? this.flowType(item) : this.wireBodyType(op.body.type, op.body.contentTypes[0] ?? "application/json");
+      const streamItem = op.body.rawStream ? this.rawStreamType(op.body.rawStream) : item;
+      const type = streamItem ? this.flowType(streamItem) : this.wireBodyType(op.body.type, op.body.contentTypes[0] ?? "application/json");
       const body = op.body;
       result.body = {
         name: taken.has(preferred) ? "requestBody" : preferred,
@@ -202,6 +203,7 @@ export class ApiBuilder {
         kind: body.kind,
         ...(body.tupleMultipart ? { tupleMultipart: true } : {}),
         ...(item ? { jsonLines: item } : {}),
+        ...(body.rawStream ? { rawStream: body.rawStream } : {}),
         ...(body.parts
           ? {
               parts: body.parts.map((p) => ({
@@ -217,7 +219,7 @@ export class ApiBuilder {
           : {}),
         ...(body.file ? { file: { isText: body.file.isText, contentTypes: body.file.contentTypes } } : {}),
       };
-      if (!item) {
+      if (!streamItem) {
         const checks = this.types.parameterChecks({ name: result.body.name, type: body.type, constraints: body.constraints }, result.body.type, result.body.name);
         if (checks.length) result.body.checks = checks;
       }
@@ -236,6 +238,10 @@ export class ApiBuilder {
 
   private responseBody(body: NonNullable<OperationIR["responses"][number]["body"]>): Pick<KtResponse, "body" | "contentType" | "stream"> {
     const contentType = body.contentTypes[0] ?? "application/json";
+    if (body.rawStream) {
+      const type = this.rawStreamType(body.rawStream);
+      return { body: type, contentType, stream: { protocol: body.rawStream, type } };
+    }
     if (body.multipart) {
       const type = this.types.typeUse(body.type);
       return { body: { ...type, multipart: { contentType, tuple: body.multipart.tuple, parts: body.multipart.parts.map((part) => ({
@@ -257,6 +263,11 @@ export class ApiBuilder {
     return this.types.hasName("Flow")
       ? { text: `${FLOW}<${item.text}>`, imports: item.imports, nullable: false }
       : { text: `Flow<${item.text}>`, imports: [FLOW, ...item.imports], nullable: false };
+  }
+
+  private rawStreamType(protocol: "bytes" | "text"): KtTypeUse {
+    const name = protocol === "bytes" ? "ByteArray" : "String";
+    return { text: this.types.hasName(name) ? `kotlin.${name}` : name, imports: [], nullable: false };
   }
 
   private result(opName: string, groupName: string, success: KtResponse[]): KtResult {

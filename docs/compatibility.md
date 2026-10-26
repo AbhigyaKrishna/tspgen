@@ -149,7 +149,9 @@ net/http server and Gin server.
 | `@useAuth` | Yes: client credentials and exact server OR-of-AND provider requirements | Partial: supported credentials and alternatives | Partial: same credentials | No: authenticated operations rejected |
 | Typed SSE (`SSEStream<@events union>`) and untyped `text/event-stream` | Yes: `Flow` | Yes: `AsyncIterable` | Yes: `AsyncIterable` | No |
 | JSON Lines (`JsonlStream<T>`, `application/jsonl` / `application/x-ndjson`) | Yes: request/response `Flow<T>` | No | No | No |
-| Other stream protocols and SSE request bodies | No | No | No | No |
+| Custom/raw HTTP streams (`HttpStream`, wire body `bytes` / `string`) | Opt-in: `features.raw-streams` generates request/response `Flow<ByteArray>` / `Flow<String>` chunks; application owns record framing | No | No | No |
+| Additional framed protocols (e.g. JSON text sequences) | No built-in codec; Kotlin raw streams can carry their wire bytes/text | No | No | No |
+| SSE-encoded request streams | No: `unsupported-request-stream` error | No | No | No |
 | WebSockets | Opt-in: Ktor client/server `webSocket` metadata and scoped sessions; frame protocols are application-owned | No | No | No |
 | Automatic pagination / long-running-operation polling | No generated helper | No generated helper | No generated helper | No generated helper |
 
@@ -170,6 +172,11 @@ Qualifications:
   one success response without response headers; other shapes warn `unsupported-sse-response`
   and become text bodies. Typed SSE needs the optional TypeSpec events/streams/SSE libraries.
   No generated reconnection or Last-Event-ID handling; see [server-sent events](server-sent-events.md).
+- Kotlin raw streams preserve wire bytes or incrementally decoded text. Transport chunk boundaries are
+  not logical item boundaries, and the logical `HttpStream` item type does not select a custom framing codec.
+  Raw request bodies must be required and can be collected once; empty flows represent empty bodies.
+  Text honors the declared/request/response charset, defaulting to UTF-8. Unsupported request media types
+  or charsets answer 415; malformed request text answers 400 when consumed. Declared error responses remain buffered.
 - Upload support does not imply arbitrary MIME support: TS sends `FormData` as
   `multipart/form-data`, including for a declared `multipart/mixed` body. Inherited
   multipart parts and `Http.File` in JSON have additional limits; see [uploads](uploads.md).
@@ -191,6 +198,8 @@ Tests: [Ktor client](../packages/kotlin-ktor-client/test/client.test.ts),
 [multipart responses](../packages/kotlin-ktor-server/test/multipart-responses.test.ts),
 [JSON Lines](../packages/kotlin-ktor-server/test/json-lines.test.ts),
 [streaming response metadata](../packages/kotlin-ktor-server/test/streaming-responses.test.ts),
+[raw stream generation](../packages/kotlin-ktor-server/test/raw-streams.test.ts),
+[raw stream runtime and cancellation](../e2e/kotlin/src/test/kotlin/RawStreamsE2ETest.kt),
 [WebSockets](../packages/kotlin-ktor-client/test/websocket.test.ts),
 [TS grouped client](../packages/ts-nextjs-client/test/client.test.ts),
 [TS flat client](../packages/ts-nextjs-client/test/flat.test.ts),

@@ -208,6 +208,7 @@ export interface KtBody {
   tupleMultipart?: boolean;
   /** A JSON-lines request stream; type is Flow<item>. */
   jsonLines?: KtTypeUse;
+  rawStream?: "bytes" | "text";
   name: string;
   type: KtTypeUse;
   contentType: string;
@@ -251,10 +252,10 @@ export interface KtResponse {
   stream?: KtStream;
 }
 
-/** A server-sent event stream: a `Flow` of events. */
+/** A response stream: typed events/items, or raw byte/text chunks. */
 export interface KtStream {
-  protocol?: "sse" | "jsonl";
-  /** Element type: the events interface of a typed stream, else `SseMessage`. */
+  protocol?: "sse" | "jsonl" | "bytes" | "text";
+  /** Element type: an event/item type, `SseMessage`, `ByteArray` or `String`. */
   type: KtTypeUse;
   /** The events declaration of a typed stream. */
   events?: KtEvents;

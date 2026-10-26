@@ -8,6 +8,7 @@ internal fun multipartContent(parts: List<io.ktor.http.content.PartData>, mediaT
 }
 <% } -%>
 <% if (it.jsonLines) { %><%~ include("ktor-client/json-lines", it) %><% } %>
+<% if (it.rawStreams) { %><%~ include("ktor-client/raw-stream-support", it) %><% } %>
 <% if (it.multipartResponses) { %><%~ include("ktor-client/multipart-response", it) %><% } %>
 
 internal inline fun <reified T> encodeParam(value: T): String =

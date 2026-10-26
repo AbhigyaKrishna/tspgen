@@ -268,6 +268,8 @@ export interface BodyIR {
   tupleMultipart?: boolean;
   /** The item type of a declared JSON-lines request stream. */
   jsonLines?: TypeRef;
+  /** Custom declared stream, exposed as wire chunks without inferring item framing. */
+  rawStream?: "bytes" | "text";
   /** Name of the explicit `@body` parameter, when there is one. */
   name?: string;
   /** Doc comment of the explicit `@body` parameter. */
@@ -318,10 +320,10 @@ export interface ResponseIR {
   isError: boolean;
   headers: HeaderIR[];
   /**
-   * `stream`: a server-sent event stream (`text/event-stream`), set only on the single success response of an
-   * operation. Its `type` is the `@events` union of a typed stream, the declared body type (string) otherwise.
+   * `stream`: a server-sent event success response (`text/event-stream`). Its `type` is the `@events` union of a
+   * typed stream, the declared body type (string) otherwise. Other protocols use `jsonLines` or `rawStream`.
    */
-  body?: { type: TypeRef; contentTypes: string[]; stream?: StreamIR; file?: FileBodyIR; jsonLines?: TypeRef; multipart?: { parts: PartIR[]; tuple: boolean } };
+  body?: { type: TypeRef; contentTypes: string[]; stream?: StreamIR; file?: FileBodyIR; jsonLines?: TypeRef; rawStream?: "bytes" | "text"; multipart?: { parts: PartIR[]; tuple: boolean } };
 }
 
 export interface HeaderIR {
