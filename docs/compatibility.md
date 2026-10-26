@@ -1,8 +1,8 @@
 # Implementation compatibility matrix
 
-This matrix describes the **current source, including unreleased Kotlin changes after 0.2.3**
-(release baseline `65d2e3a`), audited against implementation and tests on 2026-10-26. It covers the shipped Kotlin, TypeScript and Go emitters, rather than the
-capabilities of the TypeSpec compiler or other emitters. The repository pins
+This matrix describes **tspgen 0.2.4**, audited against implementation and tests on 2026-10-26.
+It covers the shipped Kotlin, TypeScript and Go emitters, rather than the capabilities of the
+TypeSpec compiler or other emitters. The repository pins
 `@typespec/compiler` and `@typespec/http` **1.16.0**, and versioning/events/streams/SSE
 libraries **0.86.0**; see the [core package](../packages/core/package.json).
 

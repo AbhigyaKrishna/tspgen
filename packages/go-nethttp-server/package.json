@@ -1,6 +1,6 @@
 {
   "name": "@abhigyakrishna/tspgen-go-nethttp-server",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/AbhigyaKrishna/tspgen.git", "directory": "packages/go-nethttp-server" },
   "publishConfig": { "registry": "https://npm.pkg.github.com" },

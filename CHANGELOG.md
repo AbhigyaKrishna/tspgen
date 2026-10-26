@@ -4,7 +4,7 @@ All packages (`@abhigyakrishna/tspgen-core`, `-kotlin`, `-kotlin-ktor-server`, `
 `-typescript`, `-ts-nextjs-client`, `-go`, `-go-nethttp-client`, `-go-nethttp-server`, `-go-gin-server`)
 are released together with the same version.
 
-## Unreleased
+## 0.2.4 — 2026-10-26
 
 ### Added
 
@@ -22,8 +22,16 @@ are released together with the same version.
   scoped client callbacks. Streaming uploads validate required and duplicate single parts; positional tuples
   support trailing repeated parts and reject ambiguous layouts.
 
+### Changed
+
+- End-to-end tests share central TypeSpec contracts across languages, with separate Go and Kotlin client/server
+  suites and a TypeScript client suite. Remove copied entrypoints and the house-style e2e project.
+
 ### Fixed
 
+- Ktor client: encode slashes in path parameter values for HTTP, streaming and WebSocket requests instead of
+  treating them as route separators.
+- Restore discovery of the real-connection SSE runtime test by giving its coroutine-backed test method a Unit return type.
 - Decode structured parameters without losing JSON shapes, preserve encoded scalar arguments in nested generic
   model properties, validate literals and HTTP parameters, and retain inherited scalar and collection constraints.
 - Preserve exact numeric and temporal bounds, decimal JSON-number versus explicit string encodings in precise
