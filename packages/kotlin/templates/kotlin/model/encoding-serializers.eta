@@ -1,0 +1,88 @@
+<% for (const codec of it.serializers.filter(codec => !codec.delegate)) { -%>
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+<%= it.h.visibility(it) %>object <%= codec.name %> : kotlinx.serialization.KSerializer<<%= codec.type %>> {
+    override val descriptor = kotlinx.serialization.descriptors.PrimitiveSerialDescriptor(
+        <%~ it.h.str(it.package + "." + codec.name) %>, kotlinx.serialization.descriptors.PrimitiveKind.<%= codec.wire === "string" ? "STRING" : "DOUBLE" %>,
+    )
+
+    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): <%= codec.type %> {
+        val input = decoder as? kotlinx.serialization.json.JsonDecoder
+            ?: throw kotlinx.serialization.SerializationException("Wire encodings require JSON")
+        val primitive = input.decodeJsonElement() as? kotlinx.serialization.json.JsonPrimitive
+            ?: throw kotlinx.serialization.SerializationException("Expected an encoded primitive")
+        if (primitive.isString != <%= codec.wire === "string" %>) throw kotlinx.serialization.SerializationException("Unexpected wire encoding")
+        return try {
+            val raw = <%~ codec.wire === "string" ? "primitive.content" : "java.math.BigDecimal(primitive.content)" %>
+<% if (codec.wire === "number") { -%>
+            validateNumber(raw)
+<% } -%>
+            <%~ codec.decode %>
+        } catch (cause: IllegalArgumentException) {
+            throw kotlinx.serialization.SerializationException("Invalid encoded value", cause)
+        } catch (cause: java.time.DateTimeException) {
+            throw kotlinx.serialization.SerializationException("Invalid encoded date or duration", cause)
+        } catch (cause: ArithmeticException) {
+            throw kotlinx.serialization.SerializationException("Encoded number is outside its range or precision", cause)
+        }
+    }
+
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: <%= codec.type %>) {
+        val output = encoder as? kotlinx.serialization.json.JsonEncoder
+            ?: throw kotlinx.serialization.SerializationException("Wire encodings require JSON")
+        val raw = <%~ codec.encode %>
+<% if (codec.wire === "number") { -%>
+        validateNumber(raw)
+<% } -%>
+        output.encodeJsonElement(<%~ codec.wire === "string" ? "kotlinx.serialization.json.JsonPrimitive(raw)" : "kotlinx.serialization.json.JsonUnquotedLiteral(raw.stripTrailingZeros().toPlainString())" %>)
+    }
+<% if (codec.wire === "number") { %>
+    private fun validateNumber(value: java.math.BigDecimal) {
+<% if (codec.integer) { -%>
+        if (value.stripTrailingZeros().scale() > 0) throw kotlinx.serialization.SerializationException("Expected whole encoded units")
+<% } -%>
+<% if (codec.minimum !== undefined) { -%>
+        if (value < java.math.BigDecimal(<%~ it.h.str(codec.minimum) %>) || value > java.math.BigDecimal(<%~ it.h.str(codec.maximum) %>)) {
+            throw kotlinx.serialization.SerializationException("Encoded number is outside its declared range")
+        }
+<% } -%>
+    }
+<% } -%>
+}
+
+<% } -%>
+<% for (const codec of it.serializers.filter(codec => codec.delegate)) { -%>
+<%= it.h.visibility(it) %>object <%= codec.name %> : kotlinx.serialization.KSerializer<<%= codec.type %>> {
+    override val descriptor = <%= codec.delegate %>.descriptor
+
+    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): <%= codec.type %> =
+        <%= codec.type %>(<%= codec.delegate %>.deserialize(decoder))
+
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: <%= codec.type %>) =
+        <%= codec.delegate %>.serialize(encoder, value.value)
+}
+
+<% } -%>
+private fun durationFromSeconds(value: java.math.BigDecimal): java.time.Duration {
+    val parts = value.movePointRight(9).toBigIntegerExact().divideAndRemainder(java.math.BigInteger("1000000000"))
+    return java.time.Duration.ofSeconds(parts[0].longValueExact(), parts[1].longValueExact())
+}
+
+private fun durationSeconds(value: java.time.Duration): java.math.BigDecimal =
+    java.math.BigDecimal(value.seconds).add(java.math.BigDecimal(value.nano).movePointLeft(9))
+
+private fun <T> decodeDelimitedElement(serializer: kotlinx.serialization.KSerializer<T>, value: String): T {
+    var descriptor = serializer.descriptor
+    while (descriptor.isInline) descriptor = descriptor.getElementDescriptor(0)
+    val element = if (descriptor.kind == kotlinx.serialization.descriptors.PrimitiveKind.STRING ||
+        descriptor.kind == kotlinx.serialization.descriptors.SerialKind.ENUM) kotlinx.serialization.json.JsonPrimitive(value)
+        else kotlinx.serialization.json.Json.parseToJsonElement(value)
+    return kotlinx.serialization.json.Json.decodeFromJsonElement(serializer, element)
+}
+
+private fun <T> encodeDelimitedElement(serializer: kotlinx.serialization.KSerializer<T>, value: T, separator: String): String {
+    val element = kotlinx.serialization.json.Json.encodeToJsonElement(serializer, value)
+    val text = (element as? kotlinx.serialization.json.JsonPrimitive)?.content
+        ?: throw kotlinx.serialization.SerializationException("Delimited array elements must be primitives")
+    if (text.isEmpty() || separator in text) throw kotlinx.serialization.SerializationException("Array element cannot be represented without delimiter escaping")
+    return text
+}

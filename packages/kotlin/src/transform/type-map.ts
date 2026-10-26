@@ -72,6 +72,7 @@ export const JSON_ELEMENT: KtTypeUse = {
   text: "JsonElement",
   imports: ["kotlinx.serialization.json.JsonElement"],
   nullable: false,
+  structuredParam: true,
 };
 
 export function scalarTypeUse(
@@ -135,6 +136,7 @@ export function genericOf(base: KtTypeUse, args: readonly KtTypeUse[]): KtTypeUs
     text: `${base.text}<${args.map((a) => a.text).join(", ")}>`,
     imports: [...base.imports, ...args.flatMap((a) => a.imports)],
     nullable: false,
+    structuredParam: true,
     generic: { base, args: [...args] },
     ...(args.some((a) => a.needs) ? { needs: args.flatMap((a) => a.needs ?? []) } : {}),
   };
@@ -151,7 +153,9 @@ function ownSerializerImports(t: KtTypeUse): string[] {
 /** `[expression, imports]` of an explicit serializer for `t`; undefined when nothing in it needs one (unless `force`). */
 function serializerOf(t: KtTypeUse, force: boolean): [string, string[]] | undefined {
   let inner: [string, string[]] | undefined;
-  if (t.serializer) {
+  if (t.explicitJson) {
+    inner = [`String.serializer()`, [`${BUILTINS}.serializer`]];
+  } else if (t.serializer) {
     inner = [t.serializer, ownSerializerImports(t)];
   } else if (t.element) {
     const e = serializerOf(t.element, false);
@@ -185,6 +189,20 @@ export function serializerExpr(t: KtTypeUse): string | undefined {
 /** Imports `serializerExpr(t)` needs; empty when it is undefined. */
 export function serializerImports(t: KtTypeUse): string[] {
   return [...new Set(serializerOf(t, false)?.[1] ?? [])];
+}
+
+/** Explicit JSON serializer, including generic arguments whose wire encoding differs from their Kotlin type. */
+export function jsonSerializer(type: KtTypeUse, parameters: readonly string[] = []): string {
+  if (type.nullable) return `${jsonSerializer({ ...type, text: type.text.replace(/\?$/, ""), nullable: false }, parameters)}.nullable`;
+  if (type.serializer) return type.serializer;
+  if (type.element) return `ListSerializer(${jsonSerializer(type.element, parameters)})`;
+  if (type.value) return `MapSerializer(String.serializer(), ${jsonSerializer(type.value, parameters)})`;
+  if (type.generic) return `${type.generic.base.text}.serializer(${type.generic.args.map((arg) => jsonSerializer(arg, parameters)).join(", ")})`;
+  if (parameters.includes(type.text)) return `${type.text}Serializer`;
+  if (type.underlying && !type.wrapper) return jsonSerializer(type.underlying, parameters);
+  const custom = serializedIn(type).find((fqn) => type.text === fqn || type.text === fqn.slice(fqn.lastIndexOf(".") + 1));
+  if (custom) return `${custom.slice(custom.lastIndexOf(".") + 1)}Serializer`;
+  return `${type.text}.serializer()`;
 }
 
 /** A JSON media type: `application/json` or a `+json` suffix (parameters ignored). */

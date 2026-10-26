@@ -11,7 +11,7 @@ with `@encode(string)`, which both languages honour.
 | `uint8` / `uint16` / `uint32` | `number` | `z.number().int()` | `Short` / `Int` / `Long` (widened to hold the unsigned range) |
 | `uint64` | `number` | `z.number().int()` | `ULong` |
 | `float32`, `float64`, `float`, `numeric` | `number` | `z.number()` | `Float`/`Double` |
-| `decimal`, `decimal128` | `string` | `z.string().regex(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/)` | `BigDecimal` (`decimal: big-decimal`, default) or `String` (`decimal: string`); both write a JSON string |
+| `decimal`, `decimal128` | `string` | `z.string().regex(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/)` | `BigDecimal` (`decimal: big-decimal`, default) or `String` (`decimal: string`); exact JSON numbers with `features.precise-numbers`, legacy JSON strings otherwise |
 | `@encode(string)` on `int64`, `integer`, `safeint` | `string` | `z.string().regex(/^-?\d+$/)` | `Long` with `@Serializable(with = LongAsStringSerializer::class)` |
 | `@encode(string)` on `uint64` | `string` | `z.string().regex(/^\d+$/)` (no leading `-`) | `ULong` with generated `@Serializable(with = ULongAsStringSerializer::class)` |
 | `utcDateTime` | `string`, or `Date` with `date-type: date` | `z.iso.datetime({ offset: true })` / `dateTimeCodec` | `Instant` |
@@ -24,13 +24,14 @@ the number as a JSON string — the only exact `int64`/`uint64` for JavaScript c
 JSON goes: model properties, and top-level request/response bodies, typed error bodies, event payloads and
 multipart JSON parts (`BigId[]` → `["1"]`), with an explicit serializer where the type alone would lose it (see
 the Ktor server's **JSON** paragraph). A scalar body with no JSON content type (`text/plain`, TypeSpec's default
-for a scalar `@body`) is not JSON and is left as it is. Any other encoding
-(`unixTimestamp`, `rfc7231`, `base64url`, `@encode(string)` on other scalars or on a non-scalar shape such as a
-union) warns `unsupported-encoding` and keeps the default JSON form; a scalar's own default (`rfc3339` on dates,
-`ISO8601` on `duration`, `base64` on `bytes`) is accepted silently. The warning is deduplicated per declaring
-property or scalar (a `model … is …`/spread/template copy of the same declared `@encode` warns once, not per
-copy). Kotlin annotates only direct properties and `List`/`Map` elements; type arguments of generic models
-(`Page<BigId>`) are not annotated — use `scalar-style: value-class` there.
+for a scalar `@body`) is not JSON and is left as it is. Kotlin also supports RFC 7231 date strings, Unix timestamp seconds, numeric duration seconds/milliseconds,
+base64url byte strings, string-encoded numeric/boolean values and `ArrayEncoding` delimited arrays. Explicit
+wire serializers work in generic model properties as well as top-level bodies and collection elements.
+Integer duration encodings reject fractional units and out-of-range values. Delimited arrays reject empty
+or separator-containing elements when encoding, since these cannot round-trip without a protocol-specific
+escaping convention; an empty string represents an empty list. Bytes remain wire-format strings.
+Unknown custom encoding names warn `unsupported-encoding`. TypeScript and Go retain their existing encoding
+subset and warnings described in the [compatibility matrix](compatibility.md).
 
 TypeScript `@minValue`/`@maxValue` on `decimal`/`decimal128` (always a string) are not checked and warn
 `unsupported-bounds`; the same bounds on an `@encode(string)`-encoded `int64`/`uint64`/`integer`/`safeint` **are**
@@ -84,7 +85,7 @@ A `Base` model reached only through `@meta("typescript", #{ supertypes: #[...] }
 cast onto the schema rather than validated, so a `Date` field inherited that way is typed `Date` but not decoded by
 the schema.
 
-**Kotlin `decimal: big-decimal`** (default) generates `BigDecimalSerializer` in `ModelSerializers.kt`: it writes
+**Kotlin legacy `decimal: big-decimal`** (default without `features.precise-numbers`) generates `BigDecimalSerializer` in `ModelSerializers.kt`: it writes
 `toPlainString()` as a JSON string and reads a JSON string or number. Round-tripping a decimal through `BigDecimal`
 can change its scale or textual representation (e.g. trailing zeros, exponent form), so a value forwarded
 unmodified is not guaranteed to serialize back byte-for-byte; `decimal: string` keeps the original string as-is.
@@ -102,12 +103,27 @@ unknown input value with 400; turn it on for client-only projects, or per enum/n
 **Kotlin `scalar-style`** (per scalar: `@meta("kotlin", #{ scalarStyle: "…" })`, `@Kotlin.type` still wins):
 `inline` (default) uses the base type; `typealias` declares `typealias PetId = String`; `value-class` declares
 `@Serializable @JvmInline value class PetId(val value: String)` whose `init { }` checks the scalar's own
-constraints (with `features.validation`) — constraints declared on a base scalar further up an `extends` chain are
-not carried onto the value class, only the most-derived scalar's own. Value classes serialize as their value (the
+constraints (with `features.validation`) — constraints inherited along an `extends` chain are retained, with the nearest declaration winning
+for each bound or pattern. Scalar constraints also apply to inline array and record elements. Value classes serialize as their value (the
 wire is unchanged); Ktor parameters convert through the base type (`PetId(it)`, `id.value`); defaults render
 `PetId("…")`. A property-level `@encode(string)` on a use of a value-class scalar whose own declaration is not
 already string-encoded generates `<Name>AsStringSerializer` in `ModelSerializers.kt` — wrapping
 `LongAsStringSerializer` (`Long`-based scalars) or the generated `ULongAsStringSerializer` (`ULong`-based) — once
 per scalar, and annotates that use `@Serializable(with = <Name>AsStringSerializer::class)`, so the wire matches
 the use's own `@encode(string)` while the class keeps its one declaration. `String`/`BigDecimal`-based value
-classes (`decimal`/`decimal128`) already write a JSON string, so a use's `@encode(string)` there is a no-op.
+classes (`decimal`/`decimal128`) already write a JSON string in legacy mode. In precise mode, an explicit
+`@encode(string)` selects a string codec, including on a value-class use.
+
+
+**Kotlin exact numbers.** `features.precise-numbers: true` maps `integer` to `java.math.BigInteger`
+and `numeric` to `java.math.BigDecimal`, with exact JSON-number serializers. `decimal`/`decimal128`
+also write JSON numbers in this mode, retaining the `decimal` option's Kotlin type. `decimal: string`
+preserves the numeric token text; `BigDecimal` preserves its value but may normalize exponent notation.
+Explicit `@encode(string)` selects the corresponding JSON-string codec for all four scalar types.
+Decoders reject the wrong primitive kind. Fixed-width types retain their normal mapping. Numeric literals
+beyond the JVM integer range use exact numeric types automatically. Nested defaults and numeric bounds
+retain exact values as well, and temporal bounds compare parsed logical values.
+
+**Kotlin closed and open enums.** `features.numeric-enums: true` emits numeric and mixed enums with JSON
+codecs that distinguish `1` from `"1"`. `features.open-enums: true` emits extensible string unions as value
+classes with known constants and accepts future strings. Both gates default false to preserve existing APIs.

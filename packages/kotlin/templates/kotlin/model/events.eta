@@ -5,6 +5,7 @@
 
 <% } -%>
 <%~ it.h.kdoc(it.h.eventDoc(e), "    ") -%>
+<%~ it.h.annotations(e.annotations, "    ") -%>
 <% if (e.data) { -%>
     data class <%= e.name %>(val data: <%= e.data.text %>) : <%= d.name %>
 <% } else { -%>

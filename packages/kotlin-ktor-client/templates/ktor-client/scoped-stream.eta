@@ -1,0 +1,44 @@
+<% const op = it.op; const c = it.h.ktorClient; const consumer = c.streamConsumer(op); const signature = c.signature(op); const segments = c.pathSegments(op); const auth = it.extras[op.id].auth; -%>
+    suspend fun <%= op.name %>(<%~ signature ? signature + ", " : "" %><%= consumer %>: suspend (<%= op.result.type.text %>) -> Unit) {
+<% for (const check of [...op.params.flatMap(parameter => parameter.checks ?? []), ...(op.body?.checks ?? [])]) { -%>
+        <%~ check %>
+<% } -%>
+<% if (auth) { -%>
+        val <%= auth.variable %> = resolveAuth(<%~ auth.alternatives %>)
+<% } -%>
+        http.prepareRequest {
+            expectSuccess = false
+            method = HttpMethod.<%= c.method(op.verb) %>
+            url {
+                takeFrom(baseUrl)
+<% if (segments) { -%>
+                appendPathSegments(<%~ segments %>)
+<% } -%>
+<% for (const line of c.queryLines(op)) { -%>
+                <%~ line %>
+<% } -%>
+            }
+            header(HttpHeaders.Accept, <%~ it.h.str([...new Set(op.responses.filter(response => !response.isError).map(response => response.contentType).filter(Boolean))].join(", ")) %>)
+<% for (const line of c.requestLines(op)) { -%>
+            <%~ line %>
+<% } -%>
+<% if (auth) { -%>
+            applyAuth(<%= auth.variable %>)
+<% } -%>
+        }.execute { response ->
+<% if (c.typedErrors(op)) { -%>
+            if (response.isProblem()) throw ApiException(response.status.value, response.errorMessage())
+<% } -%>
+            var <%= consumer %>Active = true
+            try {
+                val result = when {
+<% for (const branch of c.scopedBranches(op, it.bounded)) { -%>
+                    <%~ branch.condition %> -> <%~ branch.expression %>
+<% } -%>
+                }
+                <%= consumer %>(result)
+            } finally {
+                <%= consumer %>Active = false
+            }
+        }
+    }

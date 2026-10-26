@@ -1,0 +1,16 @@
+internal data class MultipartValue(val name: String, val bytes: ByteArray, val contentType: String, val filename: String? = null)
+
+internal suspend fun ApplicationCall.respondMultipart(status: HttpStatusCode, mediaType: String, parts: List<MultipartValue>) {
+    val boundary = "tspgen-" + java.util.UUID.randomUUID().toString()
+    val contentType = ContentType.parse(mediaType).withParameter("boundary", boundary)
+    respondBytesWriter(contentType, status) {
+        for (part in parts) {
+            var disposition = io.ktor.http.ContentDisposition("form-data").withParameter("name", part.name)
+            part.filename?.let { disposition = disposition.withParameter("filename", it) }
+            writeStringUtf8("--$boundary\r\nContent-Disposition: $disposition\r\nContent-Type: ${part.contentType}\r\n\r\n")
+            writeFully(part.bytes)
+            writeStringUtf8("\r\n")
+        }
+        writeStringUtf8("--$boundary--\r\n")
+    }
+}

@@ -12,6 +12,7 @@ export function kotlinxImports(decl: KtDecl): string[] {
       if (decl.plain) return [];
       return [
         "kotlinx.serialization.Serializable",
+        ...(decl.additional || decl.tuple || decl.jsonCodec ? jsonCodecImports : []),
         ...(decl.serialName !== undefined || decl.properties.some((p) => p.serialName !== undefined)
           ? ["kotlinx.serialization.SerialName"]
           : []),
@@ -27,7 +28,7 @@ export function kotlinxImports(decl: KtDecl): string[] {
         ...decl.variants.flatMap(kotlinxImports),
       ];
     case "enum":
-      return decl.unknown
+      return decl.jsonValues ? [...jsonCodecImports, "kotlinx.serialization.Serializable", "kotlinx.serialization.json.JsonPrimitive"] : decl.unknown
         ? [
             "kotlinx.serialization.KSerializer",
             "kotlinx.serialization.Serializable",
@@ -45,7 +46,7 @@ export function kotlinxImports(decl: KtDecl): string[] {
     case "value-class":
       return ["kotlinx.serialization.Serializable"];
     case "untagged-union":
-      return ["kotlinx.serialization.Serializable", "kotlinx.serialization.KSerializer", "kotlinx.serialization.SerializationException",
+      return [...jsonCodecImports, "kotlinx.serialization.Serializable", "kotlinx.serialization.KSerializer", "kotlinx.serialization.SerializationException",
         "kotlinx.serialization.descriptors.buildClassSerialDescriptor", "kotlinx.serialization.encoding.Decoder", "kotlinx.serialization.encoding.Encoder",
         "kotlinx.serialization.json.JsonDecoder", "kotlinx.serialization.json.JsonEncoder", "kotlinx.serialization.json.Json",
         "kotlinx.serialization.json.decodeFromJsonElement", "kotlinx.serialization.json.encodeToJsonElement",
@@ -56,3 +57,12 @@ export function kotlinxImports(decl: KtDecl): string[] {
       return [];
   }
 }
+
+const jsonCodecImports = [
+  "kotlinx.serialization.KSerializer", "kotlinx.serialization.SerializationException",
+  "kotlinx.serialization.descriptors.buildClassSerialDescriptor", "kotlinx.serialization.encoding.Decoder", "kotlinx.serialization.encoding.Encoder",
+  "kotlinx.serialization.json.JsonDecoder", "kotlinx.serialization.json.JsonEncoder", "kotlinx.serialization.json.JsonElement",
+  "kotlinx.serialization.json.JsonObject", "kotlinx.serialization.json.JsonArray", "kotlinx.serialization.json.JsonPrimitive",
+  "kotlinx.serialization.json.jsonObject", "kotlinx.serialization.builtins.ListSerializer", "kotlinx.serialization.builtins.MapSerializer",
+  "kotlinx.serialization.builtins.serializer", "kotlinx.serialization.builtins.nullable",
+];

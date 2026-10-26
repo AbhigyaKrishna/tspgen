@@ -1,5 +1,6 @@
 import {
   camel,
+  codecImports,
   isJsonContentType,
   kotlinString as str,
   listElement,
@@ -7,6 +8,7 @@ import {
   paramEncode,
   serializedIn,
   serializerExpr,
+  jsonSerializer,
   serializerImports,
   typeName,
   type KtBody,
@@ -81,7 +83,25 @@ export function respondsJson(op: KtOperation): boolean {
 
 /** Imports of the explicit serializers an operation's routes use for its request and response bodies. */
 export function bodySerializerImports(op: KtOperation): string[] {
-  return [...(receivesJson(op) ? serializerImports(op.body!.type) : []), ...responseBodies(op).flatMap(serializerImports)];
+  return [...(receivesJson(op) ? serializerImports(op.body!.type) : []), ...responseBodies(op).flatMap((type) => [
+    ...serializerImports(type), ...(type.multipart?.parts.flatMap((part) => [...codecImports(part.type), ...serializerImports(part.type)]) ?? []),
+  ])];
+}
+
+function multipartResponse(status: string, type: KtTypeUse, value: string): string {
+  const body = type.multipart!;
+  const parts = body.parts.map((part) => {
+    const field = `multipart.${part.name}`;
+    const name = str(part.wireName);
+    const entry = (item: string) => {
+      if (part.kind === "file") return `MultipartValue(${name}, ${item}.bytes, ${item}.contentType ?: ${str(part.contentTypes[0] ?? "application/octet-stream")}, ${item}.filename ?: ${name})`;
+      const text = part.kind === "json" ? `serverJson.encodeToString(${jsonSerializer(part.type)}, ${item})` : paramEncode(item, part.type);
+      return `MultipartValue(${name}, (${text}).encodeToByteArray(), ${str(part.kind === "json" ? part.contentTypes[0] ?? "application/json" : "text/plain; charset=UTF-8")})`;
+    };
+    return part.multi ? `${field}${part.optional ? "?" : ""}.forEach { add(${entry("it")}) }`
+      : part.optional ? `${field}?.let { add(${entry("it")}) }` : `add(${entry(field)})`;
+  });
+  return `${value}.let { multipart -> call.respondMultipart(${status}, ${str(body.contentType)}, buildList { ${parts.join("; ")} }) }`;
 }
 
 function plain(name: string): string {
@@ -123,8 +143,19 @@ export function resourceSerializedClasses(op: KtOperation): string[] {
   return op.params.filter((p) => p.location === "path" || p.location === "query").flatMap((p) => serializedIn(p.type));
 }
 
+/** Resources' form decoder cannot run JSON wire serializers; decode those routes with the DSL. */
+export function needsDslRoute(op: KtOperation): boolean {
+  return Boolean((op as Partial<ServerOperation>).webSocket || op.params.some((parameter) => requiresWireCodec(parameter.type)));
+}
+
+function requiresWireCodec(type: KtTypeUse): boolean {
+  return Boolean(type.encodedParam || type.structuredParam || type.value ||
+    type.underlying && requiresWireCodec(type.underlying) || type.element && requiresWireCodec(type.element));
+}
+
 /** Exposed to templates as `it.h.ktorServer`. */
 export const ktorServerHelpers = {
+  needsDslRoute,
   status(code: number): string {
     const name = STATUS[code];
     return name ? `HttpStatusCode.${name}` : `HttpStatusCode.fromValue(${code})`;
@@ -134,7 +165,7 @@ export const ktorServerHelpers = {
   paramExpr(p: KtParam): string {
     const wire = str(p.wireName);
     const source = `call.${SOURCES[p.location]}(${wire})`;
-    const item = listElement(p.type);
+    const item = p.type.encodedParam ? undefined : listElement(p.type);
     if (item) {
       const mapped = converter(item) ? `.map { ${convert("it", wire, item, false)} }` : "";
       if (p.location === "query" && p.explode) {
@@ -158,6 +189,7 @@ export const ktorServerHelpers = {
   },
 
   bodyExpr(body: KtBody): string {
+    if (body.jsonLines) return `call.receiveJsonLines(${jsonSerializer(body.jsonLines)})`;
     if (jsonBody(body)) return `call.receiveJson(${serializerExpr(body.type)})`;
     return body.optional
       ? `call.receiveNullable<${body.type.text.replace(/\?$/, "")}>()`
@@ -172,6 +204,8 @@ export const ktorServerHelpers = {
    * form needs one (see `serializerExpr`), else Ktor's content negotiation.
    */
   respond(status: string, type: KtTypeUse, value: string): string {
+    if (type.multipart) return multipartResponse(status, type, value);
+    if (type.file) return `call.respondFile(${status}, ${value})`;
     const serializer = serializerExpr(type);
     return serializer ? `call.respondJson(${status}, ${serializer}, ${value})` : `call.respond(${status}, ${value})`;
   },

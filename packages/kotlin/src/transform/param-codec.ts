@@ -1,5 +1,6 @@
 import type { KtTypeUse } from "./model.js";
 import { javaTimeCodec } from "./type-map.js";
+import { serializerImports } from "./type-map.js";
 
 /** Parse calls of primitive parameter types, applied to the wire string. */
 const PARSE: Record<string, string> = {
@@ -13,6 +14,8 @@ const PARSE: Record<string, string> = {
   Boolean: "toBooleanStrict()",
   BigDecimal: "toBigDecimal()",
   "java.math.BigDecimal": "toBigDecimal()",
+  BigInteger: "toBigInteger()",
+  "java.math.BigInteger": "toBigInteger()",
 };
 
 /** `type` without its `?`. */
@@ -26,7 +29,8 @@ export function bareType(type: KtTypeUse): KtTypeUse {
  * or `Seen(Instant.parse(it))`, which the wrapper's own imports alone (`Seen`'s fqn) do not cover).
  */
 export function codecImports(type: KtTypeUse): string[] {
-  return type.underlying ? [...type.imports, ...codecImports(type.underlying)] : type.imports;
+  const imports = [...type.imports, ...(type.encodedParam ? serializerImports(type) : [])];
+  return type.underlying ? [...imports, ...codecImports(type.underlying)] : imports;
 }
 
 /** Element of a `List` parameter type (from `listOf`, else read from the text); undefined for other types. */
@@ -43,6 +47,8 @@ export function listElement(type: KtTypeUse): KtTypeUse | undefined {
  */
 export function paramDecode(expr: string, type: KtTypeUse): string {
   const t = bareType(type);
+  if (t.encodedParam) return `decodeParam(${expr}, ${t.serializer})`;
+  if (t.enumWire) return `${t.text}.fromWire(${expr})`;
   if (t.underlying) {
     const inner = paramDecode(expr, t.underlying);
     return t.wrapper === "value-class" ? `${t.text}(${inner})` : inner;
@@ -56,6 +62,8 @@ export function paramDecode(expr: string, type: KtTypeUse): string {
 /** Kotlin expression writing the non-null value `expr` of `type` as its wire string. */
 export function paramEncode(expr: string, type: KtTypeUse): string {
   const t = bareType(type);
+  if (t.encodedParam) return `encodeParam(${expr}, ${t.serializer})`;
+  if (t.enumWire) return `${expr}.wireValue.content`;
   if (t.underlying) return paramEncode(t.wrapper === "value-class" ? `${expr}.value` : expr, t.underlying);
   if (t.text === "String") return expr;
   if (t.text === "BigDecimal" || t.text === "java.math.BigDecimal") return `${expr}.toPlainString()`;

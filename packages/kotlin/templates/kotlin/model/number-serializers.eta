@@ -1,0 +1,49 @@
+<% for (const name of it.serializers) { const text = name.startsWith("DecimalText"); const type = text ? "String" : name.startsWith("BigDecimal") || name === "NumericSerializer" ? "java.math.BigDecimal" : "java.math.BigInteger"; const string = name.endsWith("AsStringSerializer"); -%>
+<% if (!string) { %>@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+<% } %><%= it.h.visibility(it) %>object <%= name %> : kotlinx.serialization.KSerializer<<%= type %>> {
+    override val descriptor = kotlinx.serialization.descriptors.PrimitiveSerialDescriptor(
+        <%~ it.h.str(it.package + "." + name) %>, kotlinx.serialization.descriptors.PrimitiveKind.<%= string ? "STRING" : "DOUBLE" %>,
+    )
+
+    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): <%= type %> {
+        val input = decoder as? kotlinx.serialization.json.JsonDecoder
+            ?: throw kotlinx.serialization.SerializationException("Exact numbers require JSON")
+        val value = input.decodeJsonElement() as? kotlinx.serialization.json.JsonPrimitive
+            ?: throw kotlinx.serialization.SerializationException("Expected a numeric primitive")
+        if (value.isString != <%= string %>) throw kotlinx.serialization.SerializationException("Unexpected numeric wire encoding")
+        return try {
+<% if (text) { -%>
+            validateDecimal(value.content)
+<% } else { -%>
+            <%= type %>(value.content)
+<% } -%>
+        } catch (cause: NumberFormatException) {
+            throw kotlinx.serialization.SerializationException("Invalid numeric value", cause)
+        }
+    }
+
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: <%= type %>) {
+        val output = encoder as? kotlinx.serialization.json.JsonEncoder
+            ?: throw kotlinx.serialization.SerializationException("Exact numbers require JSON")
+<% if (text) { -%>
+        validateDecimal(value)
+<% } -%>
+        output.encodeJsonElement(<%~ string ? "kotlinx.serialization.json.JsonPrimitive(value.toString())" : "kotlinx.serialization.json.JsonUnquotedLiteral(value.toString())" %>)
+    }
+<% if (text) { %>
+
+    private fun validateDecimal(value: String): String {
+<% if (!string) { -%>
+        if (!Regex("""-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?""").matches(value)) {
+            throw kotlinx.serialization.SerializationException("Invalid JSON decimal")
+        }
+<% } -%>
+        try { java.math.BigDecimal(value) } catch (cause: NumberFormatException) {
+            throw kotlinx.serialization.SerializationException("Invalid decimal value", cause)
+        }
+        return value
+    }
+<% } -%>
+}
+
+<% } -%>

@@ -1,0 +1,32 @@
+<% const d = it.decl; -%>
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable(with = <%= d.name %>.Serializer::class)
+<%= it.h.visibility(it) %>sealed interface <%= d.name %> {
+<% for (const variant of d.variants) { %><%~ it.h.kdoc(variant.docs, "    ") %><%~ it.h.annotations(variant.annotations, "    ") %>    data class <%= variant.name %>(val value: <%= variant.type.text %>) : <%= d.name %>
+<% } %>
+    object Serializer : KSerializer<<%= d.name %>> {
+        override val descriptor = buildClassSerialDescriptor(<%~ it.h.str(d.fqn) %>)
+
+        override fun deserialize(decoder: Decoder): <%= d.name %> {
+            val input = decoder as? JsonDecoder ?: throw SerializationException("Tagged unions require JSON")
+            val envelope = input.decodeJsonElement() as? JsonObject ?: throw SerializationException("Expected a union envelope")
+            val discriminator = envelope[<%~ it.h.str(d.discriminator.property) %>] as? JsonPrimitive
+            if (discriminator == null || !discriminator.isString) throw SerializationException("Missing string union discriminator")
+            val payload = envelope[<%~ it.h.str(d.discriminator.envelopeProperty) %>] ?: throw SerializationException("Missing union payload")
+            return when (discriminator.content) {
+<% for (const variant of d.variants) { %>                <%~ variant.guard %> -> <%= variant.name %>(input.json.decodeFromJsonElement(<%~ it.h.jsonSerializer(variant.type) %>, payload))
+<% } %>                else -> throw SerializationException("Unknown union discriminator")
+            }
+        }
+
+        override fun serialize(encoder: Encoder, value: <%= d.name %>) {
+            val output = encoder as? JsonEncoder ?: throw SerializationException("Tagged unions require JSON")
+            val (discriminator, payload) = when (value) {
+<% for (const variant of d.variants) { %>                is <%= variant.name %> -> <%~ variant.guard %> to output.json.encodeToJsonElement(<%~ it.h.jsonSerializer(variant.type) %>, value.value)
+<% } %>            }
+            output.encodeJsonElement(JsonObject(mapOf(
+                <%~ it.h.str(d.discriminator.property) %> to JsonPrimitive(discriminator),
+                <%~ it.h.str(d.discriminator.envelopeProperty) %> to payload,
+            )))
+        }
+    }
+}

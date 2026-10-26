@@ -1,4 +1,9 @@
 <% const d = it.decl; %>
 <%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable
 @JvmInline
-<%= it.h.visibility(it) %>value class <%= d.name %>(<% if (d.value.serializer) { %>@Serializable(with = <%= d.value.serializer %>::class) <% } %>val value: <%= d.value.text %>)<%~ it.h.initBlock(d.checks) %>
+<%= it.h.visibility(it) %>value class <%= d.name %>(<% if (d.value.serializer) { %>@Serializable(with = <%= d.value.serializer %>::class) <% } %>val value: <%= d.value.text %>)<%~ it.h.initBlock(d.checks) %><% if (d.constants) { %> {
+    companion object {
+<% for (const constant of d.constants) { %><%~ it.h.kdoc(constant.docs, "        ") %><%~ it.h.annotations(constant.annotations, "        ") %>        val <%= constant.name %> = <%= d.name %>(<%~ it.h.str(constant.value) %>)
+<% } %>    }
+}
+<% } %>

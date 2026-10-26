@@ -4,6 +4,29 @@ All packages (`@abhigyakrishna/tspgen-core`, `-kotlin`, `-kotlin-ktor-server`, `
 `-typescript`, `-ts-nextjs-client`, `-go`, `-go-nethttp-client`, `-go-nethttp-server`, `-go-gin-server`)
 are released together with the same version.
 
+## Unreleased
+
+### Added
+
+- Documented TypeSpec feature compatibility across Kotlin, TypeScript and Go, with implementation and test evidence.
+- Kotlin models: typed additional properties, tuple JSON codecs, object-envelope discriminated unions, nested and
+  exact numeric defaults, and preserved encoded generic arguments. Opt-in numeric/mixed enums, open string enums,
+  arbitrary-precision numbers, strict optional field presence and HTTP lifecycle payload models preserve existing generated APIs by default.
+- Kotlin wire codecs for standard date/time, duration, string primitive and delimited-array encodings.
+- Ktor transports: JSON Lines request/response flows, typed file/multipart downloads, tuple multipart uploads,
+  exact compound server authentication and scoped server WebSocket sessions.
+- Ktor SSE/JSON Lines responses retain declared statuses, headers and alternate success variants through
+  scoped client callbacks. Streaming uploads validate required and duplicate single parts; positional tuples
+  support trailing repeated parts and reject ambiguous layouts.
+
+### Fixed
+
+- Decode structured parameters without losing JSON shapes, preserve encoded scalar arguments in nested generic
+  model properties, validate literals and HTTP parameters, and retain inherited scalar and collection constraints.
+- Preserve exact numeric and temporal bounds, decimal JSON-number versus explicit string encodings in precise
+  mode, and documentation/deprecation on custom-codec members and API declarations. Validate WebSocket
+  handshake parameters before upgrading the connection.
+
 ## 0.2.3 — 2026-10-25
 
 ### Added

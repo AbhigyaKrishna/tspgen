@@ -22,7 +22,7 @@ dependencies {
     implementation("io.ktor:ktor-client-content-negotiation:$ktor")
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
     testImplementation("io.ktor:ktor-server-test-host:$ktor")
-    testImplementation("io.ktor:ktor-server-websockets:$ktor")
+    implementation("io.ktor:ktor-server-websockets:$ktor")
     testImplementation("io.ktor:ktor-server-cio:$ktor")
     testImplementation("io.ktor:ktor-client-cio:$ktor")
     testImplementation(kotlin("test"))
@@ -35,6 +35,13 @@ kotlin {
     }
     sourceSets.main {
         kotlin.srcDirs(
+            "build/generated/tspgen-numeric-mapping/models",
+            "build/generated/tspgen-lifecycle/models",
+            "build/generated/tspgen-lifecycle/client",
+            "build/generated/tspgen-lifecycle/server",
+            "build/generated/tspgen-contracts/models",
+            "build/generated/tspgen-contracts/client",
+            "build/generated/tspgen-contracts/server",
             "build/generated/tspgen-websocket/models",
             "build/generated/tspgen-websocket/client",
             "build/generated/tspgen-client/models",

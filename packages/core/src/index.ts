@@ -1,6 +1,7 @@
 export { $lib, reportDiagnostic, createDiagnostic, errorMessage } from "./lib.js";
 export { apiVersionConstants, constantCase, pascal, type ApiVersionConstant } from "./naming.js";
 export * from "./ir/types.js";
+export { collectDefault, ExactNumericDefault } from "./ir/defaults.js";
 export { isDefaultStatus, isFixedStatus, statusRank } from "./http.js";
 export { buildApiIR, type BuildOptions } from "./ir/build.js";
 export {

@@ -3,6 +3,10 @@ import { createTypeSpecLibrary, paramMessage } from "@typespec/compiler";
 export const $lib = createTypeSpecLibrary({
   name: "@abhigyakrishna/tspgen-core",
   diagnostics: {
+    "unsupported-json-lines": {
+      severity: "error",
+      messages: { default: paramMessage`JSON-lines operation '${"operation"}' requires one fixed-status success response without response headers.` },
+    },
     "invalid-selection": {
       severity: "error",
       messages: { default: paramMessage`Unknown ${"option"} id '${"id"}'.` },
@@ -72,6 +76,12 @@ export const $lib = createTypeSpecLibrary({
       severity: "warning",
       messages: {
         default: paramMessage`Operation '${"operation"}' returns a text/event-stream response together with other success responses or response headers; only a single success response can stream. It is treated as a text body.`,
+      },
+    },
+    "ambiguous-multipart-parts": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Multipart tuple part ${"part"} in '${"operation"}' is ambiguous: part names must be unique, and an unnamed repeated part cannot precede another unnamed part. Give these parts explicit names.`,
       },
     },
     "events-in-json": {

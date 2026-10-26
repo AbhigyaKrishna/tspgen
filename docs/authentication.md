@@ -29,20 +29,27 @@ providers of those names. Routes with the same wrapper share one block.
 |---|---|
 | `A` / `A \| B` | `authenticate(pA)` / `authenticate(pA, pB)` (the first valid credential wins; the others aren't checked) |
 | `[A, B]` (A & B) | `authenticate(pA, pB, strategy = AuthenticationStrategy.Required)` |
-| any of these `\| NoAuth` | `authenticate(…every scheme…, optional = true)`: anonymous calls pass; with credentials, the first valid one wins (the others aren't checked) and only all-invalid credentials get 401 |
-| `[A, B] \| NoAuth` (a combination and `NoAuth`) | the same `authenticate(pA, pB, optional = true)`, so one valid credential is enough: warning `auth-combination-approximated` |
+| `A \| B \| NoAuth` | `authenticate(pA, pB, optional = true)`: anonymous calls pass; otherwise the first valid credential wins |
+| `[A, B] \| NoAuth` | generated combination provider: anonymous calls pass, supplied credentials must satisfy the complete AND clause |
 | `NoAuth` only, or none | none |
-| `[A, B] \| C` (several alternatives, one needing several schemes) | error `unsupported-auth-combination`; fails closed with `authenticate(pA, pB, pC, strategy = AuthenticationStrategy.Required)` (every scheme required) until you set the `authenticate` meta key |
+| `[A, B] \| C` | generated combination provider: both A and B, or C; partial AND success cannot authorize a call |
 
 Nested `authenticate` blocks are not used for `A & B`: Ktor collects the providers of nested blocks into one
 set, each with its block's strategy, so two default (first-successful) blocks accept either credential. For the
 same reason, don't combine `@useAuth` with a `wrap` that calls `authenticate(...)` (the house-style pattern):
 the route would accept either provider — use the `authenticate` meta key or `features.auth: false` instead. The `authenticate` meta key on an operation
-or group replaces the generated wrapper (and silences `unsupported-auth-combination` and
-`auth-combination-approximated`); `wrap` wrappers go inside it. An `authenticate` key inherited from a namespace or
+or group replaces the generated wrapper; `wrap` wrappers go inside it. An `authenticate` key inherited from a namespace or
 group replaces the wrapper of an operation with its own `@useAuth` too, so it can loosen (or tighten) that
 operation's auth. `features.auth: false` turns generation off. The Ktor client generates credentials from
 `@useAuth`, see below.
+
+Compound requirements target Ktor 3.6 and generate `AuthenticationSupport.kt` and register synthetic providers after your
+providers have been installed. Each delegate is evaluated in an isolated `AuthenticationContext` and
+`skipWhen` is honored. One principal per accepted provider is copied to the call under that provider's
+configured name. Ktor does not expose public enumeration of a provider's principals or native challenges;
+providers producing several principals should use an application-owned wrapper. Failed compound
+requirements use a generated 401 challenge rather than replaying native provider challenge bodies.
+Registration is idempotent and missing providers fail at route installation.
 
 **Next.js clients.** A service using schemes the client can send gets a `<Service>Auth` type of credential
 providers, keyed by scheme id (quoted when not an identifier), passed as `auth` in the grouped client's

@@ -31,6 +31,7 @@ npm install zod @tanstack/react-query react
 
 | Guide | Contents |
 |---|---|
+| [Implementation compatibility](docs/compatibility.md) | TypeSpec feature support across Kotlin, TypeScript and Go, target differences, limits and implementation evidence |
 | [Kotlin](docs/kotlin.md) | `tspconfig.yaml`, packages, output layout, generics, date/time, sealed unions, Ktor server and client |
 | [TypeScript / Next.js](docs/typescript.md) | Models, zod schemas, grouped and flat Next.js clients, TanStack Query, Server Actions |
 | [Go](docs/go.md) | Models, `net/http` client and server, Gin server |

@@ -1,4 +1,4 @@
-<% const d = it.decl; const sup = d.implements.length ? " : " + d.implements.map((f) => it.h.ref(f, it.qualified)).join(", ") : ""; const tp = d.typeParameters?.length ? "<" + d.typeParameters.join(", ") + ">" : ""; %>
+<% const d = it.decl; const sup = d.implements.length ? " : " + d.implements.map((f) => it.h.ref(f, it.qualified)).join(", ") : ""; const tp = d.typeParameters?.length ? "<" + d.typeParameters.join(", ") + ">" : ""; if (d.additional || d.tuple || d.jsonCodec) { %><%~ include("kotlin/model/json-class", it) %><% } else { %>
 <%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><% if (!d.plain && d.properties.some((p) => p.encodeDefault || p.presence)) { %>@OptIn(ExperimentalSerializationApi::class) // @EncodeDefault
 <% } %><% if (!d.plain) { %>@Serializable
 <% } %><% if (d.serialName !== undefined) { %>@SerialName(<%~ it.h.str(d.serialName) %>)
@@ -8,4 +8,4 @@
 <% } %><% if (p.encodeDefault) { %>    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
 <% } %>    <%= p.override ? "override " : "" %>val <%= p.name %>: <%= p.serialType ?? p.type.text %><%= p.default !== undefined ? " = " + p.default : "" %>,
 <% } %>)<%= sup %><%~ it.h.initBlock(d.checks) %>
-<% } %>
+<% } %><% } %>

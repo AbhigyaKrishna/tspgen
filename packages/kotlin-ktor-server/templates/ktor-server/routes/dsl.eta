@@ -4,6 +4,9 @@
 
 <% } -%>
 <%= it.h.visibility(it) %>fun Route.<%= fn.name %>(service: <%= u.serviceName %>) {
+<% if (it.authCombinations) { -%>
+    application.plugin(Authentication).configure { installAuthCombinations() }
+<% } -%>
 <% if (fn.prefix) { -%>
     route(<%~ it.h.str(fn.prefix) %>) {
 <%~ it.h.indent(body, "    ") %>

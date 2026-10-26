@@ -14,6 +14,7 @@ export interface ContextParam {
 
 /** An operation as the server sees it: replaced parameters removed, context parameters appended. */
 export interface ServerOperation extends KtOperation {
+  webSocket?: boolean;
   context: ContextParam[];
   /** How a multipart or file body is received; absent for JSON bodies. */
   upload?: ServerUpload;

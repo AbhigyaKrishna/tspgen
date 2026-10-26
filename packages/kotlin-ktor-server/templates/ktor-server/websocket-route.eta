@@ -1,0 +1,18 @@
+<% const op = it.op; const s = it.h.ktorServer; -%>
+    route(<%~ it.h.str(it.path ?? op.path) %>) {
+        install(WebSocketHandshakeValidation) {
+            validate = { call ->
+<% for (const parameter of op.params) { -%>
+                val <%= parameter.name %> = <%~ s.paramExpr(parameter) %>
+<% } -%>
+<% const checks = op.params.flatMap(parameter => parameter.checks ?? []); if (checks.length) { -%>
+                validRequest {
+<% for (const check of checks) { -%>
+                    <%~ check %>
+<% } -%>
+                }
+<% } -%>
+            }
+        }
+<%~ it.h.indent(include("ktor-server/routes/dsl-route", { ...it, path: "", validatedHandshake: true }), "    ") -%>
+    }

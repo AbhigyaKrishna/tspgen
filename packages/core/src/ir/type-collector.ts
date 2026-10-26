@@ -4,12 +4,24 @@ import {
   getEncode,
   getEntityName,
   getFriendlyName,
+  getLifecycleVisibilityEnum,
+  getReturnTypeVisibilityFilter,
   getMaxItems,
   getMaxLength,
   getMaxValue,
+  getMaxValueAsNumeric,
+  getMaxValueForScalar,
+  getMaxValueExclusive,
+  getMaxValueExclusiveAsNumeric,
+  getMaxValueExclusiveForScalar,
   getMinItems,
   getMinLength,
   getMinValue,
+  getMinValueAsNumeric,
+  getMinValueForScalar,
+  getMinValueExclusive,
+  getMinValueExclusiveAsNumeric,
+  getMinValueExclusiveForScalar,
   getNamespaceFullName,
   getPattern,
   getTypeName,
@@ -24,22 +36,25 @@ import {
   serializeValueAsJson,
   type Entity,
   type Enum,
+  type EnumMember,
   type Model,
   type ModelProperty,
   type Namespace,
+  type Operation,
   type Program,
   type Scalar,
   type Type,
   type Union,
   type UnionVariant,
 } from "@typespec/compiler";
-import { getHttpPart, isBody, isBodyRoot, isMetadata, isOrExtendsHttpFile } from "@typespec/http";
+import { createMetadataInfo, getHttpPart, getVisibilitySuffix, HttpVisibilityProvider, isBody, isBodyRoot, isMetadata, isOrExtendsHttpFile, resolveRequestVisibility, Visibility, type HttpVerb } from "@typespec/http";
 import { reportDiagnostic } from "../lib.js";
 import { pascal } from "../naming.js";
 import { collectDecorators, namespaceDecoratorsField } from "./decorators.js";
 import { docInfo } from "./docs.js";
+import { collectDefault } from "./defaults.js";
 import { isEventsUnion, type SseLibraries } from "./sse.js";
-import type { ConstraintsIR, CustomScalarIR, EnumIR, EventIR, ModelIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
+import type { ConstraintsIR, CustomScalarIR, EnumIR, EventIR, ModelIR, PartIR, PropertyIR, TypeIR, TypeRef, UnionIR } from "./types.js";
 import type { ResolvedService } from "./versioning.js";
 
 const UNKNOWN: TypeRef = { kind: "unknown" };
@@ -53,11 +68,42 @@ const DEFAULT_ENCODINGS: Record<string, readonly string[]> = {
   duration: ["ISO8601"],
   bytes: ["base64"],
 };
+const WIRE_ENCODINGS: Record<string, readonly string[]> = {
+  utcDateTime: ["rfc3339", "rfc7231", "unixTimestamp"],
+  offsetDateTime: ["rfc3339", "rfc7231", "unixTimestamp"],
+  duration: ["ISO8601", "seconds", "milliseconds"],
+  bytes: ["base64", "base64url"],
+};
+const ARRAY_DELIMITERS: Record<string, string> = {
+  pipeDelimited: "|", spaceDelimited: " ", commaDelimited: ",", newlineDelimited: "\n",
+};
+
+interface CollectorOptions {
+  generics: boolean | ((declaration: Model) => boolean);
+  sse?: SseLibraries;
+  tuples?: boolean;
+  fileResponses?: boolean;
+  multipartResponses?: boolean;
+  jsonLines?: boolean;
+  streamingResponses?: boolean;
+  exactLiterals?: boolean;
+  payloadVisibility?: boolean;
+  wireEncodings?: boolean;
+}
 
 /** Converts TypeSpec types into TypeRefs, collecting named/anonymous declarations as TypeIR. */
 export class TypeCollector {
   private readonly types = new Map<string, TypeIR>();
-  private readonly ids = new Map<Type, string>();
+  private readonly idMaps = new Map<number, Map<Type, string>>();
+  private visibility = Visibility.Read;
+  private readonly metadata;
+
+  private get ids(): Map<Type, string> {
+    const visibility = this.options.payloadVisibility ? this.visibility : Visibility.Read;
+    let ids = this.idMaps.get(visibility);
+    if (!ids) this.idMaps.set(visibility, ids = new Map());
+    return ids;
+  }
   /** Template declarations checked by `declarationGeneric` (true while being checked, for recursion). */
   private readonly genericDeclarations = new Map<Model, boolean>();
   /** `genericsFor` results by declaration, so a `generics` callback runs once per template declaration. */
@@ -86,14 +132,85 @@ export class TypeCollector {
 
   constructor(
     private readonly program: Program,
-    private readonly options: { generics: boolean | ((declaration: Model) => boolean); sse?: SseLibraries | undefined } = {
+    private readonly options: CollectorOptions = {
       generics: true,
     },
-  ) {}
+  ) {
+    this.metadata = createMetadataInfo(program, { canonicalVisibility: Visibility.Read });
+  }
+
+  request<T>(operation: Operation, verb: HttpVerb, build: () => T): T {
+    if (!this.options.payloadVisibility) return build();
+    return this.withVisibility(resolveRequestVisibility(this.program, operation, verb), build);
+  }
+
+  response<T>(operation: Operation, build: () => T): T {
+    if (!this.options.payloadVisibility) return build();
+    const filter = getReturnTypeVisibilityFilter(this.program, operation, HttpVisibilityProvider());
+    const lifecycle = getLifecycleVisibilityEnum(this.program);
+    const flags: Record<string, Visibility> = { Read: Visibility.Read, Create: Visibility.Create, Update: Visibility.Update, Delete: Visibility.Delete, Query: Visibility.Query };
+    const visibility = filter.any ? [...filter.any].reduce((result, member) =>
+      member.enum === lifecycle ? result | (flags[member.name] ?? Visibility.None) : result, Visibility.None) : Visibility.All;
+    return this.withVisibility(visibility, build);
+  }
+
+  private withVisibility<T>(visibility: Visibility, build: () => T): T {
+    const previous = this.visibility;
+    this.visibility = visibility;
+    try {
+      return build();
+    } finally {
+      this.visibility = previous;
+    }
+  }
+
+  private visibilitySuffix(type: Type): string {
+    if (!this.options.payloadVisibility || !this.metadata.isTransformed(type, this.visibility)) return "";
+    return getVisibilitySuffix(this.visibility, Visibility.Read) + (this.visibility & Visibility.Patch ? "Patch" : "");
+  }
+
+  get exactLiterals(): boolean { return this.options.exactLiterals === true; }
+  get fileResponses(): boolean { return this.options.fileResponses === true; }
+  get multipartResponses(): boolean { return this.options.multipartResponses === true; }
+  get jsonLines(): boolean { return this.options.jsonLines === true; }
+  get streamingResponses(): boolean { return this.options.streamingResponses === true; }
+  get tuples(): boolean { return this.options.tuples === true; }
+
+  multipartRef(operation: string, hint: string, parts: PartIR[]): TypeRef {
+    const id = `$multipart.${operation}`;
+    if (!this.types.has(id)) this.types.set(id, {
+      kind: "model", id, name: hint, namespace: [], decorators: {}, multipart: true,
+      properties: parts.map((part) => ({
+        name: part.property, wireName: part.property, decorators: {}, optional: part.optional,
+        type: part.multi ? { kind: "array", of: part.type } : part.type,
+      })),
+    });
+    return { kind: "named", id };
+  }
+
+  jsonLinesRef(type: Type, hint: string): TypeRef {
+    if (type.kind !== "Union") return this.ref(type, hint);
+    const suffix = this.visibilitySuffix(type);
+    const id = `$jsonl.${typeId(type)}${suffix ? `#${this.visibility}` : ""}`;
+    if (this.types.has(id)) return { kind: "named", id };
+    const union: UnionIR = { kind: "union", id, name: pascal(hint) + suffix, namespace: [], decorators: {}, variants: [], jsonLines: true };
+    this.types.set(id, union);
+    union.variants = [...type.variants.values()].map((variant, index) => ({
+      ...(typeof variant.name === "string" ? { name: variant.name } : {}),
+      type: this.ref(variant.type, `${hint}Variant${index + 1}`),
+    }));
+    const [discriminated] = getDiscriminatedUnion(this.program, type);
+    if (discriminated) union.discriminator = {
+      property: discriminated.options.discriminatorPropertyName,
+      envelope: discriminated.options.envelope,
+      envelopeProperty: discriminated.options.envelopePropertyName,
+    };
+    return { kind: "named", id };
+  }
 
   /** The TypeSpec type collected under `id`, if any. */
   sourceOf(id: string): Type | undefined {
-    for (const [type, typeId] of this.ids) if (typeId === id) return type;
+    for (const ids of this.idMaps.values()) for (const [type, typeId] of ids) if (typeId === id) return type;
     return undefined;
   }
 
@@ -175,18 +292,39 @@ export class TypeCollector {
       case "Union":
         return this.unionRef(type, hint);
       case "String":
-      case "Number":
       case "Boolean":
         return { kind: "literal", value: type.value };
+      case "Number":
+        return { kind: "literal", value: type.value, ...(this.options.exactLiterals && type.numericValue.asNumber() === null
+          ? { numericText: type.numericValue.asBigInt()?.toString() ?? type.numericValue.toString() } : {}) };
       case "Intrinsic":
         if (isNullType(type)) return { kind: "literal", value: null };
         if (type.name === "unknown") return UNKNOWN;
         break;
       case "TemplateParameter":
         return { kind: "typeParam", name: (type.node as { id: { sv: string } }).id.sv };
+      case "Tuple":
+        if (this.options.tuples) return this.tupleRef(type, hint);
     }
     reportDiagnostic(this.program, { code: "unsupported-type", format: { kind: type.kind }, target: type ?? NoTarget });
     return UNKNOWN;
+  }
+
+  private tupleRef(type: Extract<Type, { kind: "Tuple" }>, hint: string): TypeRef {
+    const existing = this.ids.get(type);
+    if (existing) return { kind: "named", id: existing };
+    const id = `$tuple.${typeId(type)}${this.options.payloadVisibility ? `#${this.visibility}` : ""}`;
+    this.ids.set(type, id);
+    if (!this.types.has(id)) {
+      const name = pascal(hint);
+      const tuple: ModelIR = { kind: "model", id, name, namespace: [], decorators: {}, properties: [], tuple: true };
+      this.types.set(id, tuple);
+      tuple.properties = type.values.map((value, index) => ({
+        name: `item${index + 1}`, wireName: `item${index + 1}`, optional: false,
+        type: this.ref(value, `${name}Item${index + 1}`), decorators: {},
+      }));
+    }
+    return { kind: "named", id };
   }
 
   /**
@@ -213,16 +351,23 @@ export class TypeCollector {
     const data = getEncode(this.program, state);
     if (!data) return ref;
     const target = ref.kind === "nullable" ? ref.of : ref;
+    const arrayEncoding = data.encoding?.split(".").at(-1);
+    if (this.options.wireEncodings && target.kind === "array" && arrayEncoding && arrayEncoding in ARRAY_DELIMITERS) {
+      const encoded: TypeRef = { ...target, delimiter: ARRAY_DELIMITERS[arrayEncoding] };
+      return ref.kind === "nullable" ? { kind: "nullable", of: encoded } : encoded;
+    }
     if (target.kind !== "scalar") {
       this.reportUnsupportedEncoding(state, data.encoding ?? "string");
       return ref;
     }
     const encoding = this.encoding(state, target.name);
+    const wireEncoding = this.wireEncoding(state, target.name);
     const encoded: TypeRef = {
       kind: "scalar",
       name: target.name,
       ...(target.custom ? { custom: target.custom } : {}),
       ...(encoding ? { encoding } : {}),
+      ...(wireEncoding ? { wireEncoding } : {}),
     };
     return ref.kind === "nullable" ? { kind: "nullable", of: encoded } : encoded;
   }
@@ -237,8 +382,21 @@ export class TypeCollector {
     const encoding = data.encoding ?? "string";
     if (encoding === "string" && STRING_ENCODABLE.has(root)) return "string";
     if (DEFAULT_ENCODINGS[root]?.includes(encoding)) return undefined;
+    if (this.wireEncoding(target, root)) return undefined;
     this.reportUnsupportedEncoding(target, encoding);
     return undefined;
+  }
+
+  private wireEncoding(target: ModelProperty | Scalar, root: string) {
+    if (!this.options.wireEncodings) return undefined;
+    const data = getEncode(this.program, target);
+    if (!data) return undefined;
+    const name = data.encoding ?? "string";
+    if (name === "string" && (/^(u?int|integer|safeint|float|numeric|decimal)/.test(root) || root === "boolean")) {
+      return STRING_ENCODABLE.has(root) ? undefined : { name, type: "string" };
+    }
+    const supported = WIRE_ENCODINGS[root] ?? [];
+    return supported.includes(name) ? { name, type: this.stdScalarName(data.type) } : undefined;
   }
 
   /**
@@ -282,9 +440,9 @@ export class TypeCollector {
       const value = (part.type.kind === "Model" && this.envelopeBody(part.type)) || part.type;
       return isBytes(value) ? FILE : this.ref(value, hint);
     }
-    if (isArrayModelType(model)) return { kind: "array", of: this.ref(model.indexer.value, `${hint}Item`) };
+    if (isArrayModelType(model)) return { kind: "array", of: this.collectionRef(model.indexer.value, `${hint}Item`) };
     if (isRecordModelType(model) && model.name === "Record") {
-      return { kind: "map", of: this.ref(model.indexer.value, `${hint}Value`) };
+      return { kind: "map", of: this.collectionRef(model.indexer.value, `${hint}Value`) };
     }
     // Inside a template declaration `T[]` / `Record<T>` have a template-parameter argument and no indexer yet.
     const [element] = this.stdCollectionArgs(model);
@@ -301,6 +459,10 @@ export class TypeCollector {
     return { kind: "named", id: this.collectModel(source, hint) };
   }
 
+  private collectionRef(type: Type, hint: string): TypeRef {
+    return this.withVisibility(this.visibility | Visibility.Item, () => this.ref(type, hint));
+  }
+
   private stdCollectionArgs(model: Model): Type[] {
     if ((model.name !== "Array" && model.name !== "Record") || !model.namespace) return [];
     if (getNamespaceFullName(model.namespace) !== "TypeSpec") return [];
@@ -309,6 +471,7 @@ export class TypeCollector {
 
   /** `Page<Pet>` → the generic `Page` (collected once) with args [Pet], when the template can be generic. */
   private genericRef(instance: Model, hint: string): TypeRef | undefined {
+    if (this.options.payloadVisibility) return undefined;
     const generic = this.genericTemplate(instance);
     if (!generic) return undefined;
     // Decorators do not run on template declarations, so docs, encoded names and constraints come
@@ -361,6 +524,10 @@ export class TypeCollector {
     if (getFriendlyName(this.program, instance)) return false;
     if (this.isHttpEnvelope(declaration) || this.isHttpEnvelope(instance)) return false;
     if (instance.indexer && !declaration.indexer) return false;
+    if (this.options.wireEncodings && [...instance.properties.values()].some((property) => {
+      const declared = declaration.properties.get(property.name);
+      return getEncode(this.program, property) && declared && this.mentionsTemplateParameter(declared.type);
+    })) return false;
     const names = (m: Model) => [...m.properties.keys()].join("\0");
     return names(instance) === names(declaration);
   }
@@ -414,6 +581,8 @@ export class TypeCollector {
         return !type.name && [...type.properties.values()].some((p) => this.mentionsTemplateParameter(p.type, seen));
       case "Union":
         return [...type.variants.values()].some((v) => this.mentionsTemplateParameter(v.type, seen));
+      case "Tuple":
+        return type.values.some((value) => this.mentionsTemplateParameter(value, seen));
       default:
         return false;
     }
@@ -431,14 +600,23 @@ export class TypeCollector {
 
   private scalarRef(scalar: Scalar): TypeRef {
     const name = this.stdScalarName(scalar);
-    if (this.isStd(scalar)) return { kind: "scalar", name };
+    if (this.isStd(scalar) && !(this.options.wireEncodings && scalar.name === "unixTimestamp32")) return { kind: "scalar", name };
     // The nearest @encode along the user scalar chain (starting at this scalar itself) applies.
     const encoding = this.nearestEncoding(scalar, name);
+    let wireEncoding;
+    for (let current: Scalar | undefined = scalar; current; current = current.baseScalar) {
+      if (!getEncode(this.program, current)) continue;
+      wireEncoding = this.wireEncoding(current, name);
+      break;
+    }
+    const custom = !this.isStd(scalar) ? this.customScalar(scalar, name, encoding) : undefined;
+    if (wireEncoding && custom) custom.wireEncoding = wireEncoding;
     return {
       kind: "scalar",
       name,
-      custom: this.customScalar(scalar, name, encoding),
+      ...(custom ? { custom } : {}),
       ...(encoding ? { encoding } : {}),
+      ...(wireEncoding ? { wireEncoding } : {}),
     };
   }
 
@@ -458,7 +636,7 @@ export class TypeCollector {
   private customScalar(scalar: Scalar, root: string, encoding: "string" | undefined): CustomScalarIR {
     const cached = this.customScalars.get(scalar);
     if (cached) return cached;
-    const constraints = this.collectConstraints([scalar]);
+    const constraints = this.collectConstraints(scalarChain(scalar));
     const ir: CustomScalarIR = {
       id: getTypeName(scalar),
       name: scalar.name,
@@ -477,6 +655,7 @@ export class TypeCollector {
   private stdScalarName(scalar: Scalar): string {
     let current = scalar;
     while (current.baseScalar && !this.isStd(current)) current = current.baseScalar;
+    if (this.options.wireEncodings && current.name === "unixTimestamp32" && current.baseScalar) current = current.baseScalar;
     return current.name;
   }
 
@@ -503,9 +682,10 @@ export class TypeCollector {
   private identify(type: Model | Union | Enum, hint: string): { id: string; name: string; namespace: string[] } {
     if (type.name) {
       const friendly = getFriendlyName(this.program, type);
-      const name = friendly ?? type.name + templateArgsName(type);
+      const suffix = type.kind === "Enum" ? "" : this.visibilitySuffix(type);
+      const name = (friendly ?? type.name + templateArgsName(type)) + suffix;
       const namespace = type.namespace ? splitNamespace(getNamespaceFullName(type.namespace)) : [];
-      return { id: typeId(type), name, namespace };
+      return { id: typeId(type) + (suffix ? `#${this.visibility}` : ""), name, namespace };
     }
     const base = pascal(hint);
     let name = base;
@@ -535,7 +715,7 @@ export class TypeCollector {
     this.types.set(id, ir);
     for (const prop of model.properties.values()) {
       const stateProp = state?.properties.get(prop.name) ?? prop;
-      if (isMetadata(this.program, stateProp)) continue;
+      if (this.options.payloadVisibility ? !this.metadata.isPayloadProperty(stateProp, this.visibility) : isMetadata(this.program, stateProp)) continue;
       ir.properties.push(this.property(prop, name, stateProp));
     }
     if (model.baseModel) ir.baseId = this.collectModel(model.baseModel, `${name}Base`);
@@ -573,23 +753,24 @@ export class TypeCollector {
       name: prop.name,
       wireName: resolveEncodedName(this.program, state, "application/json"),
       type: this.propertyRef(prop, `${parentName}${pascal(prop.name)}`, state),
-      optional: prop.optional,
+      optional: this.options.payloadVisibility ? this.metadata.isOptional(state, this.visibility) : prop.optional,
       ...docInfo(this.program, state),
       decorators: collectDecorators(prop),
     };
     const constraints = this.constraints(state);
     if (constraints) ir.constraints = constraints;
-    if (state.defaultValue) ir.default = serializeValueAsJson(this.program, state.defaultValue, state.type);
+    if (state.defaultValue) ir.default = this.options.exactLiterals ? collectDefault(this.program, state.defaultValue, state.type)
+      : serializeValueAsJson(this.program, state.defaultValue, state.type);
     return ir;
   }
 
   /**
-   * Constraint decorators of a property or parameter (then of its scalar type, also through `Scalar | null`);
+   * Constraint decorators of a property or parameter, then its scalar inheritance chain (also through `Scalar | null`);
    * undefined when none. Scalar-level constraints of array items (`Slug[]`) are not collected.
    */
   constraints(prop: ModelProperty): ConstraintsIR | undefined {
     const scalar = constrainedScalar(prop.type);
-    return this.collectConstraints(scalar ? [prop, scalar] : [prop]);
+    return this.collectConstraints(scalar ? [prop, ...scalarChain(scalar)] : [prop]);
   }
 
   /** The first value of each constraint decorator among `sources`, in order; undefined when none applies. */
@@ -608,8 +789,26 @@ export class TypeCollector {
       maxItems: first(getMaxItems),
       minValue: first(getMinValue),
       maxValue: first(getMaxValue),
+      minValueExclusive: first(getMinValueExclusive),
+      maxValueExclusive: first(getMaxValueExclusive),
       pattern: first(getPattern),
     };
+    if (this.options.exactLiterals) {
+      const numericBounds = Object.fromEntries([
+        ["minValue", first(getMinValueAsNumeric)], ["maxValue", first(getMaxValueAsNumeric)],
+        ["minValueExclusive", first(getMinValueExclusiveAsNumeric)], ["maxValueExclusive", first(getMaxValueExclusiveAsNumeric)],
+      ].flatMap(([key, value]) => typeof value === "object" && value.asNumber() === null ? [[key, value.toString()]] : []));
+      if (Object.keys(numericBounds).length) all.numericBounds = numericBounds;
+      const scalarBounds = Object.fromEntries([
+        ["minValue", first(getMinValueForScalar)], ["maxValue", first(getMaxValueForScalar)],
+        ["minValueExclusive", first(getMinValueExclusiveForScalar)], ["maxValueExclusive", first(getMaxValueExclusiveForScalar)],
+      ].flatMap(([key, value]) => {
+        if (typeof value !== "object") return [];
+        const logical = collectDefault(this.program, value, value.scalar);
+        return typeof logical === "string" ? [[key, logical]] : [];
+      }));
+      if (Object.keys(scalarBounds).length) all.scalarBounds = scalarBounds;
+    }
     const set = Object.entries(all).filter(([, value]) => value !== undefined);
     return set.length > 0 ? (Object.fromEntries(set) as ConstraintsIR) : undefined;
   }
@@ -628,15 +827,28 @@ export class TypeCollector {
       ...docInfo(this.program, e),
       decorators: collectDecorators(e),
       ...namespaceDecoratorsField(e),
-      members: [...e.members.values()].map((m) => ({
-        name: m.name,
-        value: m.value ?? m.name,
-        ...docInfo(this.program, m),
-        decorators: collectDecorators(m),
-      })),
+      members: [...e.members.values()].map((member) => {
+        const numericText = this.enumNumericText(member);
+        return {
+          name: member.name, value: member.value ?? member.name,
+          ...(numericText ? { numericText } : {}),
+          ...docInfo(this.program, member), decorators: collectDecorators(member),
+        };
+      }),
     };
     this.types.set(id, ir);
     return id;
+  }
+
+  private enumNumericText(member: EnumMember): string | undefined {
+    if (!this.options.exactLiterals || typeof member.value !== "number") return undefined;
+    let source = member;
+    while (source.sourceMember) source = source.sourceMember;
+    if (!source.node?.value) return undefined;
+    const literal = this.program.checker.getTypeForNode(source.node.value);
+    if (literal.kind !== "Number") return undefined;
+    if (literal.numericValue.asNumber() !== null && Math.abs(literal.value) < 9223372036854775808) return undefined;
+    return literal.numericValue.asBigInt()?.toString() ?? literal.numericValue.toString();
   }
 
   private unionRef(union: Union, hint: string): TypeRef {
@@ -677,6 +889,7 @@ export class TypeCollector {
         ...(variantName ? { name: variantName } : {}),
         type: isDiscriminated && v.type.kind === "Model" ? this.modelRef(v.type, hint, false) : this.ref(v.type, hint),
         ...docInfo(this.program, v),
+        ...(this.options.exactLiterals ? { decorators: collectDecorators(v) } : {}),
       };
     });
     const [discriminated] = getDiscriminatedUnion(this.program, union);
@@ -719,7 +932,8 @@ export class TypeCollector {
       const variantName = typeof variant.name === "string" ? variant.name : undefined;
       const payload = this.ref(definition.payloadType, `${name}${pascal(variantName ?? "Message")}`);
       const { docs } = docInfo(this.program, variant);
-      ir.variants.push({ ...(variantName ? { name: variantName } : {}), type: payload, ...(docs ? { docs } : {}) });
+      ir.variants.push({ ...(variantName ? { name: variantName } : {}), type: payload, ...(docs ? { docs } : {}),
+        ...(this.options.exactLiterals ? { ...docInfo(this.program, variant), decorators: collectDecorators(variant) } : {}) });
       const event: EventIR = {
         name: definition.eventType ?? "message",
         payload,
@@ -888,7 +1102,7 @@ function applies(type: Model, name: string): boolean {
 }
 
 /** The scalar of `Scalar` or of an anonymous `Scalar | null`; undefined otherwise. */
-function constrainedScalar(type: Type): Type | undefined {
+function constrainedScalar(type: Type): Scalar | undefined {
   if (type.kind === "Scalar") return type;
   if (type.kind !== "Union" || type.name) return undefined;
   const variants = [...type.variants.values()];
@@ -896,4 +1110,11 @@ function constrainedScalar(type: Type): Type | undefined {
   return nonNull.length === 1 && nonNull.length < variants.length && nonNull[0].type.kind === "Scalar"
     ? nonNull[0].type
     : undefined;
+}
+
+/** Constraint precedence follows the nearest scalar before its base scalars. */
+function scalarChain(scalar: Scalar): Scalar[] {
+  const chain: Scalar[] = [];
+  for (let current: Scalar | undefined = scalar; current; current = current.baseScalar) chain.push(current);
+  return chain;
 }

@@ -134,6 +134,14 @@ fun Route.uploadsRoutes(service: UploadsService) {
                 "avatar" -> emit(UploadPart.Avatar(part.partFileName(), part.contentType?.toString(), part.partChannel()))
                 "photos" -> emit(UploadPart.Photos(part.partFileName(), part.contentType?.toString(), part.partChannel()))
             }
+        }.validateParts(setOf("name", "meta", "avatar"), setOf("name", "count", "meta", "avatar")) { value ->
+            when (value) {
+                is UploadPart.Name -> "name"
+                is UploadPart.Count -> "count"
+                is UploadPart.Meta -> "meta"
+                is UploadPart.Avatar -> "avatar"
+                is UploadPart.Photos -> "photos"
+            }
         }
         service.upload(parts)
         call.respond(HttpStatusCode.NoContent)

@@ -1,0 +1,25 @@
+
+/** Read inside the response's scoped execute block, so cancellation releases the connection. */
+internal suspend fun ByteReadChannel.readJsonLines(consume: suspend (String) -> Unit) {
+    while (true) {
+        val line = readLine() ?: break
+        if (line.isNotBlank()) consume(line)
+    }
+}
+
+internal class JsonLinesContent<T>(
+    private val values: Flow<T>,
+    private val serializer: KSerializer<T>,
+    private val json: Json,
+    mediaType: String,
+) : io.ktor.http.content.OutgoingContent.WriteChannelContent() {
+    override val contentType = ContentType.parse(mediaType)
+
+    override suspend fun writeTo(channel: io.ktor.utils.io.ByteWriteChannel) {
+        values.collect { value ->
+            channel.writeStringUtf8(json.encodeToString(serializer, value))
+            channel.writeStringUtf8("\n")
+            channel.flush()
+        }
+    }
+}

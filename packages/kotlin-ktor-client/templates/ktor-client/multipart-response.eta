@@ -1,0 +1,43 @@
+internal data class MultipartValue(val bytes: ByteArray, val filename: String?, val contentType: String?)
+
+@OptIn(io.ktor.utils.io.InternalAPI::class)
+internal suspend fun <T> HttpClient.readMultipart(
+    response: HttpResponse,
+    positionalNames: List<String>,
+    singleNames: Set<String>,
+    decode: (Map<String, List<MultipartValue>>) -> T,
+): T = kotlinx.coroutines.coroutineScope {
+    val mediaType = response.headers[io.ktor.http.HttpHeaders.ContentType]
+        ?: throw IllegalStateException("Missing multipart response content type")
+    require(ContentType.parse(mediaType).contentType == "multipart") { "Expected a multipart response" }
+    val bytes = <%~ it.bounded ? "response.apiBodyBytes()" : "response.body<ByteArray>()" %>
+    val input = io.ktor.utils.io.ByteReadChannel(bytes)
+    try {
+        val multipart = io.ktor.http.cio.CIOMultipartDataBase(coroutineContext, input, mediaType, bytes.size.toLong(), bytes.size.toLong())
+        val parts = linkedMapOf<String, MutableList<MultipartValue>>()
+        var position = 0
+        multipart.forEachPart { part ->
+            try {
+                val name = part.name ?: positionalNames.getOrNull(position)
+                if (part.name != null) {
+                    val index = positionalNames.indexOf(part.name)
+                    if (index >= position) position = index + 1
+                } else if (name in singleNames) position++
+                val value = when (part) {
+                    is io.ktor.http.content.PartData.FormItem -> MultipartValue(part.value.encodeToByteArray(), null, part.contentType?.toString())
+                    is io.ktor.http.content.PartData.FileItem -> MultipartValue(part.provider().toByteArray(), part.originalFileName, part.contentType?.toString())
+                    else -> throw IllegalStateException("Unsupported multipart response part")
+                }
+                if (name != null) {
+                    require(name !in singleNames || name !in parts) { "Duplicate multipart response part '$name'" }
+                    parts.getOrPut(name) { mutableListOf() }.add(value)
+                }
+            } finally {
+                part.release()
+            }
+        }
+        decode(parts)
+    } finally {
+        input.cancel(null)
+    }
+}

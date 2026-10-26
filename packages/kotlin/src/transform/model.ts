@@ -14,6 +14,11 @@ export interface KtTypeUse {
   text: string;
   imports: string[];
   nullable: boolean;
+  /** A numeric/mixed enum with generated text parameter codecs. */
+  enumWire?: boolean;
+  /** An HTTP file value with filename, content type and bytes. */
+  file?: boolean;
+  multipart?: { parts: KtPart[]; contentType: string; tuple: boolean };
   /** Element of a `List` (set by `listOf`); parameter codecs convert list items with it. */
   element?: KtTypeUse;
   /** Value of a `Map<String, …>` (set by `mapOf`); keys are always `String`. */
@@ -25,6 +30,12 @@ export interface KtTypeUse {
    * a model property of this type is annotated `@Serializable(with = <serializer>::class)`.
    */
   serializer?: string;
+  /** Parameters must use the explicit wire serializer rather than the Kotlin type's default text form. */
+  encodedParam?: boolean;
+  /** The parameter is represented by a JSON document rather than a form-decoder scalar. */
+  structuredParam?: boolean;
+  /** Native HTTP String readers bypass JSON content negotiation and need an explicit serializer. */
+  explicitJson?: boolean;
   /** Imports `serializer` / `serialText` need. */
   serialImports?: string[];
   /** The type as written in a model when an element needs a serializer: `List<@Serializable(with = …) Long>`. */
@@ -89,6 +100,14 @@ export interface KtDataClass extends KtDeclBase {
   typeParameters?: string[];
   /** Not `@Serializable`: a multipart request body model, whose file parts are `HttpFile`s. */
   plain?: boolean;
+  /** Unknown object keys, retained with their declared value type. */
+  additional?: { name: string; type: KtTypeUse };
+  /** Properties serialize as a fixed-length JSON array instead of an object. */
+  tuple?: boolean;
+  /** Use explicit property serializers instead of losing encoded generic arguments. */
+  jsonCodec?: boolean;
+  /** Discriminator injected by the surrounding polymorphic serializer. */
+  discriminator?: string;
 }
 
 export interface KtSealedInterface extends KtDeclBase {
@@ -103,6 +122,9 @@ export interface KtSealedInterface extends KtDeclBase {
 export interface KtEnumMember {
   name: string;
   serialName: string;
+  /** Numeric/mixed enums preserve primitive JSON kinds. */
+  value?: string | number;
+  numericText?: string;
   docs?: string;
   annotations: string[];
   meta: MetaScopes;
@@ -115,11 +137,14 @@ export interface KtEnum extends KtDeclBase {
   unknown?: string;
   /** Name of the nested `Serializer` object, set together with `unknown`: `Serializer` unless a member has that name. */
   serializerName?: string;
+  /** JSON serializer for numeric or mixed-valued enums. */
+  jsonValues?: boolean;
 }
 
 export interface KtUntaggedUnion extends KtDeclBase {
   kind: "untagged-union";
-  variants: { name: string; type: KtTypeUse; guard: string; literal?: string }[];
+  variants: { name: string; type: KtTypeUse; guard: string; literal?: string; docs?: string; annotations?: string[] }[];
+  discriminator?: { property: string; envelopeProperty: string };
 }
 
 export interface KtTypeAlias extends KtDeclBase {
@@ -136,10 +161,13 @@ export interface KtValueClass extends KtDeclBase {
   value: KtTypeUse;
   /** `init { }` check lines (throwing `ModelCheckException`) from the scalar's own constraints (features.validation). */
   checks: string[];
+  /** Known values of an otherwise extensible string union. */
+  constants?: { name: string; value: string; docs?: string; annotations?: string[] }[];
 }
 
 /** One event of an `@events` union: a class nested in the events interface. */
 export interface KtEvent {
+  annotations?: string[];
   /** Nested class name. */
   name: string;
   /** SSE `event:` value. */
@@ -164,6 +192,8 @@ export interface KtEvents extends KtDeclBase {
 export type KtDecl = KtDataClass | KtSealedInterface | KtEnum | KtTypeAlias | KtEvents | KtValueClass | KtUntaggedUnion;
 
 export interface KtParam {
+  /** Checks of the declared parameter constraints, evaluated before the service or HTTP request. */
+  checks?: string[];
   name: string;
   wireName: string;
   location: "path" | "query" | "header" | "cookie";
@@ -174,6 +204,10 @@ export interface KtParam {
 }
 
 export interface KtBody {
+  checks?: string[];
+  tupleMultipart?: boolean;
+  /** A JSON-lines request stream; type is Flow<item>. */
+  jsonLines?: KtTypeUse;
   name: string;
   type: KtTypeUse;
   contentType: string;
@@ -219,6 +253,7 @@ export interface KtResponse {
 
 /** A server-sent event stream: a `Flow` of events. */
 export interface KtStream {
+  protocol?: "sse" | "jsonl";
   /** Element type: the events interface of a typed stream, else `SseMessage`. */
   type: KtTypeUse;
   /** The events declaration of a typed stream. */
@@ -257,6 +292,7 @@ export interface KtGroup {
 }
 
 export interface KtService {
+  annotations?: string[];
   id: string;
   name: string;
   package: string;
@@ -294,6 +330,9 @@ export interface KotlinIR {
   modelCheckException?: string;
   /** Optional-field presence support, generated only when a property uses it. */
   optionalValue?: string;
+  /** Exact arbitrary-precision numeric serializers used by generated types. */
+  numberSerializers?: string[];
+  encodingSerializers?: import("./encodings.js").EncodingSerializer[];
   /** `@encode(string)` on uint64 is used: ModelSerializers.kt declares `ULongAsStringSerializer`. */
   ulongAsString?: boolean;
   /**
@@ -309,6 +348,8 @@ export type KtResult =
   | { kind: "sealed"; type: KtTypeUse; decl: KtResultDecl };
 
 export interface KtResultVariant {
+  stream?: KtStream;
+  docs?: string;
   name: string;
   statusCodes: StatusCodes;
   /** Fixed status code; absent for ranges/default (the variant then carries `status`). */

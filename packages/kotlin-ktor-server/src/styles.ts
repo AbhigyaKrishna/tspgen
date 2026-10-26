@@ -1,5 +1,5 @@
 import type { ExtensionRegistry } from "@abhigyakrishna/tspgen-core";
-import { ktorServerHelpers, receivesJson } from "./helpers.js";
+import { ktorServerHelpers, needsDslRoute, receivesJson } from "./helpers.js";
 import type { KtorServerOptions } from "./options.js";
 import type { ServerUnit } from "./units.js";
 
@@ -31,7 +31,8 @@ function routeImports(unit: ServerUnit): string[] {
 }
 
 function verbs(unit: ServerUnit, pkg: string): string[] {
-  return [...new Set(unit.operations.map((o) => `${pkg}.${o.verb}`))];
+  return [...new Set(unit.operations.map((operation) => operation.webSocket ? "io.ktor.server.websocket.webSocket"
+    : `${needsDslRoute(operation) ? "io.ktor.server.routing" : pkg}.${operation.verb}`))];
 }
 
 export const builtinStyles: Record<string, RoutingStyle> = {

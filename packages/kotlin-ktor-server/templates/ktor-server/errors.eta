@@ -7,7 +7,9 @@
 <% for (const e of it.exceptions) { -%>
     exception<<%= e %>> { call, cause ->
 <% const serializer = it.exceptionSerializers?.[e]; -%>
-<% if (serializer) { -%>
+<% if (it.exceptionResponses?.[e]) { -%>
+        <%~ it.exceptionResponses[e] %>
+<% } else if (serializer) { -%>
         call.respondJson(HttpStatusCode.fromValue(cause.status), <%~ serializer %>, cause.error)
 <% } else { -%>
         call.respond(HttpStatusCode.fromValue(cause.status), cause.error)

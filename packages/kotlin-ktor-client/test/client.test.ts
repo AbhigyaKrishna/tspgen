@@ -108,6 +108,28 @@ class PetsClient(
     expect(code).toContain(`Instant.parse((response.headers["x-next"] ?: throw`);
   });
 
+  it("decodes model response headers as JSON while enum header values remain text", async () => {
+    const { outputs } = await client().compile(`
+      @service namespace S;
+      model Filter { name: string; count: int32; }
+      enum Kind { brackets: "[raw]", object: "{raw}" }
+      @route("/items") op list(): {
+        @header filter: Filter;
+        @header labels: Record<string>;
+        @header kind: Kind;
+      };
+    `);
+    const code = outputs[`${DIR}/SClient.kt`];
+    expect(code).toContain("decodeParam<Filter>(");
+    expect(code).toContain("decodeParam<Map<String, String>>(");
+    expect(code).toContain("decodeParam<Kind>(");
+    const support = outputs[`${DIR}/ClientSupport.kt`];
+    expect(support).toContain("paramJson.parseToJsonElement(raw)");
+    expect(support).toContain("descriptor.kind is kotlinx.serialization.descriptors.PrimitiveKind");
+    expect(support).toContain("descriptor.kind == kotlinx.serialization.descriptors.SerialKind.ENUM");
+    expect(support).toContain("while (descriptor.isInline)");
+  });
+
   it("emits the aggregate client and support helpers", async () => {
     const { outputs } = await client().compile(spec);
     expect(outputs[`${DIR}/PetStoreApiClient.kt`]).toBe(`${HEADER}

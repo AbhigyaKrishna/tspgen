@@ -8,6 +8,9 @@ let consumer = "consume";
 while (taken.has(consumer)) consumer += "Socket";
 -%>
     suspend fun <%= op.name %>(<%= signature %><%= signature ? ", " : "" %><%= consumer %>: suspend (io.ktor.client.plugins.websocket.DefaultClientWebSocketSession) -> Unit) {
+<% for (const check of op.params.flatMap(p => p.checks ?? [])) { -%>
+        <%~ check %>
+<% } -%>
 <% if (auth) { -%>
         val <%= auth.variable %> = resolveAuth(<%~ auth.alternatives %>)
 <% } -%>

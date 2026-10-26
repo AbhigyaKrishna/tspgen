@@ -1,13 +1,35 @@
 <% const op = it.op; const s = it.h.ktorServer; const path = it.path ?? op.path; -%>
-    <%= op.verb %><%~ path ? "(" + it.h.str(path) + ")" : "" %> {
+<% if (op.webSocket && op.params.length && !it.validatedHandshake) { -%>
+<%~ include("ktor-server/websocket-route", it) -%>
+<% } else { -%>
+    <%= op.webSocket ? "webSocket" : op.verb %><%~ path ? "(" + it.h.str(path) + ")" : "" %> {
 <% for (const p of op.params) { -%>
         val <%= p.name %> = <%~ s.paramExpr(p) %>
+<% } -%>
+<% const checks = op.params.flatMap(p => p.checks ?? []); if (checks.length && !it.validatedHandshake) { -%>
+        validRequest {
+<% for (const check of checks) { -%>
+            <%~ check %>
+<% } -%>
+        }
 <% } -%>
 <% for (const line of s.bodyLines(op)) { -%>
         <%~ line %>
 <% } -%>
+<% if (!op.upload && op.body?.checks?.length) { -%>
+        validRequest {
+<% for (const check of op.body.checks) { -%>
+            <%~ check %>
+<% } -%>
+        }
+<% } -%>
 <% for (const c of op.context ?? []) { -%>
         val <%= c.name %> = <%~ c.expr %>
 <% } -%>
+<% if (op.webSocket) { -%>
+        <%~ s.callExpr(op, it.unit, it.options) %>
+<% } else { -%>
 <%~ include("ktor-server/routes/respond", { op, call: s.callExpr(op, it.unit, it.options), h: it.h }) -%>
+<% } -%>
     }
+<% } -%>

@@ -152,27 +152,19 @@ ${route("b", "            ")}
     expect(routes).not.toMatch(/authenticate\([^)]*\) \{\n\s+get<SecureResources.OpenResource>/);
   });
 
-  it("reports alternatives of several schemes each as unsupported and fails closed: every scheme required", async () => {
-    const [result, diagnostics] = await server().compileAndDiagnose(`
+  it("composes alternatives of several schemes instead of requiring every scheme", async () => {
+    const { outputs } = await server().compile(`
       @service namespace S;
       model Key is ApiKeyAuth<ApiKeyLocation.header, "X-Key">;
       @route("/secure") interface Secure { @get @route("/m") @useAuth([BearerAuth, Key] | BasicAuth) m(): void; }
     `);
-    expectDiagnostics(diagnostics, {
-      code: "@abhigyakrishna/tspgen-core/unsupported-auth-combination",
-      message: /S\.Secure\.m.*\(BearerAuth & Key\) \| BasicAuth.*every scheme.*@meta\("kotlin:ktor-server", #\{ authenticate: … \}\)\.$/,
-    });
-    expect(diagnostics[0].message).not.toContain("wrap");
-    const target = diagnostics[0].target as { kind?: string; name?: string };
-    expect([target.kind, target.name]).toEqual(["Operation", "m"]);
-    expect(result.outputs[ROUTES]).toContain(
-      `    authenticate("BearerAuth", "Key", "BasicAuth", strategy = AuthenticationStrategy.Required) {\n${route("m")}`,
-    );
-    expect(result.outputs[ROUTES]).toContain("import io.ktor.server.auth.AuthenticationStrategy\n");
+    expect(outputs[ROUTES]).toContain('authenticate("tspgen:S.Secure.m")');
+    expect(outputs["server/com/acme/server/AuthenticationSupport.kt"]).toContain('listOf("BearerAuth", "Key")');
+    expect(outputs["server/com/acme/server/AuthenticationSupport.kt"]).toContain('listOf("BasicAuth")');
   });
 
-  it("warns that a combination of several schemes or NoAuth is approximated by optional = true", async () => {
-    const [result, diagnostics] = await server().compileAndDiagnose(`
+  it("preserves optional AND clauses without loosening them to single-provider success", async () => {
+    const { outputs } = await server().compile(`
       @service namespace S;
       model Key is ApiKeyAuth<ApiKeyLocation.header, "X-Key">;
       @route("/secure") interface Secure {
@@ -181,18 +173,13 @@ ${route("b", "            ")}
         @get @route("/c") @useAuth(BearerAuth | Key | NoAuth) c(): void;
       }
     `);
-    expectDiagnostics(diagnostics, [
-      {
-        code: "@abhigyakrishna/tspgen-core/auth-combination-approximated",
-        severity: "warning",
-        message: /S\.Secure\.a.*\(BearerAuth & Key\) \| NoAuth.*optional = true.*first valid credential/,
-      },
-      { code: "@abhigyakrishna/tspgen-core/auth-combination-approximated", message: /S\.Secure\.b/ },
-    ]);
-    const target = diagnostics[0].target as { kind?: string; name?: string };
-    expect([target.kind, target.name]).toEqual(["Operation", "a"]);
-    expect(result.outputs[ROUTES]).toContain(`    authenticate("BearerAuth", "Key", optional = true) {\n${route("a")}`);
-    expect(result.outputs[ROUTES]).toContain(`    authenticate("BearerAuth", "Key", "BasicAuth", optional = true) {\n${route("b")}`);
+    expect(outputs[ROUTES]).toContain('authenticate("tspgen:S.Secure.a", optional = true)');
+    expect(outputs[ROUTES]).toContain('authenticate("tspgen:S.Secure.b", optional = true)');
+    expect(outputs[ROUTES]).toContain('authenticate("BearerAuth", "Key", optional = true)');
+    const support = outputs["server/com/acme/server/AuthenticationSupport.kt"];
+    expect(support).toContain('listOf("BearerAuth", "Key")');
+    expect(support).toContain('listOf(),');
+    expect(support).toContain('alternative.all');
   });
 
   it("does not warn about an approximated combination the authenticate meta key replaces", async () => {

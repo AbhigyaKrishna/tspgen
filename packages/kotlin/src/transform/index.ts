@@ -104,6 +104,8 @@ export function transformToKotlin(program: Program, api: ApiIR, options: KotlinT
     services,
     api,
     serializers,
+    ...(builder.encodings.serializers.size ? { encodingSerializers: [...builder.encodings.serializers.values()] } : {}),
+    ...(builder.numberSerializers.size ? { numberSerializers: [...builder.numberSerializers] } : {}),
     ...(builder.presenceUsed ? { optionalValue: `${modelsPackage}.OptionalValue` } : {}),
     apiVersions: options.apiVersion === false ? [] : apiVersionConstants(api),
     ...(builder.fileUsed ? { httpFile: builder.httpFileFqn } : {}),
@@ -121,6 +123,7 @@ function usedSerializers(declarations: KtDecl[], services: KtService[]): string[
   const types: KtTypeUse[] = [];
   const addDecl = (d: KtDecl): void => {
     if (d.kind === "data-class" || d.kind === "sealed-interface") types.push(...d.properties.map((p) => p.type));
+    if (d.kind === "data-class" && d.additional) types.push(d.additional.type);
     if (d.kind === "sealed-interface") d.variants.forEach(addDecl);
     // Event payloads are encoded with the models' Json: a java.time payload needs its serializer.
     if (d.kind === "events") types.push(...d.events.flatMap((e) => (e.data ? [e.data] : [])));

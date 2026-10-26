@@ -1,4 +1,4 @@
-import { metaStrings, reportDiagnostic, type AuthRequirementIR, type ExtensionRegistry, type FileSpec } from "@abhigyakrishna/tspgen-core";
+import { metaStrings, reportDiagnostic, type ExtensionRegistry, type FileSpec } from "@abhigyakrishna/tspgen-core";
 import { NoTarget, type Program, type Type } from "@typespec/compiler";
 import {
   camel,
@@ -14,7 +14,7 @@ import {
   type KtService,
 } from "@abhigyakrishna/tspgen-kotlin";
 import { withContext, type ServerOperation } from "./context.js";
-import { bodySerializerImports, receivesJson, resourceSerializedClasses, respondsJson } from "./helpers.js";
+import { bodySerializerImports, ktorServerHelpers, receivesJson, resourceSerializedClasses, respondsJson } from "./helpers.js";
 import type { KtorServerOptions } from "./options.js";
 import { commonPrefix, routeTree, type RouteFunction } from "./routes.js";
 import { builtinStyles, resolveStyle, type RoutingStyle } from "./styles.js";
@@ -22,6 +22,7 @@ import { buildUnits, type ServerUnit } from "./units.js";
 import { frameFunction, sseFunctions, sseImports, sseMode, ssePlan } from "./sse.js";
 import { serverJsonLines, type ServerRuntime } from "./runtime.js";
 import { multipartMode, PartClasses, planUpload, uploadLimit, type SupportNeed } from "./uploads.js";
+import { withWebSocket } from "./websocket.js";
 
 const TARGET_NAME = "@abhigyakrishna/tspgen-kotlin-ktor-server";
 
@@ -142,8 +143,9 @@ const UPLOAD_SUPPORT: Record<SupportNeed, { imports: (ir: KotlinIR) => string[];
       "kotlinx.coroutines.flow.Flow",
       "kotlinx.coroutines.flow.FlowCollector",
       "kotlinx.coroutines.flow.flow",
+      "kotlinx.coroutines.flow.collect",
     ],
-    functions: ["partsFlow"],
+    functions: ["partsFlow", "validateParts"],
   },
   channel: { imports: () => ["io.ktor.utils.io.ByteReadChannel"], functions: ["partChannel", "partFileName"] },
   file: {
@@ -163,7 +165,7 @@ const UPLOAD_SUPPORT: Record<SupportNeed, { imports: (ir: KotlinIR) => string[];
 const SUPPORT_NEEDS: readonly SupportNeed[] = ["limit", "parts", "json", "buffered", "files", "streaming", "channel", "file"];
 
 function withSse(program: Program, op: ServerOperation, options: KtorServerOptions): ServerOperation {
-  if (op.result.kind !== "single" || !op.result.stream) return op;
+  if (!op.responses.some((response) => !response.isError && response.stream && response.stream.protocol !== "jsonl")) return op;
   return { ...op, sse: sseMode(program, op, options.sse ?? "text-writer") };
 }
 
@@ -193,13 +195,15 @@ function typeImports(ops: ServerOperation[], file: "service" | "routes" = "servi
         : []
       : (op.body?.type.imports ?? [])),
     // Routes hand a stream to ServerSupport's writer without naming its types.
-    ...(file === "routes" && op.sse ? [] : op.result.type.imports),
+    ...(file === "routes" && op.sse && op.result.kind === "single" ? [] : op.result.type.imports),
     ...op.context.flatMap((c) => c.type.imports),
   ]);
 }
 
 /** The `@meta("kotlin:ktor-server", …)` keys this target reads, for plugins that write or read them. */
 export interface KtorServerMeta {
+  /** Generate a native WebSocket route and pass its scoped session to the service. */
+  webSocket?: boolean;
   annotations?: string[];
   /** Auth provider names: renders `authenticate(...)` as the outermost wrapper. */
   authenticate?: string[];
@@ -214,6 +218,7 @@ export interface KtorServerMeta {
 }
 
 export interface ServerOpExtras {
+  combination?: AuthCombination;
   annotations: string[];
   /**
    * Provider names of the route's `authenticate(...)` wrapper, empty without one: the `authenticate` meta key,
@@ -243,6 +248,12 @@ interface AuthWrapper {
   providers: string[];
   strategy?: "Required";
   optional?: boolean;
+  combination?: AuthCombination;
+}
+
+interface AuthCombination {
+  name: string;
+  alternatives: string[][];
 }
 
 function renderAuth(wrapper: AuthWrapper): string {
@@ -262,7 +273,7 @@ function serverExtras(program: Program, units: ServerUnit[], options: KtorServer
       const names = metaStrings(program, meta, "authenticate", op.id);
       const [routeSet] = metaStrings(program, meta, "routeSet", op.id);
       const wrapper: AuthWrapper | undefined =
-        names.length > 0 ? { names, providers: names.map((n) => kotlinString(n)) } : generatedAuth(program, op, options);
+        names.length > 0 ? { names, providers: names.map((n) => kotlinString(n)) } : generatedAuth(op, options);
       const auth = wrapper ? [renderAuth(wrapper)] : [];
       extras[op.id] = {
         annotations: metaStrings(program, meta, "annotations", op.id),
@@ -270,6 +281,7 @@ function serverExtras(program: Program, units: ServerUnit[], options: KtorServer
         authProviders: wrapper?.providers ?? [],
         ...(wrapper?.strategy ? { authStrategy: wrapper.strategy } : {}),
         ...(wrapper?.optional ? { authOptional: true } : {}),
+        ...(wrapper?.combination ? { combination: wrapper.combination } : {}),
         auth,
         // A wrapper declared both on the namespace and on the operation renders once.
         wrap: [...new Set([...auth, ...metaStrings(program, meta, "wrap", op.id)])],
@@ -281,24 +293,8 @@ function serverExtras(program: Program, units: ServerUnit[], options: KtorServer
   return extras;
 }
 
-/** `A & B | C` notation of a requirement, for diagnostics. */
-function describeAuth(auth: AuthRequirementIR): string {
-  return auth.options
-    .map((option) => (option.length === 0 ? "NoAuth" : option.length === 1 ? option[0] : `(${option.join(" & ")})`))
-    .join(" | ");
-}
-
-/**
- * The `authenticate(...)` wrapper for an operation's `@useAuth`: one scheme or alternatives of one scheme each →
- * `authenticate(a, b)` (the first valid credential wins); one alternative of several schemes → `strategy = Required`
- * (Ktor merges nested `authenticate` blocks into one set, so nesting would accept any of them); any alternative
- * with `NoAuth` → every scheme mentioned, `optional = true`: anonymous calls pass, the first valid credential wins
- * (the others are not checked) and only credentials that are all invalid are rejected; an alternative needing
- * several schemes is thereby loosened (warned as `auth-combination-approximated`). Several alternatives of which
- * some need more than one scheme cannot be expressed: they are reported and fail closed, requiring every scheme
- * mentioned (`strategy = Required`).
- */
-function generatedAuth(program: Program, op: ServerOperation, options: KtorServerOptions): AuthWrapper | undefined {
+/** Native wrappers handle simple requirements; compound alternatives use isolated provider evaluation. */
+function generatedAuth(op: ServerOperation, options: KtorServerOptions): AuthWrapper | undefined {
   if (!options.features.auth || !op.auth) return undefined;
   const alternatives = op.auth.options.map((option) => [...new Set(option)]);
   const required = alternatives.filter((option) => option.length > 0);
@@ -307,40 +303,20 @@ function generatedAuth(program: Program, op: ServerOperation, options: KtorServe
     names: ids,
     providers: ids.map((id) => options["auth-providers"]?.[id] ?? kotlinString(id)),
   });
-  if (required.length < alternatives.length) {
-    const wrapper: AuthWrapper = { ...of([...new Set(required.flat())]), optional: true };
-    // Ktor accepts the first valid credential of the set, so an alternative needing several schemes is loosened.
-    if (required.some((option) => option.length > 1)) {
-      reportDiagnostic(program, {
-        code: "auth-combination-approximated",
-        format: {
-          operation: op.id,
-          requirement: describeAuth(op.auth),
-          target: "the Ktor server",
-          wrapper: renderAuth(wrapper),
-          hint: '@meta("kotlin:ktor-server", #{ authenticate: … })',
-        },
-        target: operationTarget(program, op.id),
-      });
-    }
-    return wrapper;
+  if (alternatives.length > 1 && required.some((alternative) => alternative.length > 1)) {
+    const name = `tspgen:${op.id}`;
+    return {
+      names: [name], providers: [kotlinString(name)],
+      ...(required.length < alternatives.length ? { optional: true } : {}),
+      combination: {
+        name,
+        alternatives: alternatives.map((alternative) => alternative.map((id) => options["auth-providers"]?.[id] ?? kotlinString(id))),
+      },
+    };
   }
+  if (required.length < alternatives.length) return { ...of([...new Set(required.flat())]), optional: true };
   if (required.length === 1 && required[0].length > 1) return { ...of(required[0]), strategy: "Required" };
-  if (required.every((option) => option.length === 1)) return of(required.flat());
-  // Fail closed: the strictest wrapper covering every scheme mentioned, so the route is never left unprotected.
-  const all = [...new Set(required.flat())];
-  reportDiagnostic(program, {
-    code: "unsupported-auth-combination",
-    format: {
-      operation: op.id,
-      requirement: describeAuth(op.auth),
-      target: "the Ktor server",
-      fallback: `every scheme (${all.join(" & ")})`,
-      hint: '@meta("kotlin:ktor-server", #{ authenticate: … })',
-    },
-    target: operationTarget(program, op.id),
-  });
-  return { ...of(all), strategy: "Required" };
+  return of(required.flat());
 }
 
 /**
@@ -473,6 +449,8 @@ export function planServerFiles(
   const supportPkg = options.package ?? `${ir.basePackage}.server`;
   const dirOf = (pkg: string) => `server/${pkg.replaceAll(".", "/")}`;
   const files: FileSpec[] = [];
+  const combinations: AuthCombination[] = [];
+  const combinationImports: string[] = [];
   const partClasses = new PartClasses(supportPkg);
   // A generated type named Flow: kotlinx's Flow is written qualified in the streaming upload path.
   const flowClash = ir.declarations.some((d) => d.name === "Flow");
@@ -482,7 +460,7 @@ export function planServerFiles(
       operations: unit.operations.map((op) =>
         withSse(
           program,
-          withUpload(program, withContext(program, op, op.meta["kotlin:ktor-server"] ?? {}), options, partClasses, flowClash),
+          withUpload(program, withWebSocket(withContext(program, op, op.meta["kotlin:ktor-server"] ?? {})), options, partClasses, flowClash),
           options,
         ),
       ),
@@ -491,12 +469,22 @@ export function planServerFiles(
   const used = new Set(serviceUnits.flat().flatMap((u) => u.operations.flatMap((op) => op.upload?.support ?? [])));
   const needs = SUPPORT_NEEDS.filter((n) => used.has(n));
   const allOps = serviceUnits.flat().flatMap((u) => u.operations);
+  const webSocketValidation = allOps.some((operation) => operation.webSocket && operation.params.length);
+  const fileResponses = allOps.some((operation) => operation.responses.some((response) => response.body?.file));
+  const multipartResponses = allOps.some((operation) => operation.responses.some((response) => response.body?.multipart));
+  const jsonLines = allOps.some((operation) => operation.body?.jsonLines || operation.responses.some((response) => response.stream?.protocol === "jsonl"));
+  const requestChecks = allOps.some((operation) => operation.params.some((parameter) => parameter.checks?.length) || !operation.upload && operation.body?.checks?.length);
   const sse = ssePlan(allOps);
   // Bodies whose JSON form needs an explicit serializer (`@encode(string)` values): ServerSupport's JSON helpers.
   const receiveJson = allOps.some(receivesJson);
   const respondJson = allOps.some(respondsJson) || errorSerializers(allOps).size > 0;
   const supportFunctions = [
     ...SUPPORT_FUNCTIONS,
+    ...(webSocketValidation ? ["WebSocketHandshakeValidation"] : []),
+    ...(fileResponses ? ["respondFile"] : []),
+    ...(multipartResponses ? ["respondMultipart", "MultipartValue", "serverJson"] : []),
+    ...(jsonLines ? ["receiveJsonLines", "respondJsonLines"] : []),
+    ...(requestChecks ? ["validRequest"] : []),
     ...(receiveJson ? ["receiveJson"] : []),
     ...(respondJson ? ["respondJson"] : []),
     ...needs.flatMap((n) => UPLOAD_SUPPORT[n].functions),
@@ -510,6 +498,16 @@ export function planServerFiles(
       imports: organizeImports(
         [
           ...SUPPORT_IMPORTS,
+          ...(multipartResponses ? ["io.ktor.server.response.respondBytesWriter", "io.ktor.utils.io.writeStringUtf8", "io.ktor.utils.io.writeFully"] : []),
+          ...(jsonLines ? [
+            "kotlinx.coroutines.flow.Flow", "kotlinx.coroutines.flow.flow", "kotlinx.coroutines.flow.collect", "kotlinx.serialization.KSerializer",
+            "io.ktor.utils.io.readLine", "io.ktor.utils.io.writeStringUtf8", "io.ktor.server.request.receiveChannel",
+            "io.ktor.server.plugins.UnsupportedMediaTypeException", "io.ktor.server.response.respondBytesWriter",
+          ] : []),
+          ...(fileResponses ? [
+            `${ir.modelsPackage}.HttpFile`, "io.ktor.http.ContentDisposition", "io.ktor.http.HttpHeaders",
+            "io.ktor.server.response.respondBytes", "io.ktor.server.response.header",
+          ] : []),
           ...needs.flatMap((n) => UPLOAD_SUPPORT[n].imports(ir)).filter((i) => !flowClash || i !== "kotlinx.coroutines.flow.Flow"),
           ...(sse ? sseImports(sse, ir, runtime.sseHeaders.length > 0) : []),
           // One Json for bodies (the module's or the application's content negotiation), JSON parts and JSON events.
@@ -524,9 +522,14 @@ export function planServerFiles(
         supportPkg,
       ),
       body: "ktor-server/support",
-      uploads: Object.fromEntries(needs.map((n) => [n, true])),
+      webSocketValidation,
+      uploads: { ...Object.fromEntries(needs.map((n) => [n, true])), tuples: allOps.some((operation) => operation.body?.tupleMultipart) },
       flowType: flowClash ? "kotlinx.coroutines.flow.Flow" : "Flow",
       receiveJson,
+      fileResponses,
+      multipartResponses,
+      jsonLines,
+      requestChecks,
       respondJson,
       serverJson: serverJsonLines(ir, runtime).join("\n"),
       serverJsonOptIn: !runtime.explicitNulls,
@@ -563,6 +566,11 @@ export function planServerFiles(
   for (const [index, service] of ir.services.entries()) {
     const units = serviceUnits[index];
     const extras = serverExtras(program, units, options);
+    for (const extra of Object.values(extras)) {
+      if (!extra.combination) continue;
+      combinations.push(extra.combination);
+      combinationImports.push(...extra.imports);
+    }
     checkDslOnly(options, units, extras);
     checkAuthRendering(program, options, style, units, extras, overridden);
     const functions = new Map(units.map((unit) => [unit, routeFunctions(unit, options, extras)]));
@@ -577,6 +585,17 @@ export function planServerFiles(
     if (runtime.module) files.push(moduleFile(ir, service, units, functions, supportPkg, dirOf(supportPkg), style, runtime));
     if (runtime.errors) files.push(errorsFile(ir, service, units, supportPkg, dirOf(supportPkg), runtime));
   }
+  if (combinations.length) files.push({
+    path: `${dirOf(supportPkg)}/AuthenticationSupport.kt`, template: "kotlin/file",
+    data: {
+      package: supportPkg, body: "ktor-server/auth-combinations", functionName: "installAuthCombinations", combinations,
+      imports: organizeImports([
+        ...combinationImports,
+        ...["AuthenticationConfig", "AuthenticationProvider", "AuthenticationContext", "AuthenticationFailedCause", "UnauthorizedResponse", "allProviders"].map((name) => `io.ktor.server.auth.${name}`),
+        "io.ktor.server.response.respond",
+      ], supportPkg),
+    },
+  });
   return files;
 }
 
@@ -629,13 +648,30 @@ function routesFile(
   const serializers = resourceSerialized.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`);
   const imports = [
     ...typeImports(unit.operations, "routes"),
+    ...(unit.operations.some((operation) => operation.responses.some((response) => response.body?.multipart)) ? [
+      "kotlinx.serialization.builtins.serializer", "kotlinx.serialization.builtins.nullable",
+      "kotlinx.serialization.builtins.ListSerializer", "kotlinx.serialization.builtins.MapSerializer",
+      ...ir.serializers.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`),
+    ] : []),
+    ...(ir.modelCheckException && unit.operations.some((operation) => operation.params.some((parameter) => parameter.checks?.length) || !operation.upload && operation.body?.checks?.length) ? [ir.modelCheckException] : []),
+    ...(unit.operations.some((operation) => operation.body?.jsonLines || operation.responses.some(response => response.stream?.protocol === "jsonl")) ? [
+      "kotlinx.serialization.builtins.serializer", "kotlinx.serialization.builtins.nullable",
+      "kotlinx.serialization.builtins.ListSerializer", "kotlinx.serialization.builtins.MapSerializer",
+      ...ir.serializers.map((fqn) => `${ir.modelsPackage}.${fqn.slice(fqn.lastIndexOf(".") + 1)}Serializer`),
+      ...unit.operations.flatMap((operation) => [operation.body?.jsonLines, ...operation.responses.flatMap(response => response.stream?.protocol === "jsonl" ? [response.stream.type] : [])].flatMap((type) => type ? serializerImports(type) : [])),
+    ] : []),
     ...unit.operations.flatMap(bodySerializerImports),
     ...style.imports(unit, options),
+    ...(unit.operations.some((operation) => operation.webSocket && operation.params.length) ? ["io.ktor.server.routing.route", "io.ktor.server.application.install"] : []),
     ...support,
     ...unit.operations.flatMap((op) => extras[op.id].imports),
     ...(unit.operations.some((op) => extras[op.id].auth.length > 0) ? ["io.ktor.server.auth.authenticate"] : []),
     ...(unit.operations.some((op) => extras[op.id].authStrategy) ? ["io.ktor.server.auth.AuthenticationStrategy"] : []),
     ...(functions.some((f) => f.prefix) ? ["io.ktor.server.routing.route"] : []),
+    ...(unit.operations.some((operation) => extras[operation.id].combination) ? [
+      "io.ktor.server.routing.application", "io.ktor.server.application.plugin", "io.ktor.server.auth.Authentication",
+      `${options.package ?? `${ir.basePackage}.server`}.installAuthCombinations`,
+    ] : []),
     ...(serializers.length > 0 ? ["kotlinx.serialization.UseSerializers", ...serializers] : []),
   ];
   return {
@@ -649,6 +685,7 @@ function routesFile(
       options,
       extras,
       routeFunctions: functions,
+      authCombinations: unit.operations.some((operation) => extras[operation.id].combination),
       ...(serializers.length > 0
         ? { fileAnnotations: [`UseSerializers(${serializers.map((s) => `${simpleName(s)}::class`).join(", ")})`] }
         : {}),
@@ -668,12 +705,14 @@ function moduleFile(
 ): FileSpec {
   // The SSE plugin when an operation streams through it.
   const sse = units.some((u) => u.operations.some((op) => op.sse === "plugin")) ? ["io.ktor.server.sse.SSE"] : [];
-  const installs = [...(style.plugins ?? []), ...sse];
+  const webSockets = units.some((unit) => unit.operations.some((operation) => operation.webSocket));
+  const installs = [...(style.plugins ?? []), ...sse, ...(webSockets ? ["io.ktor.server.websocket.WebSockets"] : [])];
   const unitImports = units
     .filter((u) => u.package && u.package !== pkg)
     .flatMap((u) => [`${u.package}.${u.serviceName}`, ...functions.get(u)!.map((f) => `${u.package}.${f.name}`)]);
   const imports = [
     ...MODULE_IMPORTS,
+    ...(webSockets ? ["io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter"] : []),
     ...(runtime.statusPages ? ["io.ktor.server.plugins.statuspages.StatusPages"] : []),
     ...installs,
     ...unitImports,
@@ -711,10 +750,20 @@ function errorsFile(ir: KotlinIR, service: KtService, units: ServerUnit[], pkg: 
   }
   const problem = runtime.errorBody === "problem";
   const serializers = errorSerializers(units.flatMap((u) => u.operations));
-  const plainErrors = [...exceptions.values()].filter((name) => !serializers.has(name));
+  const encodedErrors = units.flatMap((unit) => unit.operations.flatMap((operation) => operation.errors))
+    .filter((error) => error.body?.file || error.body?.multipart);
+  const responses = Object.fromEntries(encodedErrors.map((error) => [error.exception.text,
+    ktorServerHelpers.respond("HttpStatusCode.fromValue(cause.status)", error.body!, "cause.error")]));
+  const plainErrors = [...exceptions.values()].filter((name) => !serializers.has(name) && !responses[name]);
   const imports = [
     `${ir.apiPackage}.ApiException`,
     ...[...serializers.values()].flatMap((s) => s.imports),
+    ...encodedErrors.flatMap((error) => error.body?.multipart?.parts.flatMap((part) => [...codecImports(part.type), ...serializerImports(part.type)]) ?? []),
+    ...(encodedErrors.some((error) => error.body?.multipart) ? [
+      "kotlinx.serialization.builtins.serializer", "kotlinx.serialization.builtins.nullable",
+      "kotlinx.serialization.builtins.ListSerializer", "kotlinx.serialization.builtins.MapSerializer",
+      ...ir.serializers.map((fqn) => `${ir.modelsPackage}.${simpleName(fqn)}Serializer`),
+    ] : []),
     ...(exceptions.size > 0 ? ["io.ktor.http.HttpStatusCode"] : []),
     "io.ktor.server.plugins.BadRequestException",
     "io.ktor.server.plugins.ContentTransformationException",
@@ -734,6 +783,7 @@ function errorsFile(ir: KotlinIR, service: KtService, units: ServerUnit[], pkg: 
       exceptions: [...exceptions.values()],
       /** Exception simple name → explicit serializer of its body (`respondJson`), for bodies whose JSON form needs one. */
       exceptionSerializers: Object.fromEntries([...serializers].map(([name, s]) => [name, s.serializer])),
+      exceptionResponses: responses,
       problem,
       errorsFn: `${camel(service.name)}Errors`,
     },

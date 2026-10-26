@@ -25,7 +25,7 @@ describe("operation results and errors", () => {
 
     expect(get.result).toEqual({
       kind: "single",
-      type: { text: "Pet", imports: ["com.acme.models.Pet"], nullable: false },
+      type: { text: "Pet", imports: ["com.acme.models.Pet"], nullable: false, structuredParam: true },
       status: 200,
       contentType: "application/json",
     });
@@ -65,7 +65,13 @@ package com.acme.api
 import com.acme.models.Pet
 
 sealed interface CreateResult {
+    /**
+     * The request has succeeded and a new resource has been created as a result.
+     */
     data class Created(val body: Pet, val location: String) : CreateResult
+    /**
+     * The request has succeeded.
+     */
     data class Ok(val body: Pet) : CreateResult
 }
 `);

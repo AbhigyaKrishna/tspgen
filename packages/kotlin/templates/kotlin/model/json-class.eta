@@ -1,0 +1,65 @@
+<%
+const d = it.decl;
+const parameters = d.typeParameters ?? [];
+const tp = parameters.length ? "<" + parameters.join(", ") + ">" : "";
+const model = d.name + tp;
+const target = d.fqn + tp;
+let serializerName = "Serializer";
+while (serializerName === d.name || d.properties.some(p => p.name.replaceAll(String.fromCharCode(96), "") === serializerName)) serializerName += "_";
+const serializer = (p) => it.h.jsonSerializer(p.presence ?? p.type, parameters);
+const key = (p, i) => d.tuple ? String(i) : it.h.str(p.wireName);
+const known = d.properties.map(p => it.h.str(p.wireName));
+if (d.discriminator) known.push(it.h.str(d.discriminator));
+-%>
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable(with = <%= d.fqn %>.<%= serializerName %>::class)
+<% if (d.serialName !== undefined) { %>@SerialName(<%~ it.h.str(d.serialName) %>)
+<% } %><%= it.h.visibility(it) %><%= d.properties.length || d.additional ? "data class" : "class" %> <%= model %><% if (d.properties.length || d.additional) { %>(
+<% for (const p of d.properties) { %><%~ it.h.kdoc(p.docs, "    ") %><%~ it.h.annotations(p.annotations.filter(annotation => !annotation.startsWith("@Serializable(") && !annotation.startsWith("@EncodeDefault(")), "    ") %>    <%= p.override ? "override " : "" %>val <%= p.name %>: <%= p.type.text %><%= p.default !== undefined ? " = " + p.default : "" %>,
+<% } %><% if (d.additional) { %>    val <%= d.additional.name %>: <%= d.additional.type.text %> = emptyMap(),
+<% } %>)<% } %><%= d.implements.length ? " : " + d.implements.map(f => it.h.ref(f, it.qualified)).join(", ") : "" %> {
+<% if (d.checks.length) { %>    init {
+<% for (const check of d.checks) { %>        <%~ check %>
+<% } %>    }
+
+<% } %>    <%= parameters.length ? "class" : "object" %> <%= serializerName %><%= tp %><%= parameters.length ? "(" + parameters.map(p => "private val " + p + "Serializer: KSerializer<" + p + ">").join(", ") + ")" : "" %> : KSerializer<<%= target %>> {
+        override val descriptor = <%~ d.tuple ? "ListSerializer(JsonElement.serializer()).descriptor" : "buildClassSerialDescriptor(" + it.h.str(d.serialName ?? d.fqn) + ")" %>
+
+        override fun deserialize(decoder: Decoder): <%= target %> {
+            val input = decoder as? JsonDecoder ?: throw SerializationException("This model requires JSON")
+            val fields = input.decodeJsonElement() as? <%= d.tuple ? "JsonArray" : "JsonObject" %>
+                ?: throw SerializationException("Expected a JSON <%= d.tuple ? "array" : "object" %>")
+<% if (d.tuple) { %>            if (fields.size != <%= d.properties.length %>) throw SerializationException("Expected <%= d.properties.length %> tuple elements")
+<% } else if (!d.additional) { %>            val known = setOf<String>(<%~ known.join(", ") %>)
+            if (!input.json.configuration.ignoreUnknownKeys && fields.keys.any { it !in known }) {
+                throw SerializationException("Unknown model property")
+            }
+<% } %>            return <%= target %>(
+<% for (const [i, p] of d.properties.entries()) { const decode = "input.json.decodeFromJsonElement(" + serializer(p) + ", fields[" + key(p, i) + "]" + (d.tuple ? "" : "!!") + ")"; const present = p.presence ? "OptionalValue.Present(" + decode + ")" : decode; %>                <%= p.name %> = <%~ d.tuple ? present : "if (fields.containsKey(" + key(p, i) + ")) " + present + " else " + (p.default ?? (p.type.nullable ? "if (!input.json.configuration.explicitNulls) null else " : "") + "throw SerializationException(" + it.h.str("Missing required property " + p.wireName) + ")") %>,
+<% } %><% if (d.additional) { %>                <%= d.additional.name %> = input.json.decodeFromJsonElement(
+                    <%~ it.h.jsonSerializer(d.additional.type, parameters) %>,
+                    JsonObject(fields.filterKeys { it !in setOf<String>(<%~ known.join(", ") %>) }),
+                ),
+<% } %>            )
+        }
+
+        override fun serialize(encoder: Encoder, value: <%= target %>) {
+            val output = encoder as? JsonEncoder ?: throw SerializationException("This model requires JSON")
+<% if (d.tuple) { %>            output.encodeJsonElement(JsonArray(listOf(
+<% for (const p of d.properties) { %>                output.json.encodeToJsonElement(<%~ serializer(p) %>, value.<%= p.name %>),
+<% } %>            )))
+<% } else { %>            val fields = mutableMapOf<String, JsonElement>()
+<% for (const p of d.properties) { if (p.presence) { %>            if (value.<%= p.name %> is OptionalValue.Present) {
+                fields[<%~ it.h.str(p.wireName) %>] = output.json.encodeToJsonElement(<%~ serializer(p) %>, value.<%= p.name %>.value)
+            }
+<% } else { const conditions = []; if (p.default !== undefined && !p.encodeDefault) conditions.push("(output.json.configuration.encodeDefaults || value." + p.name + " != " + p.default + ")"); if (p.type.nullable) conditions.push("(output.json.configuration.explicitNulls || value." + p.name + " != null)"); const condition = conditions.join(" && "); %><% if (condition) { %>            if (<%~ condition %>) {
+    <% } %>            fields[<%~ it.h.str(p.wireName) %>] = output.json.encodeToJsonElement(<%~ serializer(p) %>, value.<%= p.name %>)
+<% if (condition) { %>            }
+<% } } } %><% if (d.additional) { %>            val known = setOf<String>(<%~ known.join(", ") %>)
+            if (value.<%= d.additional.name %>.keys.any { it in known }) {
+                throw SerializationException("Additional properties conflict with declared properties")
+            }
+            fields.putAll(output.json.encodeToJsonElement(<%~ it.h.jsonSerializer(d.additional.type, parameters) %>, value.<%= d.additional.name %>).jsonObject)
+<% } %>            output.encodeJsonElement(JsonObject(fields))
+<% } %>        }
+    }
+}

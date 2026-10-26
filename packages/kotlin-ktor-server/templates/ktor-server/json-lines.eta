@@ -1,0 +1,27 @@
+
+/** JSON-line decoding stays lazy and scoped to the service's request. */
+internal fun <T> ApplicationCall.receiveJsonLines(serializer: KSerializer<T>): Flow<T> = flow {
+    val mediaType = request.contentType().withoutParameters().toString()
+    if (mediaType != "application/jsonl" && mediaType != "application/x-ndjson") throw UnsupportedMediaTypeException(request.contentType())
+    val channel = receiveChannel()
+    while (true) {
+        val line = channel.readLine() ?: break
+        if (line.isBlank()) continue
+        val value = try {
+            serverJson.decodeFromString(serializer, line)
+        } catch (cause: IllegalArgumentException) {
+            throw BadRequestException("Malformed JSON-lines item", cause)
+        }
+        emit(value)
+    }
+}
+
+internal suspend fun <T> ApplicationCall.respondJsonLines(status: HttpStatusCode, mediaType: String, values: Flow<T>, serializer: KSerializer<T>) {
+    respondBytesWriter(ContentType.parse(mediaType), status) {
+        values.collect { value ->
+            writeStringUtf8(serverJson.encodeToString(serializer, value))
+            writeStringUtf8("\n")
+            flush()
+        }
+    }
+}

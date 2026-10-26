@@ -103,6 +103,7 @@ export class ApiBuilder {
       name: typeName(s.name),
       package: basePackage,
       ...(s.docs ? { docs: s.docs } : {}),
+      ...(s.deprecated !== undefined ? { annotations: this.types.annotations({ deprecated: s.deprecated, decorators: {} }, s.id) } : {}),
       servers: s.servers,
       auth: s.auth,
       groups: s.groups.map((g) => {
@@ -120,7 +121,7 @@ export class ApiBuilder {
           ...(g.docs ? { docs: g.docs } : {}),
           annotations: this.types.annotations(g, g.id, groupScopes),
           meta: groupScopes,
-          operations: g.operations.map((op) => this.operation(op, name, groupScopes)),
+          operations: g.operations.map((op) => this.operation({ ...op, deprecated: op.deprecated ?? g.deprecated }, name, groupScopes)),
         };
       }),
     }));
@@ -139,12 +140,16 @@ export class ApiBuilder {
   private operation(op: OperationIR, groupName: string, groupScopes: MetaScopes): KtOperation {
     const scopes = mergeScopes(groupScopes, metaScopes(op.decorators));
     const params: KtParam[] = op.params.map((p) => {
-      const type = this.types.typeUse(p.type);
+      const base = this.types.typeUse(p.type);
+      const type = p.optional ? nullable(base) : base;
+      const name = identifier(camel(p.name));
+      const checks = this.types.parameterChecks(p, type, name);
       return {
-        name: identifier(camel(p.name)),
+        name,
         wireName: p.wireName,
         location: p.location,
-        type: p.optional ? nullable(type) : type,
+        type,
+        ...(checks.length ? { checks } : {}),
         optional: p.optional,
         explode: p.explode,
         ...(p.docs ? { docs: p.docs } : {}),
@@ -173,7 +178,7 @@ export class ApiBuilder {
       name,
       verb: op.verb,
       path: op.path,
-      ...(op.docs ? { docs: op.docs } : {}),
+      ...(this.types.operationDocs(op, scopes) ? { docs: this.types.operationDocs(op, scopes) } : {}),
       annotations: this.types.annotations(op, op.id, scopes),
       meta: scopes,
       params,
@@ -186,7 +191,8 @@ export class ApiBuilder {
     if (op.body) {
       const taken = new Set(params.map((p) => p.name));
       const preferred = identifier(camel(op.body.name ?? "body"));
-      const type = this.wireBodyType(op.body.type, op.body.contentTypes[0] ?? "application/json");
+      const item = op.body.jsonLines ? this.types.typeUse(op.body.jsonLines) : undefined;
+      const type = item ? this.flowType(item) : this.wireBodyType(op.body.type, op.body.contentTypes[0] ?? "application/json");
       const body = op.body;
       result.body = {
         name: taken.has(preferred) ? "requestBody" : preferred,
@@ -194,6 +200,8 @@ export class ApiBuilder {
         contentType: body.contentTypes[0] ?? "application/json",
         optional: body.optional,
         kind: body.kind,
+        ...(body.tupleMultipart ? { tupleMultipart: true } : {}),
+        ...(item ? { jsonLines: item } : {}),
         ...(body.parts
           ? {
               parts: body.parts.map((p) => ({
@@ -209,6 +217,10 @@ export class ApiBuilder {
           : {}),
         ...(body.file ? { file: { isText: body.file.isText, contentTypes: body.file.contentTypes } } : {}),
       };
+      if (!item) {
+        const checks = this.types.parameterChecks({ name: result.body.name, type: body.type, constraints: body.constraints }, result.body.type, result.body.name);
+        if (checks.length) result.body.checks = checks;
+      }
     }
     return result;
   }
@@ -218,27 +230,43 @@ export class ApiBuilder {
     if (ref.kind === "scalar" && ref.name === "bytes" && !decoratorArg(ref.custom?.decorators, "Kotlin.type") && !isJsonContentType(contentType)) {
       return { text: "ByteArray", imports: [], nullable: false };
     }
-    return this.types.typeUse(ref);
+    const type = this.types.typeUse(ref);
+    return isJsonContentType(contentType) && type.text === "String" ? { ...type, explicitJson: true } : type;
   }
 
   private responseBody(body: NonNullable<OperationIR["responses"][number]["body"]>): Pick<KtResponse, "body" | "contentType" | "stream"> {
     const contentType = body.contentTypes[0] ?? "application/json";
+    if (body.multipart) {
+      const type = this.types.typeUse(body.type);
+      return { body: { ...type, multipart: { contentType, tuple: body.multipart.tuple, parts: body.multipart.parts.map((part) => ({
+        name: body.type.kind === "named" ? this.types.propertyName(body.type.id, part.property) : identifier(camel(part.property)),
+        wireName: part.name, kind: part.kind, multi: part.multi, optional: part.optional,
+        type: this.types.typeUse(part.type), contentTypes: part.contentTypes,
+      })) } }, contentType };
+    }
+    if (body.jsonLines) {
+      const type = this.types.typeUse(body.jsonLines);
+      return { body: type, contentType, stream: { protocol: "jsonl", type } };
+    }
     if (!body.stream) return { body: this.wireBodyType(body.type, contentType), contentType };
     const stream = this.types.stream(body.stream, body.type);
     return { body: stream.type, contentType, stream };
   }
 
+  private flowType(item: KtTypeUse): KtTypeUse {
+    return this.types.hasName("Flow")
+      ? { text: `${FLOW}<${item.text}>`, imports: item.imports, nullable: false }
+      : { text: `Flow<${item.text}>`, imports: [FLOW, ...item.imports], nullable: false };
+  }
+
   private result(opName: string, groupName: string, success: KtResponse[]): KtResult {
     if (success.length === 0) return { kind: "single", type: UNIT, status: 204 };
     const [only] = success;
-    // Core streams only a single success response without headers.
-    if (only.stream && isFixedStatus(only.statusCodes)) {
+    if (success.length === 1 && only.headers.length === 0 && only.stream && isFixedStatus(only.statusCodes)) {
       return {
         kind: "single",
         // Written qualified when a generated type is named Flow (its import would clash).
-        type: this.types.hasName("Flow")
-          ? { text: `${FLOW}<${only.stream.type.text}>`, imports: only.stream.type.imports, nullable: false }
-          : { text: `Flow<${only.stream.type.text}>`, imports: [FLOW, ...only.stream.type.imports], nullable: false },
+        type: this.flowType(only.stream.type),
         status: only.statusCodes,
         ...(only.contentType ? { contentType: only.contentType } : {}),
         stream: only.stream,
@@ -263,7 +291,9 @@ export class ApiBuilder {
         name: vname,
         statusCodes: r.statusCodes,
         ...(isFixedStatus(r.statusCodes) ? { status: r.statusCodes } : {}),
-        ...(r.body ? { body: r.body, contentType: r.contentType } : {}),
+        ...(r.body ? { body: r.stream ? this.flowType(r.stream.type) : r.body, contentType: r.contentType } : {}),
+        ...(r.stream ? { stream: r.stream } : {}),
+        ...(r.description ? { docs: r.description } : {}),
         headers: r.headers,
       };
     });

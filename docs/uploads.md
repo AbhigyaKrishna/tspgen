@@ -53,8 +53,9 @@ Pick the server mode with the `multipart` target option, or per operation / inte
   when a part that is not a list (`HttpPart<T>`, not `HttpPart<T>[]`) is sent more than once
   (`Part 'photo' must be sent at most once`).
 - A streaming `Flow` can be collected once (a second collection throws `IllegalStateException`); a file part's
-  `channel` is readable only until the collector returns for that part; unlike `buffered`, required parts are
-  not checked. Undeclared parts are skipped.
+  `channel` is readable only until the collector returns for that part. Duplicate single parts answer 400,
+  and a fully consumed flow checks missing required single parts. A service that stops collecting early
+  owns validation of the remaining request. Undeclared parts are skipped.
 - The Ktor server needs file parts sent **with a filename** (`Content-Disposition: form-data; name="photo";
   filename="…"`): Ktor reads a part without one as UTF-8 text, which would corrupt binary content, so
   `buffered` and `streaming` answer 400 (`File part 'photo' must be sent with a filename`). The generated
@@ -69,12 +70,23 @@ Pick the server mode with the `multipart` target option, or per operation / inte
   `filename="blob"`: fine for Ktor, but frameworks that treat every part with a filename as a file upload (multer,
   FastAPI, …) see it as a file. A `multipart/mixed` operation is sent as `multipart/form-data` (all `FormData`
   can encode).
-- Not supported: file or multipart **responses** (downloads), tuple-form `@multipartBody` (error
-  `unsupported-multipart-tuple`; the operation is skipped), React Query hooks and Server Actions for upload
-  operations (skipped — call the client directly), and `Http.File` used inside a JSON model.
+- Kotlin supports model and tuple multipart requests, including `multipart/mixed`. Tuple fields are
+  `item1`, `item2`, etc.; explicit `HttpPart` names are retained, and unnamed parts use positional names.
+  Named repeated parts work like model-form lists, and a trailing unnamed repeated part consumes the
+  remaining unnamed parts. A repeated unnamed part before another unnamed part fails generation with
+  `ambiguous-multipart-parts`; duplicate explicit names fail with the same diagnostic.
+- Kotlin file responses return `HttpFile`, preserving filename, media type and bytes. Multipart responses
+  return the declared plain model (or a generated tuple model), with typed JSON parts and buffered files.
+  The server writes a MIME boundary and per-part headers; the client validates required parts and disposes
+  parser resources. Configured client response limits bound the entire multipart message before decoding.
+  The reader uses [Ktor 3.6's `CIOMultipartDataBase`](https://github.com/ktorio/ktor/blob/3.6.0/ktor-http/ktor-http-cio/common/src/io/ktor/http/cio/CIOMultipartDataBase.kt) with `InternalAPI` opt-in for `multipart/mixed` support;
+  revalidate it when upgrading Ktor.
+- TypeScript still rejects tuple multipart bodies and does not implement file/multipart responses.
+  React Query hooks and Server Actions skip uploads; call the client directly. `Http.File` inside JSON
+  remains unsupported in all targets.
 - Diagnostics: a multipart body model that `extends` a model with parts is an error
   (`unsupported-multipart-base` — TypeSpec ignores inherited parts; spread the base with `...Base` instead) and
-  its operation is skipped; `Http.File` inside a JSON model or as a response body warns `file-in-json`; a model
+  its operation is skipped; `Http.File` inside a JSON model warns `file-in-json` (TypeScript also warns for response bodies); a model
   with parts also used as JSON (a response, a JSON body, a JSON model's property) warns
   `multipart-model-in-json`. In Kotlin, a model of your own named `HttpFile` in the models package clashes with
   the file class (`http-file-conflict`; rename it with `@Kotlin.name`).

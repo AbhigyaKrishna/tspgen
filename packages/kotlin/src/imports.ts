@@ -57,7 +57,8 @@ function declImportCandidates(decl: KtDecl): string[] {
         : decl.kind === "events"
           ? decl.events.flatMap((e) => e.data?.imports ?? [])
           : [
-              ...decl.properties.flatMap((p) => p.type.imports),
+              ...decl.properties.flatMap((p) => [...p.type.imports, ...(p.serialImports ?? []), ...serializerImports(p.presence ?? p.type)]),
+              ...(decl.kind === "data-class" && decl.additional ? [...decl.additional.type.imports, ...(decl.additional.type.serialImports ?? []), ...serializerImports(decl.additional.type)] : []),
               ...(decl.kind === "data-class" ? decl.properties.flatMap((p) => p.serialImports ?? []) : []),
               ...decl.implements,
             ];
@@ -108,7 +109,7 @@ export function qualifyDecl(decl: KtDecl, qualified: readonly string[]): KtDecl 
     case "value-class":
       return { ...decl, value: fix(decl.value) };
     default:
-      return { ...decl, properties: decl.properties.map(fixProp) } as KtDecl;
+      return { ...decl, properties: decl.properties.map(fixProp), ...(decl.additional ? { additional: { ...decl.additional, type: fix(decl.additional.type) } } : {}) } as KtDecl;
   }
 }
 

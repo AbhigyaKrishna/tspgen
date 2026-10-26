@@ -1,7 +1,8 @@
-<% const d = it.decl; -%>
+<% const d = it.decl; if (d.discriminator) { %><%~ include("kotlin/model/tagged-union", it) %><% } else { -%>
 <%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %>@Serializable(with = <%= d.name %>.Serializer::class)
 <%= it.h.visibility(it) %>sealed interface <%= d.name %> {
 <% for (const v of d.variants) { -%>
+<%~ it.h.kdoc(v.docs, "    ") %><%~ it.h.annotations(v.annotations, "    ") -%>
     data class <%= v.name %>(val value: <%= v.type.serialText ?? v.type.text %>) : <%= d.name %>
 <% } -%>
 
@@ -46,4 +47,4 @@
             }
         }
     }
-}
+}<% } %>

@@ -1,0 +1,30 @@
+<% const d = it.decl; -%>
+<%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><% if (d.members.some(member => member.numericText)) { %>@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+<% } %>@Serializable(with = <%= d.name %>.<%= d.serializerName %>::class)
+<%= it.h.visibility(it) %>enum class <%= d.name %>(val wireValue: JsonPrimitive) {
+<% for (const member of d.members) { %><%~ it.h.kdoc(member.docs, "    ") %><%~ it.h.annotations(member.annotations, "    ") %>    <%= member.name %>(<%~ member.numericText ? "kotlinx.serialization.json.JsonUnquotedLiteral(" + it.h.str(member.numericText) + ")" : "JsonPrimitive(" + (typeof member.value === "string" ? it.h.str(member.value) : String(member.value)) + ")" %>),
+<% } %><% if (d.unknown) { %>    <%= d.unknown %>(JsonPrimitive("")),
+<% } %>    ;
+
+    companion object {
+        fun fromWire(value: String): <%= d.name %> = entries.firstOrNull { <%~ d.unknown ? "it != " + d.unknown + " && " : "" %>it.wireValue.content == value }
+            ?: <%~ d.unknown ?? 'throw IllegalArgumentException("Unknown enum value")' %>
+    }
+
+    object <%= d.serializerName %> : KSerializer<<%= d.name %>> {
+        override val descriptor = JsonPrimitive.serializer().descriptor
+
+        override fun deserialize(decoder: Decoder): <%= d.name %> {
+            val input = decoder as? JsonDecoder ?: throw SerializationException("This enum requires JSON")
+            val value = input.decodeJsonElement()
+            return entries.firstOrNull { <%~ d.unknown ? "it != " + d.unknown + " && " : "" %>it.wireValue == value }
+                ?: <%~ d.unknown ?? 'throw SerializationException("Unknown enum value")' %>
+        }
+
+        override fun serialize(encoder: Encoder, value: <%= d.name %>) {
+<% if (d.unknown) { %>            if (value == <%= d.unknown %>) throw SerializationException("Unknown enum sentinel has no wire value")
+<% } %>            val output = encoder as? JsonEncoder ?: throw SerializationException("This enum requires JSON")
+            output.encodeJsonElement(value.wireValue)
+        }
+    }
+}

@@ -1,5 +1,14 @@
 @PublishedApi
 internal val paramJson: Json = Json { isLenient = true }
+<% if (it.multipart) { -%>
+
+internal fun multipartContent(parts: List<io.ktor.http.content.PartData>, mediaType: String): io.ktor.client.request.forms.MultiPartFormDataContent {
+    val boundary = "tspgen-" + java.util.UUID.randomUUID().toString()
+    return io.ktor.client.request.forms.MultiPartFormDataContent(parts, boundary, ContentType.parse(mediaType).withParameter("boundary", boundary))
+}
+<% } -%>
+<% if (it.jsonLines) { %><%~ include("ktor-client/json-lines", it) %><% } %>
+<% if (it.multipartResponses) { %><%~ include("ktor-client/multipart-response", it) %><% } %>
 
 internal inline fun <reified T> encodeParam(value: T): String =
     when (val element = paramJson.encodeToJsonElement(value)) {
@@ -7,7 +16,33 @@ internal inline fun <reified T> encodeParam(value: T): String =
         else -> element.toString()
     }
 
-internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))
+internal fun <T> encodeParam(value: T, serializer: kotlinx.serialization.KSerializer<T>): String =
+    when (val element = paramJson.encodeToJsonElement(serializer, value)) {
+        is JsonPrimitive -> element.content
+        else -> element.toString()
+    }
+
+internal fun <T> decodeParam(raw: String, serializer: kotlinx.serialization.KSerializer<T>): T {
+    val element = if (serializer.descriptor.kind == kotlinx.serialization.descriptors.PrimitiveKind.STRING) JsonPrimitive(raw)
+        else paramJson.parseToJsonElement(raw)
+    return paramJson.decodeFromJsonElement(serializer, element)
+}
+
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+internal inline fun <reified T> decodeParam(raw: String): T {
+    val serializer = kotlinx.serialization.serializer<T>()
+    var descriptor = serializer.descriptor
+    val isNullable = descriptor.isNullable
+    // Value classes keep the JSON shape of their wrapped type.
+    while (descriptor.isInline) descriptor = descriptor.getElementDescriptor(0)
+    val element = when {
+        isNullable && raw == "null" -> kotlinx.serialization.json.JsonNull
+        descriptor.kind is kotlinx.serialization.descriptors.PrimitiveKind ||
+            descriptor.kind == kotlinx.serialization.descriptors.SerialKind.ENUM -> JsonPrimitive(raw)
+        else -> paramJson.parseToJsonElement(raw)
+    }
+    return paramJson.decodeFromJsonElement(serializer, element)
+}
 
 /**
  * Whether the response is an RFC 9457 `application/problem+json` body: never a declared error model, so it raises an

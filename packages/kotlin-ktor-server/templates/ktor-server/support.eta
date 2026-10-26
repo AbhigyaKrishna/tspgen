@@ -21,14 +21,63 @@ internal inline fun <T> String.convertParam(name: String, convert: (String) -> T
 
 @PublishedApi
 internal val paramJson: Json = Json { isLenient = true }
+<% if (it.jsonLines) { %><%~ include("ktor-server/json-lines", it) %><% } %>
+<% if (it.multipartResponses) { %><%~ include("ktor-server/multipart-response", it) %><% } %>
+<% if (it.webSocketValidation) { %>
+internal class WebSocketHandshakeConfig {
+    lateinit var validate: (ApplicationCall) -> Unit
+}
 
-internal inline fun <reified T> decodeParam(raw: String): T = paramJson.decodeFromJsonElement(JsonPrimitive(raw))
+internal val WebSocketHandshakeValidation = io.ktor.server.application.createRouteScopedPlugin(
+    "TspgenWebSocketHandshakeValidation", ::WebSocketHandshakeConfig,
+) {
+    val validate = pluginConfig.validate
+    onCallValidators { call -> validate(call) }
+}
+<% } %>
+
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+internal inline fun <reified T> decodeParam(raw: String): T {
+    val serializer = kotlinx.serialization.serializer<T>()
+    var descriptor = serializer.descriptor
+    val isNullable = descriptor.isNullable
+    // Value classes keep the JSON shape of their wrapped type.
+    while (descriptor.isInline) descriptor = descriptor.getElementDescriptor(0)
+    val element = when {
+        isNullable && raw == "null" -> kotlinx.serialization.json.JsonNull
+        descriptor.kind is kotlinx.serialization.descriptors.PrimitiveKind ||
+            descriptor.kind == kotlinx.serialization.descriptors.SerialKind.ENUM -> JsonPrimitive(raw)
+        else -> paramJson.parseToJsonElement(raw)
+    }
+    return paramJson.decodeFromJsonElement(serializer, element)
+}
 
 internal inline fun <reified T> encodeParam(value: T): String =
     when (val element = paramJson.encodeToJsonElement(value)) {
         is JsonPrimitive -> element.content
         else -> element.toString()
     }
+
+internal fun <T> encodeParam(value: T, serializer: kotlinx.serialization.KSerializer<T>): String =
+    when (val element = paramJson.encodeToJsonElement(serializer, value)) {
+        is JsonPrimitive -> element.content
+        else -> element.toString()
+    }
+
+internal fun <T> decodeParam(raw: String, serializer: kotlinx.serialization.KSerializer<T>): T {
+    val element = if (serializer.descriptor.kind == kotlinx.serialization.descriptors.PrimitiveKind.STRING) JsonPrimitive(raw)
+        else paramJson.parseToJsonElement(raw)
+    return paramJson.decodeFromJsonElement(serializer, element)
+}
+<% if (it.fileResponses) { -%>
+
+internal suspend fun ApplicationCall.respondFile(status: HttpStatusCode, file: HttpFile) {
+    file.filename?.let {
+        response.header(HttpHeaders.ContentDisposition, ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, it).toString())
+    }
+    respondBytes(file.bytes, ContentType.parse(file.contentType ?: "application/octet-stream"), status)
+}
+<% } -%>
 <% if (it.serverJson) { -%>
 
 /**
@@ -294,12 +343,22 @@ internal suspend fun ApplicationCall.receiveParts(
     fileParts: Set<String> = emptySet(),
 <% } -%>
     multiParts: Set<String> = emptySet(),
+<% if (it.uploads.tuples) { -%>
+    positionalNames: List<String> = emptyList(),
+<% } -%>
 ): ReceivedParts {
     val parts = ReceivedParts(limit, multiParts)
+<% if (it.uploads.tuples) { -%>
+    var position = 0
+<% } -%>
     withMultipart(limit) { data ->
         data.forEachPart { part ->
             try {
-                val name = part.name
+                val name = part.name<% if (it.uploads.tuples) { %> ?: positionalNames.getOrNull(position)
+                if (part.name != null) {
+                    val index = positionalNames.indexOf(part.name)
+                    if (index >= position) position = index + 1
+                } else if (name !in multiParts) position++<% } %>
                 when {
                     name == null -> Unit
                     name in textParts -> {
@@ -321,6 +380,8 @@ internal suspend fun ApplicationCall.receiveParts(
     return parts
 }
 
+<% } -%>
+<% if (it.requestChecks || it.uploads?.buffered) { -%>
 /**
  * Runs [build], turning an IllegalArgumentException (a model check that fails, or a part that does not decode) into a
  * [BadRequestException], so invalid input answers 400 instead of 500. Only a model check's message is sent (see
@@ -364,6 +425,17 @@ internal fun <T> ApplicationCall.partsFlow(limit: Long, emitPart: suspend FlowCo
             }
         }
     }
+}
+
+/** Validate cardinality as parts arrive, and required parts once a service consumes the complete request. */
+internal fun <T> <%= it.flowType %><T>.validateParts(required: Set<String>, single: Set<String>, name: (T) -> String): <%= it.flowType %><T> = flow {
+    val seen = mutableSetOf<String>()
+    collect { value ->
+        val part = name(value)
+        if (!seen.add(part) && part in single) throw BadRequestException("Part '$part' must be sent at most once")
+        emit(value)
+    }
+    required.firstOrNull { it !in seen }?.let { throw MissingRequestParameterException(it) }
 }
 <% } -%>
 <% if (it.uploads?.channel) { -%>

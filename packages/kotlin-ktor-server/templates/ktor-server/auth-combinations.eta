@@ -1,0 +1,64 @@
+internal fun AuthenticationConfig.<%= it.functionName %>() {
+    val configured = allProviders().toMap()
+    val combinations: Map<String, List<List<String?>>> = linkedMapOf(
+<% for (const combination of it.combinations) { %>        <%~ it.h.str(combination.name) %> to listOf(
+<% for (const alternative of combination.alternatives) { %>            listOf(<%~ alternative.join(", ") %>),
+<% } %>        ),
+<% } %>    )
+    for ((name, alternatives) in combinations) {
+        val existing = configured[name]
+        if (existing != null) {
+            check(existing is TspgenAuthCombinationProvider && existing.alternatives == alternatives) {
+                "Authentication provider '$name' conflicts with a generated authentication combination"
+            }
+            continue
+        }
+        val delegates = alternatives.flatten().distinct().associateWith { providerName ->
+            requireNotNull(configured[providerName]) {
+                "Authentication provider '$providerName' required by '$name' is not registered"
+            }
+        }
+        register(TspgenAuthCombinationProvider(name, alternatives, delegates))
+    }
+}
+
+private class TspgenAuthCombinationProvider(
+    name: String,
+    val alternatives: List<List<String?>>,
+    private val delegates: Map<String?, AuthenticationProvider>,
+) : AuthenticationProvider(object : AuthenticationProvider.Config(name) {}) {
+    override suspend fun onAuthenticate(context: AuthenticationContext) {
+        val results = linkedMapOf<String?, AuthenticationContext?>()
+        for ((providerName, provider) in delegates) {
+            if (provider.skipWhen.any { it(context.call) }) {
+                results[providerName] = null
+                continue
+            }
+            // Isolate partial successes so they cannot satisfy the outer authentication prematurely.
+            val result = AuthenticationContext(context.call)
+            provider.onAuthenticate(result)
+            results[providerName] = result
+        }
+        val accepted = alternatives.firstOrNull { alternative ->
+            alternative.isNotEmpty() && alternative.all { providerName ->
+                val result = results.getValue(providerName)
+                result == null || result.principal<Any>() != null
+            }
+        }
+        if (accepted != null) {
+            for (providerName in accepted.distinct()) {
+                results[providerName]?.principal<Any>()?.let { principal -> context.principal(providerName, principal) }
+            }
+            return
+        }
+        val anonymous = alternatives.any { it.isEmpty() } && results.values.all { result ->
+            result == null || (result.principal<Any>() == null &&
+                result.allFailures.all { it == AuthenticationFailedCause.NoCredentials })
+        }
+        if (anonymous) return
+        context.challenge(this, AuthenticationFailedCause.InvalidCredentials) { challenge, call ->
+            call.respond(UnauthorizedResponse())
+            challenge.complete()
+        }
+    }
+}

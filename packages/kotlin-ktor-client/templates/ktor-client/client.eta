@@ -1,5 +1,5 @@
 <% const g = it.group; const c = it.h.ktorClient; -%>
-<%~ it.h.kdoc(g.docs) %><%= it.h.visibility(it) %>class <%= g.name %>Client(
+<%~ it.h.kdoc(g.docs) %><%~ it.h.annotations(g.annotations) %><%= it.h.visibility(it) %>class <%= g.name %>Client(
     private val http: HttpClient,
     private val baseUrl: String,
 <% if (it.auth) { -%>
@@ -15,8 +15,13 @@
 <% } -%>
 <%~ it.h.kdoc(op.docs, "    ") %><%~ it.h.annotations([...op.annotations, ...it.extras[op.id].annotations], "    ") %><% const stream = c.stream(op); if (it.extras[op.id].webSocket) { -%>
 <%~ include("ktor-client/websocket", { ...it, op }) -%>
+<% } else if (c.scopedStream(op)) { -%>
+<%~ include("ktor-client/scoped-stream", { ...it, op }) -%>
 <% } else if (stream) { -%>
     fun <%= op.name %>(<%= c.signature(op) %>): <%= op.result.type.text %> = flow {
+<% for (const check of [...op.params.flatMap(p => p.checks ?? []), ...(op.body?.checks ?? [])]) { -%>
+        <%~ check %>
+<% } -%>
 <% for (const line of c.preludeLines(stream)) { -%>
         <%~ line %>
 <% } -%>
@@ -35,7 +40,7 @@
                 <%~ line %>
 <% } -%>
             }
-            header(HttpHeaders.Accept, "text/event-stream")
+            header(HttpHeaders.Accept, <%~ it.h.str(stream.protocol === "jsonl" ? (op.result.contentType ?? "application/jsonl") : "text/event-stream") %>)
 <% for (const line of c.requestLines(op)) { -%>
             <%~ line %>
 <% } -%>
@@ -53,15 +58,24 @@
 <% } -%>
                 }
             }
+<% if (stream.protocol === "jsonl") { -%>
+            response.bodyAsChannel().readJsonLines { line ->
+                emit(http.apiJson.decodeFromString(<%~ it.h.jsonSerializer(stream.type) %>, line))
+            }
+<% } else { -%>
             response.bodyAsChannel().readSse { event ->
 <% for (const line of c.emitLines(stream)) { -%>
                 <%~ line %>
 <% } -%>
             }
+<% } -%>
         }
     }
 <% } else { -%>
     suspend fun <%= op.name %>(<%= c.signature(op) %>)<%= op.result.type.text === "Unit" ? "" : ": " + op.result.type.text %> {
+<% for (const check of [...op.params.flatMap(p => p.checks ?? []), ...(op.body?.checks ?? [])]) { -%>
+        <%~ check %>
+<% } -%>
 <% if (auth) { -%>
         val <%= auth.variable %> = resolveAuth(<%~ auth.alternatives %>)
 <% } -%>

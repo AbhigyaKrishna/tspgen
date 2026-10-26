@@ -80,6 +80,40 @@ variant model nothing else references is declared inside it, named after its var
 (`union NodeSource { catalog: CatalogSource }` → `NodeSource.Catalog`, or `@Kotlin.name` on the model);
 variants used elsewhere stay top-level. `union-variants: top-level` keeps every variant in its own file.
 
+## Model fidelity
+
+Kotlin supports typed additional properties alongside declared fields, fixed-position tuple JSON arrays,
+object-envelope discriminated unions, nested constructor defaults and exact numeric literal values.
+Additional-property codecs retain unknown values and reject collisions with declared wire names.
+`features.validation` checks property literals, inherited scalar constraints, scalar collection elements
+and HTTP parameters and scalar bodies as well as models. Numeric bounds retain arbitrary precision;
+date/time/duration bounds compare logical values, including normalized offsets for timestamps.
+KDoc and deprecation metadata are emitted for model members, union variants, services, clients and
+operations; documented or deprecated parameters appear in the method's `@param` KDoc.
+
+Enable these API-changing representations explicitly:
+
+```yaml
+features:
+  numeric-enums: true       # closed numeric/mixed enums with primitive-kind JSON codecs
+  open-enums: true          # extensible string value classes and known constants
+  precise-numbers: true     # exact integer/numeric/decimal JSON numbers; @encode(string) retained
+  optional-presence: true   # OptionalValue for optional nullable properties
+  strict-optionals: true    # OptionalValue for all optional fields; reject non-nullable nulls
+  untagged-unions: true     # JSON wrappers; ambiguous input is rejected
+  lifecycle-models: true    # separate HTTP request/response lifecycle shapes
+```
+
+All seven default false to preserve existing generated APIs. With `lifecycle-models`, a read-only `id` is
+absent from create payloads and a create-only `password` is absent from read payloads. Projections follow
+HTTP request visibility and `@returnTypeVisibility`, including nested references and collection items.
+Templates requiring distinct shapes specialize per use. In TypeSpec 1.16, PATCH properties retain their
+declared optionality by default; declare a partial update model with `?` fields.
+
+See [type mapping](type-mapping.md) for encodings and number mappings, [uploads](uploads.md) for typed
+file/multipart responses and tuple uploads, and [streaming](server-sent-events.md#json-lines-kotlin) for
+JSON Lines. The [compatibility matrix](compatibility.md) records the target-specific limits.
+
 ## Server
 
 ```kotlin
@@ -300,3 +334,21 @@ The `e2e/kotlin/websocket` fixture compiles the generated API and checks text,
 binary and typed JSON messages, query/header/cookie encoding, rotating tokens,
 and connection cleanup on return, failure and cancellation against a live CIO
 server.
+
+
+### WebSocket server operations
+
+Use `@TspGen.meta("kotlin", #{ webSocket: true })` to mark both Ktor targets, or scope the metadata to
+`kotlin:ktor-server`. The server service receives a collision-safe `session` parameter of type
+`DefaultWebSocketServerSession`; send and receive frames inside that suspend call. Both route styles use
+Ktor's native `webSocket(path)` for the handshake. The generated module installs `WebSockets` with the
+same JSON format as ordinary bodies; add `io.ktor:ktor-server-websockets` at the server's Ktor version.
+Without the generated module, install that plugin yourself. A route-scoped plugin decodes and validates
+handshake parameters before upgrade; invalid values answer 400. Authentication uses the normal route
+wrapper before upgrade.
+
+Frame protocols, reconnect policy, pagination traversal and long-running-operation polling remain
+application-owned; no additional TypeSpec wire contract is inferred for them.
+
+Resources routing delegates operations with JSON-structured or explicitly encoded parameters to the DSL
+decoder so they keep the same wire format. Other operations retain typed `@Resource` routes.

@@ -186,12 +186,13 @@ function multipartUpload(
       };
       const multi = parts.filter((p) => p.multi).map((p) => str(p.wireName));
       const multiArg = multi.length > 0 ? `, multiParts = setOf(${multi.join(", ")})` : "";
+      const positionalArg = body.tupleMultipart ? `, positionalNames = listOf(${parts.map((part) => str(part.wireName)).join(", ")})` : "";
       return {
         mode,
         kind: "multipart",
         fields: [{ name: body.name, type: body.type }],
         lines: [
-          `val ${body.name} = call.receiveParts(${limit}, ${names("text")}${hasFiles ? `, ${names("file")}` : ""}${multiArg}).let { parts ->`,
+          `val ${body.name} = call.receiveParts(${limit}, ${names("text")}${hasFiles ? `, ${names("file")}` : ""}${multiArg}${positionalArg}).let { parts ->`,
           "    validRequest {",
           `        ${model}(`,
           ...parts.map((p) => `            ${p.name} = ${bufferedPartExpr(p)},`),
@@ -208,14 +209,30 @@ function multipartUpload(
       const decl = classes.of(fqn, parts);
       const own = `${classes.pkg}.${decl.name}`;
       const param = freeName(op, "parts");
+      const position = freeName(op, "partPosition");
+      const partName = freeName(op, "partName");
+      const partNames = `listOf(${parts.map((part) => str(part.wireName)).join(", ")})`;
+      const repeatedNames = `setOf<String>(${parts.filter((part) => part.multi).map((part) => str(part.wireName)).join(", ")})`;
       return {
         mode,
         kind: "multipart",
         fields: [{ name: param, type: flowClash ? use(`${FLOW}<${decl.name}>`, [own]) : use(`Flow<${decl.name}>`, [FLOW, own]) }],
         lines: [
+          ...(body.tupleMultipart ? [`var ${position} = 0`] : []),
           `val ${param} = call.partsFlow<${decl.name}>(${limit}) { part ->`,
-          "    when (part.name) {",
+          ...(body.tupleMultipart ? [
+            `    val ${partName} = part.name ?: ${partNames}.getOrNull(${position})`,
+            `    if (part.name != null) {`,
+            `        val index = ${partNames}.indexOf(part.name)`,
+            `        if (index >= ${position}) ${position} = index + 1`,
+            `    } else if (${partName} !in ${repeatedNames}) ${position}++`,
+          ] : []),
+          `    when (${body.tupleMultipart ? partName : "part.name"}) {`,
           ...parts.map((p) => `        ${str(p.wireName)} -> emit(${decl.name}.${variantName(p)}(${streamingArgs(p)}))`),
+          "    }",
+          `}.validateParts(setOf(${parts.filter(part => !part.optional && !part.multi).map(part => str(part.wireName)).join(", ")}), setOf(${parts.filter(part => !part.multi).map(part => str(part.wireName)).join(", ")})) { value ->`,
+          "    when (value) {",
+          ...parts.map(part => `        is ${decl.name}.${variantName(part)} -> ${str(part.wireName)}`),
           "    }",
           "}",
         ],

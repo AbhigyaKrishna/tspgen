@@ -1,0 +1,16 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../build/generated/tspgen-contracts"
+    package: "com.example.contracts"
+    features:
+      numeric-enums: true
+      precise-numbers: true
+      open-enums: true
+      optional-presence: true
+      strict-optionals: true
+      untagged-unions: true
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server"
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client"

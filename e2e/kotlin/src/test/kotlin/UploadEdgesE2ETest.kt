@@ -362,6 +362,8 @@ class UploadEdgesE2ETest {
         val result = runCatching {
             client.post("/extras/small-stream") {
                 setBody(MultiPartFormDataContent(formData {
+                    append("caption", "c")
+                    append("pet", petJson)
                     append("photo", "collect-twice".encodeToByteArray(), fileHeaders("a"))
                 }))
             }.status

@@ -1,6 +1,6 @@
 import { lineComments } from "@abhigyakrishna/tspgen-core";
 import { kotlinString } from "./kotlin-string.js";
-import { serializerExpr } from "./transform/type-map.js";
+import { jsonSerializer, serializerExpr } from "./transform/type-map.js";
 import { needsSerialName } from "./serialization/kotlinx.js";
 import type { KtEvent, KtResultVariant } from "./transform/model.js";
 
@@ -51,6 +51,7 @@ export const kotlinHelpers = {
     return [e.docs, `${e.docs ? "\n" : ""}Sent as ${wire}${e.terminal ? "; ends the stream" : ""}.`].filter(Boolean).join("\n");
   },
   serializerExpr,
+  jsonSerializer,
   needsSerialName,
   str: kotlinString,
   /**

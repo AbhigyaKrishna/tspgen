@@ -1,9 +1,11 @@
-import { camel, typeName, type KtOperation, type KtService } from "@abhigyakrishna/tspgen-kotlin";
+import { camel, typeName, type KtGroup, type KtOperation, type KtService } from "@abhigyakrishna/tspgen-kotlin";
 import type { ServerOperation } from "./context.js";
 import type { KtorServerOptions } from "./options.js";
 
 /** One service interface + routes file. */
 export interface ServerUnit {
+  docs?: string;
+  annotations?: string[];
   name: string;
   serviceName: string;
   routesFn: string;
@@ -18,7 +20,7 @@ export function buildUnits(
   grouping: KtorServerOptions["grouping"],
   serviceSuffix = "Service",
 ): ServerUnit[] {
-  const buckets = new Map<string, { operations: KtOperation[]; packages: (string | undefined)[] }>();
+  const buckets = new Map<string, { operations: KtOperation[]; packages: (string | undefined)[]; groups: KtGroup[] }>();
   for (const group of service.groups) {
     const key =
       grouping === "single-file"
@@ -26,7 +28,8 @@ export function buildUnits(
         : grouping === "per-namespace"
           ? typeName(group.namespace.at(-1) ?? service.name)
           : group.name;
-    const bucket = buckets.get(key) ?? { operations: [], packages: [] };
+    const bucket = buckets.get(key) ?? { operations: [], packages: [], groups: [] };
+    bucket.groups.push(group);
     bucket.operations.push(...group.operations);
     bucket.packages.push(group.package);
     buckets.set(key, bucket);
@@ -42,8 +45,12 @@ export function buildUnits(
     // A unit lives in a mapped package only when every group in it maps to the same one.
     const [pkg] = bucket.packages;
     const shared = pkg !== undefined && bucket.packages.every((p) => p === pkg) ? pkg : undefined;
+    const docs = bucket.groups.map((group) => group.docs).filter(Boolean).join("\n\n");
+    const annotations = bucket.groups[0].annotations.filter((annotation) => bucket.groups.every((group) => group.annotations.includes(annotation)));
     return {
       name,
+      ...(docs ? { docs } : {}),
+      ...(annotations.length ? { annotations } : {}),
       serviceName: `${name}${serviceSuffix}`,
       routesFn: `${camel(name)}Routes`,
       resourcesObject: `${name}Resources`,

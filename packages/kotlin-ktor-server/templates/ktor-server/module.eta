@@ -7,7 +7,13 @@
         json(serverJson)
     }
 <% for (const p of it.installs) { -%>
+<% if (p === "io.ktor.server.websocket.WebSockets") { -%>
+    install(WebSockets) {
+        contentConverter = KotlinxWebsocketSerializationConverter(serverJson)
+    }
+<% } else { -%>
     install(<%= it.h.simpleName(p) %>)
+<% } -%>
 <% } -%>
 <% if (it.statusPages) { -%>
     install(StatusPages) {

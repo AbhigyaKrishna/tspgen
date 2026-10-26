@@ -15,9 +15,29 @@ export type EnumMemberNaming = "UPPER_SNAKE" | "PascalCase";
 export const KOTLIN_EMITTER = "@abhigyakrishna/tspgen-kotlin";
 
 export const kotlinFeatures = defineFeatures({
+  "lifecycle-models": {
+    default: false,
+    description: "Generate lifecycle-specific request/read payloads, including PATCH optionality. Template models are specialized per instance.",
+  },
+  "precise-numbers": {
+    default: false,
+    description: "Use exact JSON number serializers for integer, numeric, decimal and decimal128; preserve explicit string encodings.",
+  },
+  "numeric-enums": {
+    default: false,
+    description: "Represent numeric and mixed enums as enum classes with exact JSON serializers instead of numeric aliases.",
+  },
+  "open-enums": {
+    default: false,
+    description: "Represent extensible string unions as value classes with constants for known values.",
+  },
   "optional-presence": {
     default: false,
     description: "Represent optional nullable model fields as OptionalValue<T>, distinguishing absent from explicit null.",
+  },
+  "strict-optionals": {
+    default: false,
+    description: "Represent all optional model fields as OptionalValue<T>, preserving absence and rejecting explicit null for non-nullable fields.",
   },
   "untagged-unions": {
     default: false,
@@ -27,7 +47,7 @@ export const kotlinFeatures = defineFeatures({
   validation: {
     default: true,
     description:
-      "Constraint decorators (@minLength, @maxLength, @pattern, @minItems, @maxItems, @minValue, @maxValue) as init { } checks throwing ModelCheckException (an IllegalArgumentException).",
+      "Constraint decorators, including exclusive numeric bounds, as model, scalar collection, HTTP parameter and body checks throwing ModelCheckException (an IllegalArgumentException).",
   },
   "enum-unknown": {
     default: false,

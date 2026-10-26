@@ -153,6 +153,35 @@ describe("type IR", () => {
     expect(thing.properties[0].constraints).toEqual({ minLength: 3, pattern: "^p" });
   });
 
+  it("inherits scalar constraints while preserving property and nearest-scalar precedence", async () => {
+    const ir = await build(`
+      @service namespace Pets;
+      @minLength(2) @maxLength(20) @pattern("^p") scalar BaseId extends string;
+      @minLength(4) scalar RefinedId extends BaseId;
+      @maxLength(12) scalar PetId extends RefinedId;
+      @minValue(0) @maxValue(100) scalar BaseCount extends int32;
+      @maxValue(50) scalar Count extends BaseCount;
+      model Thing {
+        id: PetId;
+        @minLength(6) overridden: PetId;
+        nullable: PetId | null;
+        @minValue(5) count: Count;
+      }
+    `);
+    const thing = find(ir, "Pets.Thing");
+    if (thing.kind !== "model") throw new Error("expected model");
+    expect(thing.properties.map((property) => property.constraints)).toEqual([
+      { minLength: 4, maxLength: 12, pattern: "^p" },
+      { minLength: 6, maxLength: 12, pattern: "^p" },
+      { minLength: 4, maxLength: 12, pattern: "^p" },
+      { minValue: 5, maxValue: 50 },
+    ]);
+    expect(ir.customScalars.find((scalar) => scalar.id === "Pets.PetId")?.constraints)
+      .toEqual({ minLength: 4, maxLength: 12, pattern: "^p" });
+    expect(ir.customScalars.find((scalar) => scalar.id === "Pets.Count")?.constraints)
+      .toEqual({ minValue: 0, maxValue: 50 });
+  });
+
   it("gives a custom scalar its ultimate std root and own @encode, independent of a property's own @encode", async () => {
     const ir = await build(`
       @service namespace Pets;

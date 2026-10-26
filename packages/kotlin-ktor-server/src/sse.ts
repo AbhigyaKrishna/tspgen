@@ -76,14 +76,17 @@ export interface SsePlan {
 }
 
 export function ssePlan(ops: ServerOperation[]): SsePlan | undefined {
-  const streams = ops.filter((op) => op.result.kind === "single" && op.result.stream);
+  const streams = ops.filter((op) => op.responses.some((response) => !response.isError && response.stream && response.stream.protocol !== "jsonl"));
   if (streams.length === 0) return undefined;
   const events = new Map<string, KtEvents>();
   let sseMessage = false;
   for (const op of streams) {
-    const stream = op.result.kind === "single" ? op.result.stream! : undefined;
-    if (stream?.events) events.set(stream.events.fqn, stream.events);
-    else sseMessage = true;
+    for (const response of op.responses) {
+      const stream = response.stream;
+      if (!stream || response.isError || stream.protocol === "jsonl") continue;
+      if (stream.events) events.set(stream.events.fqn, stream.events);
+      else sseMessage = true;
+    }
   }
   const all = [...events.values()];
   return {

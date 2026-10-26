@@ -1,5 +1,5 @@
 import type { Model, ModelProperty, Program, Type, Union, UnionVariant } from "@typespec/compiler";
-import type { HttpOperationResponseContent } from "@typespec/http";
+import type { HttpOperationResponseContent, HttpPayloadBody } from "@typespec/http";
 
 /**
  * The parts of `@typespec/streams`, `@typespec/events` and `@typespec/sse` typed SSE needs. They are optional peer
@@ -78,6 +78,16 @@ function streamModels(content: HttpOperationResponseContent): Model[] {
     if (prop.model) models.push(prop.model);
   }
   return models;
+}
+
+/** Item type of a declared HTTP stream, also for non-SSE protocols. */
+export function streamElement(program: Program, body: HttpPayloadBody, libraries?: SseLibraries): Type | undefined {
+  for (let property = body.property; property; property = property.sourceProperty) {
+    if (!property.model) continue;
+    const element = libraries?.getStreamOf(program, property.model) ?? program.stateMap(STREAM_OF).get(property.model);
+    if (element) return element as Type;
+  }
+  return undefined;
 }
 
 /**

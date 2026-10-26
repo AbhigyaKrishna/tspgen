@@ -133,6 +133,24 @@ fun Route.petStoreApiRoutes(petsService: PetsService) {
     expect(routes).toContain(`val ids = (call.queryParam("ids")?.split(",")?.map { it.convertParam("ids") { it.toInt() } }).required("ids")`);
   });
 
+  it("decodes structured parameter JSON without interpreting enum text as a JSON document", async () => {
+    const { outputs } = await server().compile(`
+      @service namespace S;
+      model Filter { name: string; count: int32; }
+      enum Kind { brackets: "[raw]", object: "{raw}" }
+      @route("/items") op list(@query filter: Filter, @query labels: Record<string>, @query kind: Kind): void;
+    `);
+    const routes = outputs[`${DIR}/SRoutes.kt`];
+    expect(routes).toContain("decodeParam<Filter>(it)");
+    expect(routes).toContain("decodeParam<Map<String, String>>(it)");
+    expect(routes).toContain("decodeParam<Kind>(it)");
+    const support = outputs[`${DIR}/ServerSupport.kt`];
+    expect(support).toContain("paramJson.parseToJsonElement(raw)");
+    expect(support).toContain("descriptor.kind is kotlinx.serialization.descriptors.PrimitiveKind");
+    expect(support).toContain("descriptor.kind == kotlinx.serialization.descriptors.SerialKind.ENUM");
+    expect(support).toContain("while (descriptor.isInline)");
+  });
+
   it("parses and writes java.time parameters and headers as ISO-8601; kotlin.time goes through kotlinx", async () => {
     const spec = `
       @service namespace S;

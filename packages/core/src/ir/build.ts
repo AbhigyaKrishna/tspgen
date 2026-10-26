@@ -6,6 +6,21 @@ import type { ApiIR } from "./types.js";
 import { resolveServices, type ResolvedService, type VersioningApi } from "./versioning.js";
 
 export interface BuildOptions {
+  /** Preserve the standard date/time and duration wire encodings. */
+  wireEncodings?: boolean;
+  /** Preserve tuple values as named, fixed-position models for languages supporting them. */
+  tuples?: boolean;
+  /** Preserve HTTP File responses for transports supporting file downloads. */
+  fileResponses?: boolean;
+  multipartResponses?: boolean;
+  /** Preserve declared JSON-lines request and response streams. */
+  jsonLines?: boolean;
+  /** Preserve streams alongside response metadata and alternate success variants. */
+  streamingResponses?: boolean;
+  /** Preserve the text of numeric literals JavaScript numbers cannot represent exactly. */
+  exactLiterals?: boolean;
+  /** Generate context-specific HTTP payload models using lifecycle visibility and PATCH optionality. */
+  payloadVisibility?: boolean;
   /**
    * Collect expressible template models once as generic models (default true); a function decides per template
    * declaration (false: one model per instance).
@@ -32,7 +47,14 @@ export interface BuildOptions {
 }
 
 export function buildApiIR(program: Program, options: BuildOptions = {}): ApiIR {
-  const collector = new TypeCollector(program, { generics: options.generics ?? true, sse: options.sse });
+  const collector = new TypeCollector(program, {
+    generics: options.generics ?? true, sse: options.sse, tuples: options.tuples,
+    fileResponses: options.fileResponses, jsonLines: options.jsonLines, exactLiterals: options.exactLiterals,
+    payloadVisibility: options.payloadVisibility,
+    wireEncodings: options.wireEncodings,
+    multipartResponses: options.multipartResponses,
+    streamingResponses: options.streamingResponses,
+  });
   const resolved = options.services ?? resolveServices(program, options.versioning, options.version).services;
   const services = buildServices(program, collector, resolved, options.sse);
   return { services, types: collector.getTypes(), customScalars: collector.getCustomScalars() };

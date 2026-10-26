@@ -9,7 +9,7 @@ function declTypes(decl: KtDecl): KtTypeUse[] {
   if (decl.kind === "value-class") return [decl.value];
   // Events classes are not serialized: their payloads are encoded by the server and client routes.
   if (decl.kind === "typealias" || decl.kind === "enum" || decl.kind === "events") return [];
-  const own = decl.properties.map((p) => p.type);
+  const own = [...decl.properties.map((p) => p.type), ...(decl.kind === "data-class" && decl.additional ? [decl.additional.type] : [])];
   return decl.kind === "sealed-interface" ? [...own, ...decl.variants.flatMap(declTypes)] : own;
 }
 
@@ -126,6 +126,22 @@ function presenceFile(ir: KotlinIR): FileSpec[] {
   }];
 }
 
+function numberSerializersFile(ir: KotlinIR): FileSpec[] {
+  if (!ir.numberSerializers?.length) return [];
+  return [{
+    path: `models/${ir.modelsPackage.replaceAll(".", "/")}/NumberSerializers.kt`, template: "kotlin/file",
+    data: { package: ir.modelsPackage, imports: [], body: "kotlin/model/number-serializers", serializers: ir.numberSerializers },
+  }];
+}
+
+function encodingSerializersFile(ir: KotlinIR): FileSpec[] {
+  if (!ir.encodingSerializers?.length) return [];
+  return [{
+    path: `models/${ir.modelsPackage.replaceAll(".", "/")}/EncodingSerializers.kt`, template: "kotlin/file",
+    data: { package: ir.modelsPackage, imports: ["kotlinx.serialization.builtins.serializer", "kotlinx.serialization.builtins.nullable"], body: "kotlin/model/encoding-serializers", serializers: ir.encodingSerializers },
+  }];
+}
+
 /** Built-in target: one Kotlin file per declaration under `models/`. */
 export const modelsTarget: Target<KotlinIR> = {
   name: "kotlin-models",
@@ -159,7 +175,7 @@ export const modelsTarget: Target<KotlinIR> = {
         },
       };
     });
-    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...modelCheckFile(ir), ...presenceFile(ir), ...modelSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
+    return [...declFiles, ...httpFileFile(ir), ...sseMessageFile(ir), ...modelCheckFile(ir), ...presenceFile(ir), ...numberSerializersFile(ir), ...encodingSerializersFile(ir), ...modelSerializersFile(ir), ...apiVersionFile(ir), ...apiFiles(ir)];
   },
 };
 

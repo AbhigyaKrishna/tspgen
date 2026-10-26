@@ -66,8 +66,8 @@ that use it; used as a regular JSON type (a model property, a request or JSON re
   Text payloads are sent
   as-is (strings) or as their wire string (numbers, java.time values, enums); CR and CRLF line breaks in data
   become separate `data:` lines, so clients receive them as LF. CR and LF are removed from `SseMessage` event
-  names and ids (they would otherwise forge fields or events) and an id containing NUL is dropped. Streams answer
-  200 whatever success status the operation declares. No heartbeat / keep-alive comments are sent: a client that
+  names and ids (they would otherwise forge fields or events) and an id containing NUL is dropped. Streams retain
+  their declared success status and response headers. No heartbeat / keep-alive comments are sent: a client that
   disconnects while the stream is idle is noticed on the next write (which cancels the service's flow).
 - **Ktor client.** Collecting the flow executes the request (`Accept: text/event-stream`); a non-2xx response
   throws the operation's usual exceptions before any event; events are parsed by a small generated reader
@@ -89,10 +89,65 @@ that use it; used as a regular JSON type (a model property, a request or JSON re
   `accept`: a global `accept` header in `ClientConfig.headers` (or `ClientOptions.headers`) overrides it. `@useAuth`
   credentials are sent with stream requests like any other. React Query hooks (grouped and flat) and Server
   Actions skip streaming operations — call the client directly.
-- Only the single success response of an operation can stream: a `text/event-stream` response next to other
+- In TypeScript, only the single success response of an operation can stream: a `text/event-stream` response next to other
   success responses or with response headers warns `unsupported-sse-response` and is treated as a text body.
-- Not supported: other stream kinds (`JsonlStream`, `HttpStream<…, "application/jsonl">`), SSE request bodies,
-  reconnection / `Last-Event-ID` (the clients report `id:` on `SseMessage` only), and sending `id:` / `retry:` from
+- Kotlin responses with headers or multiple success variants use the scoped callback API below. TypeScript
+  does not support JSON Lines. Neither language implements SSE request bodies, arbitrary stream framing,
+  reconnection / `Last-Event-ID` (the clients report `id:` on `SseMessage` only), or sending `id:` / `retry:` from
   typed events. In Kotlin, a model of your own named `SseMessage` in the models package clashes with the untyped
   message class (`sse-message-conflict`), as does a TypeScript type named `SseMessage`; rename it with
   `@Kotlin.name` / `@TS.name`.
+
+
+## JSON Lines (Kotlin)
+
+Ktor client and server support `TypeSpec.Http.Streams.JsonlStream<T>` as request and response bodies:
+
+```tsp
+import "@typespec/http/streams";
+@get op lines(): TypeSpec.Http.Streams.JsonlStream<Pet>;
+@post op ingest(...TypeSpec.Http.Streams.JsonlStream<Pet>): int32;
+```
+
+A response becomes a cold client `Flow<T>` and a service `Flow<T>`. A request becomes a streamed `Flow<T>`
+parameter on both sides. Each nonblank line is one JSON value; `application/jsonl` and
+`application/x-ndjson` are recognized. Writers flush each item; codecs honor encoded scalars and the
+shared JSON configuration. Malformed request items answer 400 before a response starts, and an incorrect
+request media type answers 415. Cancellation closes the request/response scope.
+
+As with SSE, an exception after response streaming starts terminates that stream.
+
+## Kotlin response headers and alternate successes
+
+A single fixed success response without headers keeps the cold client `Flow<T>` API. SSE and JSON Lines
+responses with headers, several success variants or non-fixed statuses return their generated result through
+a suspend callback. Each streaming variant carries `body: Flow<T>` and its declared headers:
+
+```tsp
+@route("/feed") interface Feed {
+  @get watch(): {
+    @statusCode status: 201;
+    @header trace: string;
+    ...TypeSpec.Http.Streams.JsonlStream<Pet>;
+  } | { @statusCode status: 204; };
+}
+```
+
+```kotlin
+api.feed.watch { result ->
+    when (result) {
+        is WatchResult.Created -> {
+            println(result.trace)
+            result.body.collect { pet -> println(pet.name) }
+        }
+        WatchResult.NoContent -> Unit
+    }
+}
+```
+
+Collect the flow once inside the callback. Returning, throwing or cancelling closes the response;
+collection after the callback or a second collection fails with `IllegalStateException`. Non-streaming
+variants are decoded before the callback. Declared errors use the usual typed exceptions. Responses sharing
+a status are selected by their declared content type. The service returns the same result type with a
+streaming body; the server writes its status and headers before collecting that body. Both SSE writer
+modes support these results.

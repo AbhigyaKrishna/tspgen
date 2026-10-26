@@ -1,9 +1,33 @@
-import { kotlinString as str, serializerExpr, serializerImports, type KtEvent, type KtEvents, type KtOperation, type KtStream } from "@abhigyakrishna/tspgen-kotlin";
+import { jsonSerializer, kotlinString as str, serializerExpr, serializerImports, type KtEvent, type KtEvents, type KtOperation, type KtStream } from "@abhigyakrishna/tspgen-kotlin";
 import { decode } from "./helpers.js";
 
 /** The stream of a server-sent event operation, if it is one. */
 export function streamOf(op: KtOperation): KtStream | undefined {
   return op.result.kind === "single" ? op.result.stream : undefined;
+}
+
+export function responseStreams(op: KtOperation): KtStream[] {
+  return op.responses.flatMap((response) => !response.isError && response.stream ? [response.stream] : []);
+}
+
+export function scopedStream(op: KtOperation): boolean {
+  return op.result.kind === "sealed" && responseStreams(op).length > 0;
+}
+
+export function streamConsumer(op: KtOperation): string {
+  const taken = new Set([...op.params.map((parameter) => parameter.name), op.body?.name]);
+  let name = "consume";
+  while (taken.has(name) || taken.has(`${name}Active`)) name += "Stream";
+  return name;
+}
+
+export function responseFlow(stream: KtStream, active: string): string {
+  const guard = `check(${active}) { "The response stream must be collected inside its callback" }; check(collected.compareAndSet(false, true)) { "The response stream can be collected only once" }`;
+  const prefix = "run { val collected = java.util.concurrent.atomic.AtomicBoolean(); ";
+  if (stream.protocol === "jsonl") {
+    return `${prefix}flow { ${guard}; response.bodyAsChannel().readJsonLines { line -> emit(http.apiJson.decodeFromString(${jsonSerializer(stream.type)}, line)) } } }`;
+  }
+  return `${prefix}flow { ${[guard, ...preludeLines(stream)].join("; ")}; response.bodyAsChannel().readSse { event -> ${emitLines(stream).join("; ")} } } }`;
 }
 
 /** `decode<Events>`: ClientSupport.kt's function turning a parsed event into an events value (null when unknown). */
@@ -70,11 +94,12 @@ export function streamsOf(ops: KtOperation[]): { events: KtEvents[]; untyped: bo
   let untyped = false;
   let any = false;
   for (const op of ops) {
-    const stream = streamOf(op);
-    if (!stream) continue;
-    any = true;
-    if (stream.events) events.set(stream.events.fqn, stream.events);
-    else untyped = true;
+    for (const stream of responseStreams(op)) {
+      if (stream.protocol === "jsonl") continue;
+      any = true;
+      if (stream.events) events.set(stream.events.fqn, stream.events);
+      else untyped = true;
+    }
   }
   return { events: [...events.values()], untyped, any };
 }

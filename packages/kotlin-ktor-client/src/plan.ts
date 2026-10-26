@@ -1,11 +1,11 @@
 import { metaStrings, type FileSpec } from "@abhigyakrishna/tspgen-core";
 import type { Program } from "@typespec/compiler";
-import { camel, codecImports, organizeImports, serializerExpr, type KotlinIR, type KtGroup } from "@abhigyakrishna/tspgen-kotlin";
+import { camel, codecImports, organizeImports, serializerExpr, serializerImports, type KotlinIR, type KtGroup } from "@abhigyakrishna/tspgen-kotlin";
 import { serviceAuth, type ServiceAuth } from "./auth.js";
 import type { KtorClientOptions } from "./options.js";
 import { clientJsonExpr, DEFAULT_CLIENT_RUNTIME, type ClientRuntime } from "./runtime.js";
-import { hasBracketQuery, serializerCallImports, usesSerializers } from "./helpers.js";
-import { eventFunctions, streamOf, streamsOf, supportImports, usesJson } from "./sse.js";
+import { hasBracketQuery, multipartResponseImports, serializerCallImports, usesSerializers } from "./helpers.js";
+import { eventFunctions, responseStreams, streamsOf, supportImports, usesJson } from "./sse.js";
 import { webSocketOperation } from "./websocket.js";
 
 const SUPPORT_IMPORTS = [
@@ -32,23 +32,35 @@ const API_CLIENT_IMPORTS = [
 
 function groupImports(ir: KotlinIR, group: KtGroup, runtime: ClientRuntime, webSockets: Set<string>): string[] {
   const ops = group.operations;
+  const jsonLines = ops.some((operation) => operation.body?.jsonLines || responseStreams(operation).some(stream => stream.protocol === "jsonl"));
   const httpOperations = ops.filter((op) => !webSockets.has(op.id));
   const rawStreams = runtime.streaming && ops.some((op) => op.result.kind === "single" && op.result.type.text === "ByteArray");
-  const scopedStreams = rawStreams || ops.some((op) => streamOf(op));
+  const scopedStreams = rawStreams || ops.some((op) => responseStreams(op).length > 0);
   const bounded = (runtime.maxResponseSize ?? 0) > 0 || (runtime.maxErrorSize ?? 0) > 0;
   return [
+    ...ops.flatMap(multipartResponseImports),
+    ...ops.flatMap(operation => responseStreams(operation).flatMap(stream => stream.type.imports)),
+    ...(ops.some((op) => op.responses.some((response) => response.body?.multipart)) ? ir.serializers.map((fqn) => `${ir.modelsPackage}.${fqn.slice(fqn.lastIndexOf(".") + 1)}Serializer`) : []),
     ...(bounded ? ops.flatMap((op) => op.responses.flatMap((response) => response.body?.imports ?? [])) : []),
     ...(scopedStreams ? ["io.ktor.client.request.prepareRequest", "io.ktor.client.statement.bodyAsChannel"] : []),
     ...(rawStreams ? ["io.ktor.utils.io.ByteReadChannel"] : []),
     "io.ktor.client.HttpClient",
+    ...(ir.modelCheckException && ops.some((operation) => operation.params.some((parameter) => parameter.checks?.length) || operation.body?.checks?.length) ? [ir.modelCheckException] : []),
+    ...(jsonLines ? [
+      "kotlinx.serialization.builtins.serializer", "kotlinx.serialization.builtins.nullable",
+      "kotlinx.serialization.builtins.ListSerializer", "kotlinx.serialization.builtins.MapSerializer",
+      ...ir.serializers.map((fqn) => `${ir.modelsPackage}.${fqn.slice(fqn.lastIndexOf(".") + 1)}Serializer`),
+      ...ops.flatMap((operation) => [operation.body?.jsonLines, ...responseStreams(operation).filter(stream => stream.protocol === "jsonl").map(stream => stream.type)].flatMap((type) => type ? serializerImports(type) : [])),
+    ] : []),
+    ...(ops.some((operation) => operation.responses.some((response) => response.body?.file)) ? ["io.ktor.http.contentType"] : []),
     ...(ops.some(hasBracketQuery) ? ["io.ktor.http.encodeURLParameter"] : []),
     ...(httpOperations.length > 0 ? ["io.ktor.client.call.body", "io.ktor.http.HttpMethod", `${ir.apiPackage}.ApiException`] : []),
     ...(scopedStreams ? ["io.ktor.client.plugins.expectSuccess", "io.ktor.http.appendPathSegments", "io.ktor.http.takeFrom"] : []),
     ...(httpOperations.some((o) => o.result.kind === "single") ? ["io.ktor.http.isSuccess"] : []),
-    ...(ops.some((o) => o.params.some((p) => p.location === "header") || o.body?.kind === "file" || streamOf(o))
+    ...(ops.some((o) => o.params.some((p) => p.location === "header") || o.body?.kind === "file" || responseStreams(o).length > 0)
       ? ["io.ktor.client.request.header"]
       : []),
-    ...(ops.some((o) => streamOf(o))
+    ...(ops.some((o) => responseStreams(o).length > 0)
       ? [
           "io.ktor.client.request.prepareRequest",
           "io.ktor.client.statement.bodyAsChannel",
@@ -65,7 +77,7 @@ function groupImports(ir: KotlinIR, group: KtGroup, runtime: ClientRuntime, webS
     ...(ops.some((o) => o.body?.kind === "file") ? ["io.ktor.http.ContentDisposition", "io.ktor.http.HttpHeaders"] : []),
     ...ops.flatMap((o) => [
       ...serializerCallImports(o),
-      ...o.params.flatMap((p) => p.type.imports),
+      ...o.params.flatMap((p) => codecImports(p.type)),
       ...(o.body?.type.imports ?? []),
       ...o.result.type.imports,
       ...o.errors.flatMap((e) => e.exception.imports),
@@ -94,13 +106,15 @@ export function planClientFiles(
   const fileParts = multipartBodies.some((b) => (b.parts ?? []).some((p) => p.kind === "file"));
   const streams = streamsOf(services.flatMap((s) => s.groups.flatMap((g) => g.operations)));
   const allOps = services.flatMap((s) => s.groups.flatMap((g) => g.operations));
+  const multipartResponses = allOps.some((operation) => operation.responses.some((response) => response.body?.multipart));
+  const jsonLines = allOps.some((operation) => operation.body?.jsonLines || responseStreams(operation).some(stream => stream.protocol === "jsonl"));
   const webSockets = new Set(allOps.filter(webSocketOperation).map((op) => op.id));
   // Bodies (and parts) whose JSON form needs an explicit serializer (`@encode(string)` values).
   const bounded = (runtime.maxResponseSize ?? 0) > 0 || (runtime.maxErrorSize ?? 0) > 0;
   const serializers = allOps.some(usesSerializers);
   const jsonPartSerializers = multipartBodies.some((b) => (b.parts ?? []).some((p) => p.kind === "json" && serializerExpr(p.type)));
   // Multipart JSON parts, JSON events and explicitly serialized bodies read the defaults' Json from the client (apiJson).
-  const apiJson = bounded || multipart || streams.events.some(usesJson) || serializers;
+  const apiJson = bounded || multipart || multipartResponses || jsonLines || streams.events.some(usesJson) || serializers;
   const auths = new Map<string, ServiceAuth | undefined>(services.map((s) => [s.id, runtime.auth ? serviceAuth(program, s) : undefined]));
   const used = [...auths.values()].filter((a): a is ServiceAuth => a !== undefined);
   const basic = used.some((a) => a.basic);
@@ -113,6 +127,11 @@ export function planClientFiles(
         imports: organizeImports(
           [
             ...SUPPORT_IMPORTS,
+            ...(multipartResponses ? ["io.ktor.client.call.body", "io.ktor.http.content.forEachPart", "io.ktor.utils.io.toByteArray"] : []),
+            ...(jsonLines ? [
+              "io.ktor.utils.io.ByteReadChannel", "io.ktor.utils.io.readLine", "io.ktor.utils.io.writeStringUtf8",
+              "kotlinx.coroutines.flow.Flow", "kotlinx.coroutines.flow.collect", "kotlinx.serialization.KSerializer",
+            ] : []),
             ...(webSockets.size > 0
               ? [
                   "io.ktor.client.plugins.websocket.DefaultClientWebSocketSession",
@@ -161,8 +180,10 @@ export function planClientFiles(
           pkg,
         ),
         body: "ktor-client/support",
+        jsonLines,
         webSockets: webSockets.size > 0,
         multipart,
+        multipartResponses,
         bounded,
         maxResponseSize: runtime.maxResponseSize ?? 0,
         maxErrorSize: runtime.maxErrorSize ?? 0,

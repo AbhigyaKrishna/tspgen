@@ -1,3 +1,4 @@
+import { expectDiagnostics } from "@typespec/compiler/testing";
 import { describe, expect, it } from "vitest";
 import { client } from "./tester.js";
 
@@ -23,6 +24,43 @@ const uploadSpec = `
 `;
 
 describe("ktor client uploads", () => {
+  it("reads file downloads with metadata and enforces configured response limits", async () => {
+    const { outputs } = await client({ "max-response-size": 1024 }).compile(`
+      @service namespace S;
+      @route("/files") interface Files { @get download(): File<"application/octet-stream">; }
+    `);
+    const files = outputs[`${DIR}/FilesClient.kt`];
+    expect(files).toContain("HttpFile(");
+    expect(files).toContain("response.headers[io.ktor.http.HttpHeaders.ContentDisposition]");
+    expect(files).toContain("response.apiBodyBytes()");
+  });
+  it("reads file downloads as bytes with the response filename and content type", async () => {
+    const [{ outputs }, diagnostics] = await client().compileAndDiagnose(`
+      @service namespace S;
+      @get op download(): File<"image/png">;
+    `);
+    expectDiagnostics(diagnostics, []);
+    const code = outputs[`${DIR}/SClient.kt`];
+    expect(code).toContain("suspend fun download(): HttpFile");
+    expect(code).toContain("filename = response.headers[io.ktor.http.HttpHeaders.ContentDisposition]");
+    expect(code).toContain("io.ktor.http.ContentDisposition.parse(it).parameter(io.ktor.http.ContentDisposition.Parameters.FileName)");
+    expect(code).toContain("contentType = response.headers[io.ktor.http.HttpHeaders.ContentType]");
+    expect(code).toContain("bytes = response.body<ByteArray>()");
+  });
+
+  it("uses the bounded byte reader for every file success and typed-error branch", async () => {
+    const [{ outputs }, diagnostics] = await client({ "max-response-size": 8, "max-error-size": 4 }).compileAndDiagnose(`
+      @service namespace S;
+      @error model Gone { @statusCode status: 410; @body file: File<"application/octet-stream">; }
+      @get op download(): File<"image/png"> | { @statusCode status: 201; @body file: File<"application/pdf"> } | Gone;
+    `);
+    expectDiagnostics(diagnostics, []);
+    const code = outputs[`${DIR}/SClient.kt`];
+    expect(code.match(/bytes = response\.apiBodyBytes\(\)/g)).toHaveLength(3);
+    expect(code).not.toContain("bytes = response.body<ByteArray>()");
+    expect(code).not.toContain("http.readApiBody<HttpFile>");
+  });
+
   it("sends multipart bodies as MultiPartFormDataContent without an explicit content type", async () => {
     const { outputs } = await client().compile(uploadSpec);
     const uploads = outputs[`${DIR}/UploadsClient.kt`];

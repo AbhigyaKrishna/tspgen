@@ -1,4 +1,4 @@
-<% const d = it.decl; %>
+<% const d = it.decl; if (d.jsonValues) { %><%~ include("kotlin/model/json-enum", it) %><% } else { %>
 <%~ it.h.kdoc(d.docs) %><%~ it.h.annotations(d.annotations) %><% if (d.unknown) { %>@Serializable(with = <%= d.name %>.<%= d.serializerName %>::class)
 <% } else { %>@Serializable
 <% } %><%= it.h.visibility(it) %>enum class <%= d.name %> {
@@ -25,4 +25,4 @@
 <% } %>                else -> <%= d.name %>.<%= d.unknown %>
             }
     }
-<% } %>}
+<% } %>}<% } %>

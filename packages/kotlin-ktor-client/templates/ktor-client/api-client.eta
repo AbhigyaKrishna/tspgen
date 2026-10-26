@@ -1,8 +1,5 @@
 <% const s = it.service; const a = it.auth; -%>
-/**
- * Entry point for the <%= s.name %> API.
- */
-<%= it.h.visibility(it) %>class <%= it.clientName %>(http: HttpClient, baseUrl: String<% if (a) { %>, auth: <%= a.className %>? = null<% } %>) {
+<%~ it.h.kdoc(s.docs ?? `Entry point for the ${s.name} API.`) %><%~ it.h.annotations(s.annotations) %><%= it.h.visibility(it) %>class <%= it.clientName %>(http: HttpClient, baseUrl: String<% if (a) { %>, auth: <%= a.className %>? = null<% } %>) {
 <% for (const g of s.groups) { -%>
     val <%= it.h.ktorClient.propertyName(g) %> = <%= g.name %>Client(http, baseUrl<% if (a) { %>, auth<% } %>)
 <% } -%>

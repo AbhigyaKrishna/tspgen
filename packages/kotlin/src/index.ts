@@ -17,6 +17,7 @@ export {
   SERIALIZED_CLASSES,
   serializedIn,
   serializerExpr,
+  jsonSerializer,
   serializerImports,
   type DateTimeMapping,
   type DecimalMapping,

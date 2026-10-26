@@ -1,0 +1,10 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../build/generated/tspgen-numeric-mapping"
+    package: "com.example.numericmapping"
+    decimal: string
+    date-time: kotlin.time
+    features:
+      precise-numbers: true

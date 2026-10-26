@@ -6,6 +6,8 @@ import type {
   EnumIR,
   ModelIR,
   PropertyIR,
+  ParamIR,
+  OperationIR,
   StreamIR,
   TypeIR,
   TypeRef,
@@ -27,6 +29,9 @@ import { kotlinString } from "../kotlin-string.js";
 import { reportDiagnostic, type EnumMemberNaming } from "../lib.js";
 import { camel, identifier, typeName, upperSnake } from "../naming.js";
 import { decoratorArg, decoratorArgs } from "./decorators.js";
+import { renderDefault } from "./defaults.js";
+import { boundChecks } from "./bounds.js";
+import { EncodingBuilder } from "./encodings.js";
 import type {
   KtDataClass,
   KtDecl,
@@ -53,11 +58,12 @@ import {
   nullable,
   scalarTypeUse,
   serializedIn,
+  serializerExpr,
   type DateTimeMapping,
   type DecimalMapping,
 } from "./type-map.js";
 
-type UnionShape = "enum" | "string-alias" | "sealed-interface" | "untagged" | "json";
+type UnionShape = "enum" | "string-alias" | "open-enum" | "sealed-interface" | "untagged" | "json";
 
 export interface DeclarationOptions {
   modelsPackage: string;
@@ -72,16 +78,15 @@ export interface DeclarationOptions {
   scalarStyle?: ScalarStyle;
 }
 
-const NUMERIC = new Set(["Byte", "Short", "Int", "Long", "ULong", "Float", "Double"]);
-
 const SCALAR_STYLES: readonly ScalarStyle[] = ["inline", "typealias", "value-class"];
+
+function needsGenericCodec(type: KtTypeUse): boolean {
+  if (type.generic && serializerExpr(type)) return true;
+  return Boolean((type.element && needsGenericCodec(type.element)) || (type.value && needsGenericCodec(type.value)));
+}
 
 function items(n: number): string {
   return `${n} ${n === 1 ? "item" : "items"}`;
-}
-
-function isEmptyObject(value: unknown): boolean {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0;
 }
 
 /** Builds Kotlin declarations for every IR type and resolves TypeRefs to Kotlin type uses. */
@@ -106,6 +111,8 @@ export class DeclarationBuilder {
   private usesULongAsString = false;
   private usesModelCheck = false;
   private usesPresence = false;
+  readonly numberSerializers = new Set<string>();
+  readonly encodings: EncodingBuilder;
 
   get presenceUsed(): boolean { return this.usesPresence; }
   /** Value-class scalars used with a property's own `@encode(string)`: their generated `<Name>AsStringSerializer`. */
@@ -116,6 +123,7 @@ export class DeclarationBuilder {
     private readonly api: ApiIR,
     private readonly options: DeclarationOptions,
   ) {
+    this.encodings = new EncodingBuilder(options.modelsPackage);
     this.types = new Map(api.types.map((t) => [t.id, t]));
     this.multipartModels = new Set([
       ...api.types.flatMap((t) => (t.kind === "model" && t.multipart ? [t.id] : [])),
@@ -186,6 +194,14 @@ export class DeclarationBuilder {
     return identifier(decoratorArg(p.decorators, "Kotlin.name") ?? camel(p.name));
   }
 
+  parameterChecks(parameter: Pick<ParamIR, "name" | "type" | "constraints">, type: KtTypeUse, name: string): string[] {
+    const source: PropertyIR = { ...parameter, wireName: parameter.name, optional: false, decorators: {} };
+    const property: KtProperty = { name, wireName: parameter.name, type, override: false, annotations: [], meta: {} };
+    const checks = this.checks(source, property, parameter.name);
+    if (checks.length) this.usesModelCheck = true;
+    return checks;
+  }
+
   build(): KtDecl[] {
     for (const t of this.api.types) {
       const fqn = decoratorArg(t.decorators, "Kotlin.type");
@@ -205,13 +221,15 @@ export class DeclarationBuilder {
     // last so they can adjust their variant data classes.
     for (const t of own) if (t.kind === "enum") this.fillEnum(t);
     for (const t of own) if (t.kind === "union" && this.unionShape(t) !== "sealed-interface") this.fillUnion(t);
+    for (const t of own) if (t.kind === "model") this.prepareModel(t);
     for (const t of own) if (t.kind === "model") this.fillModel(t);
     for (const t of own) if (t.kind === "union" && this.unionShape(t) === "sealed-interface") this.fillUnion(t);
-    this.fillChecks();
     if (this.options.unionVariants !== "top-level") {
       const uses = countNamedUses(this.api);
       for (const t of own) if (t.kind === "union" && this.unionShape(t) === "sealed-interface") this.nestVariants(t, uses);
     }
+    this.fillDefaults();
+    this.fillChecks();
     this.checkDuplicates();
     return [...this.decls.values()];
   }
@@ -227,14 +245,14 @@ export class DeclarationBuilder {
       case "typeParam":
         return { text: ref.name, imports: [], nullable: false };
       case "array":
-        return listOf(this.typeUse(ref.of));
+        return this.encodings.array(listOf(this.typeUse(ref.of)), ref.delimiter);
       case "map":
         return mapOf(this.typeUse(ref.of));
       case "scalar": {
         const fqn = decoratorArg(ref.custom?.decorators, "Kotlin.type");
         if (fqn) return fqnTypeUse(fqn);
         const std = this.stdScalarUse(ref.name);
-        const base = ref.encoding === "string" ? this.stringEncoded(std) : std;
+        const base = this.encodings.typeUse(ref.encoding === "string" ? this.stringEncoded(std) : std, ref.name, ref.wireEncoding);
         const decl = ref.custom ? this.decls.get(ref.custom.id) : undefined;
         if (decl?.kind === "typealias") {
           const needs = serializedIn(base);
@@ -248,43 +266,85 @@ export class DeclarationBuilder {
             const wrapped = this.valueClassAsString(decl);
             if (wrapped) return wrapped;
           }
-          return { text: decl.name, imports: [decl.fqn], nullable: false, underlying: decl.value, wrapper: "value-class" };
+          const wrapped: KtTypeUse = { text: decl.name, imports: [decl.fqn], nullable: false, underlying: base, wrapper: "value-class" };
+          return base.serializer !== decl.value.serializer ? this.encodings.wrap(wrapped, base) : wrapped;
         }
         return base;
       }
       case "literal":
         if (ref.value === null) return { text: "JsonNull", imports: ["kotlinx.serialization.json.JsonNull"], nullable: false };
-        return scalarTypeUse(
-          typeof ref.value === "string"
-            ? "string"
-            : typeof ref.value === "boolean"
-              ? "boolean"
-              : Number.isInteger(ref.value)
-                ? "int32"
-                : "float64",
-        );
+        return this.literalType(ref);
       case "nullable":
         return nullable(this.typeUse(ref.of));
       case "file":
         this.usesFile = true;
-        return { text: "HttpFile", imports: [this.httpFileFqn], nullable: false };
+        return { text: "HttpFile", imports: [this.httpFileFqn], nullable: false, file: true };
       case "unknown":
         return JSON_ELEMENT;
     }
   }
 
   /** A std scalar's type use; a java.time / java.math class is written qualified when a generated type takes its name. */
+  private literalType(ref: Extract<TypeRef, { kind: "literal" }>): KtTypeUse {
+    if (typeof ref.value === "string") return scalarTypeUse("string");
+    if (typeof ref.value === "boolean") return scalarTypeUse("boolean");
+    if (ref.numericText && !/^-?\d+$/.test(ref.numericText)) return this.exactNumberUse("numeric");
+    const value = ref.numericText ? BigInt(ref.numericText) : undefined;
+    if (value !== undefined && (value < -(1n << 63n) || value >= (1n << 63n))) return this.exactNumberUse("integer");
+    if (typeof ref.value === "number" && Number.isInteger(ref.value)) {
+      return scalarTypeUse(ref.value >= -2147483648 && ref.value <= 2147483647 ? "int32" : "int64");
+    }
+    return scalarTypeUse("float64");
+  }
+
   private stdScalarUse(name: string): KtTypeUse {
+    if (this.options.features?.values["precise-numbers"] && (name === "decimal" || name === "decimal128")) {
+      if (this.options.decimal === "string") {
+        this.numberSerializers.add("DecimalTextSerializer");
+        return { text: "String", imports: [], nullable: false, serializer: "DecimalTextSerializer",
+          serialImports: ["kotlinx.serialization.Serializable", `${this.options.modelsPackage}.DecimalTextSerializer`] };
+      }
+      return this.exactNumberUse("numeric");
+    }
+    if (this.options.features?.values["precise-numbers"] && (name === "integer" || name === "numeric")) {
+      return this.exactNumberUse(name);
+    }
     const scalar = scalarTypeUse(name, this.options.dateTime, this.options.decimal);
     const [fqn] = scalar.imports.filter((i) => i.startsWith("java.time.") || i.startsWith("java.math."));
     return fqn && this.hasName(scalar.text) ? { text: fqn, imports: [], nullable: false } : scalar;
   }
 
+  private exactNumberUse(name: "integer" | "numeric"): KtTypeUse {
+    const type = name === "integer" ? "BigInteger" : "BigDecimal";
+    const serializer = name === "integer" ? "BigIntegerSerializer" : "NumericSerializer";
+    this.numberSerializers.add(serializer);
+    return { text: this.hasName(type) ? `java.math.${type}` : type, imports: [`java.math.${type}`], nullable: false,
+      serializer, serialImports: [`${this.options.modelsPackage}.${serializer}`, "kotlinx.serialization.Serializable"] };
+  }
+
   /**
    * `@encode(string)`: Long (int64, integer, safeint) with kotlinx's LongAsStringSerializer, ULong with the generated
-   * ULongAsStringSerializer. BigDecimal and String decimals already write strings.
+   * ULongAsStringSerializer. Exact decimal codecs preserve the explicit string wire kind.
    */
   private stringEncoded(type: KtTypeUse): KtTypeUse {
+    if (type.serializer === "DecimalTextSerializer") {
+      this.numberSerializers.add("DecimalTextAsStringSerializer");
+      return { ...type, serializer: "DecimalTextAsStringSerializer", serialImports: [
+        "kotlinx.serialization.Serializable", `${this.options.modelsPackage}.DecimalTextAsStringSerializer`,
+      ] };
+    }
+    if (type.serializer === "NumericSerializer") {
+      this.numberSerializers.add("BigDecimalAsStringSerializer");
+      return { ...type, serializer: "BigDecimalAsStringSerializer", serialImports: [
+        "kotlinx.serialization.Serializable", `${this.options.modelsPackage}.BigDecimalAsStringSerializer`,
+      ] };
+    }
+    if (type.text === "BigInteger" || type.text === "java.math.BigInteger") {
+      this.numberSerializers.add("BigIntegerAsStringSerializer");
+      return { ...type, serializer: "BigIntegerAsStringSerializer", serialImports: [
+        "kotlinx.serialization.Serializable", `${this.options.modelsPackage}.BigIntegerAsStringSerializer`,
+      ] };
+    }
     if (type.text === "Long") {
       return {
         ...type,
@@ -333,9 +393,15 @@ export class DeclarationBuilder {
     const mapped = this.mapped.get(id);
     if (mapped) return mapped;
     const nested = this.nested.get(id);
-    if (nested) return { text: `${nested.parent.name}.${nested.decl.name}`, imports: [nested.parent.fqn], nullable: false };
+    if (nested) return { text: `${nested.parent.name}.${nested.decl.name}`, imports: [nested.parent.fqn], nullable: false, structuredParam: true };
     const decl = this.decls.get(id);
-    return decl ? { text: decl.name, imports: [decl.fqn], nullable: false } : JSON_ELEMENT;
+    if (!decl) return JSON_ELEMENT;
+    return {
+      text: decl.name, imports: [decl.fqn], nullable: false,
+      ...(["data-class", "sealed-interface", "untagged-union"].includes(decl.kind) ? { structuredParam: true } : {}),
+      ...(decl.kind === "enum" && decl.jsonValues ? { enumWire: true } : {}),
+      ...(decl.kind === "value-class" && decl.constants ? { underlying: decl.value, wrapper: "value-class" as const } : {}),
+    };
   }
 
   /** True if a model-level declaration already uses this simple name. */
@@ -350,11 +416,24 @@ export class DeclarationBuilder {
     scopes: MetaScopes = metaScopes(item.decorators),
   ): string[] {
     const list: string[] = [];
-    if (item.deprecated) list.push(`@Deprecated(${kotlinString(item.deprecated)})`);
+    if (item.deprecated !== undefined) list.push(`@Deprecated(${kotlinString(item.deprecated)})`);
     list.push(...decoratorArgs(item.decorators, "Kotlin.annotate"));
     list.push(...metaStrings(this.program, resolveMeta(scopes, "kotlin"), "annotations", where));
     // Merged scopes concatenate arrays, so an annotation inherited from several levels repeats.
     return [...new Set(list)];
+  }
+
+  operationDocs(operation: OperationIR, scopes: MetaScopes): string | undefined {
+    if (this.options.features && !this.options.features.at("docs", resolveMeta(scopes, "kotlin"), "operation")) return undefined;
+    const parameters = operation.params.flatMap((parameter) => {
+      const text = [parameter.docs, parameter.deprecated !== undefined ? `Deprecated: ${parameter.deprecated}` : undefined].filter(Boolean).join(" ");
+      return text ? [`@param ${identifier(camel(parameter.name))} ${text}`] : [];
+    });
+    if (operation.body) {
+      const text = [operation.body.docs, operation.body.deprecated !== undefined ? `Deprecated: ${operation.body.deprecated}` : undefined].filter(Boolean).join(" ");
+      if (text) parameters.push(`@param ${identifier(camel(operation.body.name ?? "body"))} ${text}`);
+    }
+    return [operation.docs, ...parameters].filter(Boolean).join("\n") || undefined;
   }
 
   private shell(t: TypeIR): KtDecl {
@@ -390,7 +469,7 @@ export class DeclarationBuilder {
               ...(t.typeParameters?.length ? { typeParameters: t.typeParameters } : {}),
             };
       case "enum":
-        return t.members.every((m) => typeof m.value === "string")
+        return t.members.every((m) => typeof m.value === "string") || this.options.features?.values["numeric-enums"]
           ? { ...base, kind: "enum", members: [] }
           : { ...base, kind: "typealias", target: JSON_ELEMENT };
       case "union":
@@ -402,6 +481,8 @@ export class DeclarationBuilder {
             return { ...base, kind: "sealed-interface", discriminator: t.discriminator!.property, properties: [], implements: [...implementsMeta], variants: [] };
           case "untagged":
             return { ...base, kind: "untagged-union", variants: [] };
+          case "open-enum":
+            return { ...base, kind: "value-class", value: scalarTypeUse("string"), checks: [], constants: [] };
           default:
             return { ...base, kind: "typealias", target: JSON_ELEMENT };
         }
@@ -434,7 +515,7 @@ export class DeclarationBuilder {
       this.options.modelsPackage;
     const scopes = metaScopes(s.decorators);
     const std = this.stdScalarUse(s.root);
-    const value = s.encoding === "string" ? this.stringEncoded(std) : std;
+    const value = this.encodings.typeUse(s.encoding === "string" ? this.stringEncoded(std) : std, s.root, s.wireEncoding);
     const base = {
       id: s.id,
       name,
@@ -457,7 +538,9 @@ export class DeclarationBuilder {
     const stringLiterals = types.filter((t) => t.kind === "literal" && typeof t.value === "string").length;
     if (stringLiterals === types.length) return "enum";
     const strings = types.filter((t) => t.kind === "scalar" && t.name === "string").length;
-    if (stringLiterals > 0 && stringLiterals + strings === types.length) return "string-alias";
+    if (stringLiterals > 0 && stringLiterals + strings === types.length) {
+      return this.options.features?.values["open-enums"] ? "open-enum" : "string-alias";
+    }
     if (
       u.discriminator?.envelope === "none" &&
       types.every((t) => {
@@ -467,7 +550,7 @@ export class DeclarationBuilder {
     ) {
       return "sealed-interface";
     }
-    return this.options.features?.values["untagged-unions"] ? "untagged" : "json";
+    return u.jsonLines || u.discriminator?.envelope === "object" || this.options.features?.values["untagged-unions"] ? "untagged" : "json";
   }
 
   private memberName(name: string): string {
@@ -477,16 +560,23 @@ export class DeclarationBuilder {
   private fillEnum(e: EnumIR): void {
     const decl = this.decls.get(e.id)!;
     if (decl.kind === "enum") {
+      decl.jsonValues = e.members.some((member) => typeof member.value === "number") || undefined;
+      if (decl.jsonValues) decl.serializerName = "Serializer";
       decl.members = e.members.map(
         (m): KtEnumMember => ({
           name: identifier(decoratorArg(m.decorators, "Kotlin.name") ?? this.memberName(m.name)),
           serialName: String(m.value),
+          value: m.value,
+          ...(m.numericText ? { numericText: m.numericText } : {}),
           ...(m.docs ? { docs: m.docs } : {}),
           annotations: this.annotations(m, `${e.id}.${m.name}`),
           meta: metaScopes(m.decorators),
         }),
       );
       this.fillUnknown(decl, e);
+      if (decl.jsonValues && !decl.unknown) {
+        while (decl.members.some((member) => member.name === decl.serializerName)) decl.serializerName += "_";
+      }
       return;
     }
     if (decl.kind === "typealias") {
@@ -503,6 +593,14 @@ export class DeclarationBuilder {
       return;
     }
     const shape = this.unionShape(u);
+    if (decl.kind === "value-class" && shape === "open-enum") {
+      decl.constants = u.variants.flatMap((variant) => variant.type.kind === "literal" && typeof variant.type.value === "string"
+        ? [{ name: identifier(this.memberName(variant.name ?? variant.type.value)), value: variant.type.value,
+          ...(variant.docs ? { docs: variant.docs } : {}),
+          annotations: this.annotations({ ...variant, decorators: variant.decorators ?? {} }, `${u.id}.${variant.name ?? variant.type.value}`) }]
+        : []);
+      return;
+    }
     if (decl.kind === "untagged-union") {
       const names = new Set(["Serializer"]);
       decl.variants = u.variants.map((v, index) => {
@@ -510,13 +608,21 @@ export class DeclarationBuilder {
         let name = base;
         for (let suffix = 2; names.has(name); suffix++) name = `${base}${suffix}`;
         names.add(name);
-        return { name, type: this.typeUse(v.type), guard: jsonShape(v.type, this.types), ...(v.type.kind === "literal" ? { literal: JSON.stringify(v.type.value) } : {}) };
+        return { name, type: this.typeUse(v.type), guard: jsonShape(v.type, this.types),
+          ...(v.docs ? { docs: v.docs } : {}), annotations: this.annotations({ ...v, decorators: v.decorators ?? {} }, `${u.id}.${v.name ?? index}`),
+          ...(v.type.kind === "literal" ? { literal: v.type.numericText ?? JSON.stringify(v.type.value) } : {}) };
       });
       const nested = new Set(["Serializer", ...decl.variants.map((v) => v.name)]);
       for (const variant of decl.variants) {
         const collisions = variant.type.imports.filter((fqn) => nested.has(fqn.slice(fqn.lastIndexOf(".") + 1)));
         variant.type = { ...variant.type, text: qualifyText(variant.type.text, collisions),
           ...(variant.type.serialText ? { serialText: qualifyText(variant.type.serialText, collisions) } : {}) };
+      }
+      if (u.discriminator?.envelope === "object") {
+        decl.discriminator = { property: u.discriminator.property, envelopeProperty: u.discriminator.envelopeProperty };
+        decl.variants.forEach((variant, index) => {
+          variant.guard = kotlinString(u.variants[index].name ?? String(index));
+        });
       }
       return;
     }
@@ -527,12 +633,18 @@ export class DeclarationBuilder {
           name: identifier(this.memberName(v.name ?? value)),
           serialName: value,
           ...(v.docs ? { docs: v.docs } : {}),
-          annotations: [],
+          annotations: this.annotations({ ...v, decorators: v.decorators ?? {} }, `${u.id}.${v.name ?? value}`),
           meta: {},
         };
       });
       this.fillUnknown(decl, u);
     } else if (decl.kind === "sealed-interface") {
+      const variantDocs = u.variants.flatMap((variant, index) => {
+        const text = [variant.docs, variant.deprecated !== undefined ? `Deprecated: ${variant.deprecated}` : undefined].filter(Boolean).join(" ");
+        return text ? [`${variant.name ?? `Variant ${index + 1}`}: ${text}`] : [];
+      });
+      const docsEnabled = this.options.features?.at("docs", resolveMeta(metaScopes(u.decorators), "kotlin"), "union") !== false;
+      if (docsEnabled && variantDocs.length) decl.docs = [decl.docs, ...variantDocs].filter(Boolean).join("\n\n");
       for (const variant of u.variants) {
         if (variant.type.kind !== "named") continue;
         const target = this.decls.get(variant.type.id);
@@ -540,6 +652,7 @@ export class DeclarationBuilder {
         target.implements.push(decl.fqn);
         if (target.serialName === undefined && variant.name) target.serialName = variant.name;
         target.properties = target.properties.filter((p) => p.wireName !== decl.discriminator);
+        target.discriminator = decl.discriminator;
       }
     } else if (decl.kind === "typealias") {
       if (shape === "string-alias") {
@@ -589,7 +702,10 @@ export class DeclarationBuilder {
       for (let n = 1; referenced.has(name) || taken.has(name); n++) name = `${base}Event${n > 1 ? n : ""}`;
       taken.add(name);
       const json = /[/+]json(;|$)/.test(e.contentType);
+      const source = u.variants[i];
+      const annotations = source ? this.annotations({ ...source, decorators: source.decorators ?? {} }, `${u.id}.${source.name ?? i}`) : [];
       return {
+        ...(annotations.length ? { annotations } : {}),
         name,
         event: e.name,
         ...(literal !== undefined ? { literal: json ? JSON.stringify(literal) : String(literal) } : { data: payloads[i]! }),
@@ -661,10 +777,37 @@ export class DeclarationBuilder {
     for (const m of chain) for (const p of m.properties) if (!discriminators.has(p.name)) byName.set(p.name, p);
     const props = [...byName.values()];
     decl.properties = props.map((p) => this.property(p, abstractNames.has(p.name), model.id));
+    if (decl.properties.some((property) => {
+      const type = property.presence ?? property.type;
+      return needsGenericCodec(type);
+    })) decl.jsonCodec = true;
     this.modelProps.set(model.id, new Map(props.map((p) => [p.wireName, p])));
     this.fillSealedParents(model, decl, sealedBases);
-    if (chain.some((m) => m.additionalProperties)) {
-      reportDiagnostic(this.program, { code: "additional-properties", format: { id: model.id }, target: NoTarget });
+  }
+
+  private prepareModel(model: ModelIR): void {
+    const declaration = this.decls.get(model.id);
+    if (declaration?.kind !== "data-class") return;
+    const chain = this.chain(model);
+    const additional = chain.findLast((item) => item.additionalProperties)?.additionalProperties;
+    if (additional) {
+      const names = new Set(chain.flatMap((item) => item.properties.map((property) => this.kotlinName(property).replace(/`/g, ""))));
+      let name = "additionalProperties";
+      while (names.has(name)) name += "_";
+      declaration.additional = { name, type: mapOf(this.typeUse(additional)) };
+    }
+    if (model.tuple) declaration.tuple = true;
+  }
+
+  /** Defaults name final constructors, after sealed variants have acquired their nested names. */
+  private fillDefaults(): void {
+    for (const [id, properties] of this.modelProps) {
+      const declaration = this.decls.get(id) ?? this.nested.get(id)?.decl;
+      if (declaration?.kind !== "data-class") continue;
+      declaration.properties = declaration.properties.map((property) => {
+        const source = properties.get(property.wireName);
+        return source?.default === undefined ? property : this.property(source, property.override, id);
+      });
     }
   }
 
@@ -675,12 +818,17 @@ export class DeclarationBuilder {
    */
   private fillChecks(): void {
     for (const [id, byWireName] of this.modelProps) {
-      const decl = this.decls.get(id);
+      const decl = this.decls.get(id) ?? this.nested.get(id)?.decl;
       if (decl?.kind !== "data-class") continue;
       const generated = decl.properties.flatMap((prop) => {
         const p = byWireName.get(prop.wireName);
         return p ? this.checks(p, prop, `${id}.${p.name}`) : [];
       });
+      if (decl.additional && this.options.validation !== false) {
+        const model = this.types.get(id);
+        const ref = model?.kind === "model" ? this.chain(model).findLast((item) => item.additionalProperties)?.additionalProperties : undefined;
+        if (ref) generated.push(...this.collectionChecks({ kind: "map", of: ref }, decl.additional.type, decl.additional.name, decl.additional.name));
+      }
       const meta = metaStrings(this.program, resolveMeta(decl.meta, "kotlin"), "checks", id);
       this.throwsModelCheck(decl, [...generated, ...meta.filter((line) => /\bModelCheckException\b/.test(line))]);
       decl.checks = [...generated, ...meta];
@@ -699,6 +847,7 @@ export class DeclarationBuilder {
       decl.implements.push(this.decls.get(base.id)!.fqn);
       const value = Object.entries(base.discriminator!.mapping).find(([, id]) => id === model.id)?.[0];
       if (value !== undefined) decl.serialName = value;
+      decl.discriminator = base.discriminator!.property;
     }
   }
 
@@ -739,13 +888,16 @@ export class DeclarationBuilder {
       prop.default = defaultValue;
       if (!p.optional && !this.multipartModels.has(owner)) prop.encodeDefault = true;
     } else if (p.optional) prop.default = "null";
-    if (p.optional && p.type.kind === "nullable" && !this.multipartModels.has(owner) && this.options.features?.values["optional-presence"]) {
+    const presence = this.options.features?.values["strict-optionals"] ||
+      p.type.kind === "nullable" && this.options.features?.values["optional-presence"];
+    if (p.optional && !this.multipartModels.has(owner) && presence) {
       this.usesPresence = true;
-      prop.presence = type;
-      const inner = prop.serialType ?? (type.serializer ? `@Serializable(with = ${type.serializer}::class) ${type.text}` : type.text);
+      const present = fqn ? fqnTypeUse(fqn) : this.typeUse(p.type);
+      prop.presence = present;
+      const inner = present.serialText ?? (present.serializer ? `@Serializable(with = ${present.serializer}::class) ${present.text}` : present.text);
       prop.annotations = prop.annotations.filter((a) => a !== `@Serializable(with = ${type.serializer}::class)`);
       prop.serialType = `OptionalValue<${inner}>`;
-      prop.type = { text: `OptionalValue<${type.text}>`, imports: [...type.imports, `${this.options.modelsPackage}.OptionalValue`], nullable: false };
+      prop.type = { text: `OptionalValue<${present.text}>`, imports: [...present.imports, `${this.options.modelsPackage}.OptionalValue`], nullable: false };
       prop.default = "OptionalValue.Absent";
       prop.annotations.push("@EncodeDefault(EncodeDefault.Mode.NEVER)");
     }
@@ -773,7 +925,40 @@ export class DeclarationBuilder {
       }
       type = { ...type.underlying, nullable: type.nullable };
     }
-    return this.constraintChecks(expr, p.name, c, type, notBlank, prop.name);
+    const checks = this.constraintChecks(expr, p.name, c, type, notBlank, prop.name);
+    if (this.options.validation !== false) {
+      checks.push(...this.literalChecks(p.type, prop.name, type.nullable));
+      checks.push(...this.collectionChecks(p.type, prop.type, prop.name, p.name));
+    }
+    return checks;
+  }
+
+  private literalChecks(ref: TypeRef, expression: string, nullableValue: boolean): string[] {
+    if (ref.kind === "nullable") return this.literalChecks(ref.of, expression, true);
+    if (ref.kind !== "literal" || ref.value === null) return [];
+    const literal = this.defaultLiteral(ref.numericText ?? ref.value, ref, this.typeUse(ref));
+    if (literal === undefined) return [];
+    const condition = `${nullableValue ? `${expression} == null || ` : ""}${expression} == ${literal}`;
+    return [`if (!(${condition})) throw ModelCheckException(${kotlinString(`${expression} must equal ${String(ref.value)}`)})`];
+  }
+
+  private collectionChecks(ref: TypeRef, type: KtTypeUse, expression: string, label: string, depth = 0): string[] {
+    if (ref.kind === "nullable") return this.collectionChecks(ref.of, type, expression, label, depth);
+    if (ref.kind !== "array" && ref.kind !== "map") return [];
+    const element = ref.of;
+    const itemType = ref.kind === "array" ? type.element : type.value;
+    if (!itemType) return [];
+    const item = `item${depth}`;
+    const scalar = element.kind === "nullable" ? element.of : element;
+    const constraints = scalar.kind === "scalar" && itemType.wrapper !== "value-class" ? scalar.custom?.constraints : undefined;
+    const underlying = itemType.underlying;
+    const value = itemType.wrapper === "value-class" ? `${item}.value` : item;
+    const checks = this.constraintChecks(value, `${label} item`, constraints, underlying ? { ...underlying, nullable: itemType.nullable } : itemType, false, item);
+    checks.push(...this.literalChecks(element, item, itemType.nullable));
+    checks.push(...this.collectionChecks(element, itemType, item, label, depth + 1));
+    if (!checks.length) return [];
+    const values = ref.kind === "map" ? `${expression}${type.nullable ? "?" : ""}.values` : expression;
+    return [`${values}${type.nullable ? "?" : ""}.forEach { ${item} ->`, ...checks.map((check) => `    ${check}`), "}"];
   }
 
   /** Lines checking `c` (and `notBlank`) on `expr` of `type`; `guard` is null-checked first when nullable. */
@@ -809,66 +994,21 @@ export class DeclarationBuilder {
       if (c.minItems !== undefined) add(`${name}.size >= ${c.minItems}`, `${label} must have at least ${items(c.minItems)}`);
       if (c.maxItems !== undefined) add(`${name}.size <= ${c.maxItems}`, `${label} must have at most ${items(c.maxItems)}`);
     }
-    if (NUMERIC.has(base) || base === "BigDecimal") {
-      // ULong compares only with unsigned literals (a non-positive lower bound always holds); BigDecimal with BigDecimal.
-      const literal = (v: number) =>
-        base === "ULong" ? `${v}uL` : base === "BigDecimal" ? `BigDecimal(${kotlinString(String(v))})` : String(v);
-      if (c.minValue !== undefined && !(base === "ULong" && c.minValue <= 0)) {
-        add(`${name} >= ${literal(c.minValue)}`, `${label} must be at least ${c.minValue}`);
-      }
-      if (c.maxValue !== undefined) add(`${name} <= ${literal(c.maxValue)}`, `${label} must be at most ${c.maxValue}`);
-    }
+    for (const check of boundChecks(name, label, c, type)) add(check.condition, check.message);
     return out;
   }
 
   private defaultLiteral(value: unknown, ref: TypeRef, type: KtTypeUse): string | undefined {
-    if (Array.isArray(value)) return value.length === 0 && ref.kind === "array" ? "emptyList()" : undefined;
-    if (ref.kind === "map") return isEmptyObject(value) ? "emptyMap()" : undefined;
-    if (ref.kind === "named") {
-      const decl = this.decls.get(ref.id);
-      // `#{}` for a model whose properties all have defaults (TypeSpec checks assignability).
-      if (decl?.kind === "data-class") return isEmptyObject(value) ? `${decl.name}()` : undefined;
-      if (decl?.kind === "enum") {
-        const member = decl.members.find((m) => m.serialName === String(value));
-        return member ? `${decl.name}.${member.name}` : undefined;
-      }
-      const mapped = this.mapped.get(ref.id);
-      const source = this.types.get(ref.id);
-      if (mapped && source?.kind === "enum") {
-        const member = source.members.find((m) => String(m.value) === String(value));
-        return member
-          ? `${mapped.text}.${identifier(decoratorArg(member.decorators, "Kotlin.name") ?? this.memberName(member.name))}`
-          : undefined;
-      }
-      return undefined;
-    }
-    if (type.underlying) {
-      const inner = this.defaultLiteral(value, ref, type.underlying);
-      if (inner === undefined) return undefined;
-      // `type.text` may carry a trailing `?` (a nullable property with a default keeps the non-null literal).
-      return type.wrapper === "value-class" ? `${type.text.replace(/\?$/, "")}(${inner})` : inner;
-    }
-    if (typeof value === "string") return type.text === "String" ? kotlinString(value) : undefined;
-    if (typeof value === "boolean") return String(value);
-    if (typeof value !== "number") return undefined;
-    switch (type.text) {
-      case "Long":
-        return `${value}L`;
-      case "ULong":
-        return Number.isInteger(value) && value >= 0 ? `${value}uL` : undefined;
-      case "BigDecimal":
-        return `BigDecimal(${kotlinString(String(value))})`;
-      case "Float":
-        return `${value}f`;
-      case "Double":
-        return Number.isInteger(value) ? `${value}.0` : String(value);
-      case "Int":
-      case "Short":
-      case "Byte":
-        return String(value);
-      default:
-        return undefined;
-    }
+    return renderDefault(value, ref, type, {
+      declaration: (id) => this.decls.get(id) ?? this.nested.get(id)?.decl,
+      source: (id) => this.types.get(id),
+      typeUse: (reference) => this.typeUse(reference),
+      propertyName: (id, name) => this.propertyName(id, name),
+      enumMemberName: (name) => this.memberName(name),
+      ...(this.options.features?.values["optional-presence"] || this.options.features?.values["strict-optionals"]
+        ? { optionalValue: `${this.options.modelsPackage}.OptionalValue` } : {}),
+      ...(this.options.features?.values["strict-optionals"] ? { strictOptionals: true } : {}),
+    });
   }
 
   private checkDuplicates(): void {

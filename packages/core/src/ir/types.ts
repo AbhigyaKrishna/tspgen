@@ -6,17 +6,22 @@ export type TypeRef =
   | { kind: "named"; id: string; args?: TypeRef[] }
   /** A type parameter of the enclosing generic model. */
   | { kind: "typeParam"; name: string }
-  | { kind: "array"; of: TypeRef }
+  | { kind: "array"; of: TypeRef; delimiter?: string }
   | { kind: "map"; of: TypeRef }
   /** `encoding: "string"`: `@encode(string)` on an integer or decimal (property or scalar): a JSON string on the wire. */
-  | { kind: "scalar"; name: string; custom?: CustomScalarIR; encoding?: "string" }
-  | { kind: "literal"; value: string | number | boolean | null }
+  | { kind: "scalar"; name: string; custom?: CustomScalarIR; encoding?: "string"; wireEncoding?: WireEncodingIR }
+  | { kind: "literal"; value: string | number | boolean | null; numericText?: string }
   | { kind: "nullable"; of: TypeRef }
   /** `Http.File` or a model extending it: each language maps it to its built-in file type. */
   | { kind: "file" }
   | { kind: "unknown" };
 
 /** A user-declared scalar; `name` on the TypeRef is its TypeSpec std root. */
+export interface WireEncodingIR {
+  name: string;
+  type: string;
+}
+
 export interface CustomScalarIR extends DocInfo {
   id: string;
   name: string;
@@ -29,7 +34,8 @@ export interface CustomScalarIR extends DocInfo {
    * without one. Independent of any `@encode` a property applies to a use of this scalar (see `TypeRef.encoding`).
    */
   encoding?: "string";
-  /** Constraint decorators on the scalar itself; absent when none. */
+  wireEncoding?: WireEncodingIR;
+  /** Constraints inherited from the scalar's base chain; nearest declaration wins. */
   constraints?: ConstraintsIR;
   decorators: DecoratorData;
   /**
@@ -42,14 +48,22 @@ export interface CustomScalarIR extends DocInfo {
 
 /** TypeSpec constraint decorators on a property (or its scalar type). */
 export interface ConstraintsIR {
+  /** Bounds whose exact value is not representable as a JavaScript number. */
+  numericBounds?: Partial<Record<NumericBound, string>>;
+  /** Logical ISO values of date/time/duration bounds. */
+  scalarBounds?: Partial<Record<NumericBound, string>>;
   minLength?: number;
   maxLength?: number;
   minItems?: number;
   maxItems?: number;
   minValue?: number;
   maxValue?: number;
+  minValueExclusive?: number;
+  maxValueExclusive?: number;
   pattern?: string;
 }
+
+export type NumericBound = "minValue" | "maxValue" | "minValueExclusive" | "maxValueExclusive";
 
 export interface DocInfo {
   docs?: string;
@@ -70,6 +84,8 @@ interface NamedTypeBase extends DocInfo {
 
 export interface ModelIR extends NamedTypeBase {
   kind: "model";
+  /** Fixed-position tuple represented by item1, item2, ... properties; JSON is an array. */
+  tuple?: boolean;
   properties: PropertyIR[];
   baseId?: string;
   additionalProperties?: TypeRef;
@@ -105,6 +121,7 @@ export interface EnumIR extends NamedTypeBase {
 export interface EnumMemberIR extends DocInfo {
   name: string;
   value: string | number;
+  numericText?: string;
   decorators: DecoratorData;
 }
 
@@ -117,6 +134,8 @@ export interface UnionIR extends NamedTypeBase {
    * declaration order. `variants` then hold the event payload types.
    */
   events?: EventIR[];
+  /** JSON-lines items use the declared union's JSON wire shape rather than SSE event envelopes. */
+  jsonLines?: boolean;
 }
 
 /** One event of an `@events` union. */
@@ -143,6 +162,7 @@ export interface StreamIR {
 }
 
 export interface UnionVariantIR extends DocInfo {
+  decorators?: DecoratorData;
   name?: string;
   type: TypeRef;
 }
@@ -244,10 +264,16 @@ export interface ParamIR extends DocInfo {
 }
 
 export interface BodyIR {
+  /** Tuple-form multipart data preserves positional parts as well as explicit names. */
+  tupleMultipart?: boolean;
+  /** The item type of a declared JSON-lines request stream. */
+  jsonLines?: TypeRef;
   /** Name of the explicit `@body` parameter, when there is one. */
   name?: string;
   /** Doc comment of the explicit `@body` parameter. */
   docs?: string;
+  /** Deprecation metadata of the explicit `@body` parameter, when retained by the language. */
+  deprecated?: string;
   type: TypeRef;
   contentTypes: string[];
   optional: boolean;
@@ -295,7 +321,7 @@ export interface ResponseIR {
    * `stream`: a server-sent event stream (`text/event-stream`), set only on the single success response of an
    * operation. Its `type` is the `@events` union of a typed stream, the declared body type (string) otherwise.
    */
-  body?: { type: TypeRef; contentTypes: string[]; stream?: StreamIR };
+  body?: { type: TypeRef; contentTypes: string[]; stream?: StreamIR; file?: FileBodyIR; jsonLines?: TypeRef; multipart?: { parts: PartIR[]; tuple: boolean } };
 }
 
 export interface HeaderIR {

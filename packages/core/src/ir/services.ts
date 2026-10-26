@@ -26,7 +26,7 @@ import { isDefaultStatus, isFixedStatus } from "../http.js";
 import { pascal } from "../naming.js";
 import { collectDecorators, enclosingNamespaceDecorators } from "./decorators.js";
 import { docInfo } from "./docs.js";
-import { declaresStream, isEventStream, streamEvents, type SseLibraries } from "./sse.js";
+import { declaresStream, isEventStream, streamElement, streamEvents, type SseLibraries } from "./sse.js";
 import { hasParts, isBytes, splitNamespace, type TypeCollector } from "./type-collector.js";
 import type { ResolvedService } from "./versioning.js";
 import type {
@@ -87,7 +87,7 @@ function buildService(
   schemes.requirement(getAuthentication(program, ns));
   for (const op of service.operations) {
     const body = op.parameters.body;
-    if (body?.bodyKind === "multipart" && body.multipartKind === "tuple") {
+    if (body?.bodyKind === "multipart" && body.multipartKind === "tuple" && !collector.tuples) {
       reportDiagnostic(program, {
         code: "unsupported-multipart-tuple",
         format: { operation: getTypeName(op.operation) },
@@ -125,7 +125,7 @@ function buildService(
       };
       groups.set(groupId, group);
     }
-    const ir = buildOperation(program, collector, op, groupId, sse);
+    const ir = collector.request(op.operation, op.verb, () => buildOperation(program, collector, op, groupId, sse));
     const auth = schemes.requirement(op.authentication);
     if (auth) ir.auth = auth;
     built.push([op, ir]);
@@ -219,7 +219,7 @@ function buildOperation(
   const base = pascal(opName);
   const body = op.parameters.body;
   // Multipart boundaries and file content types are set by the HTTP runtime, not by a parameter.
-  const contentTypeParam = body && body.bodyKind !== "single" ? body.contentTypeProperty : undefined;
+  const contentTypeParam = body && (body.bodyKind !== "single" || collector.jsonLines && isJsonLines(body.contentTypes)) ? body.contentTypeProperty : undefined;
   const params: ParamIR[] = op.parameters.parameters
     .filter((p) => p.param !== contentTypeParam)
     .map((p) => {
@@ -246,7 +246,7 @@ function buildOperation(
     decorators: collectDecorators(op.operation),
   };
   const streams = { sse, streamable: streamable(program, op), rejected: false };
-  ir.responses = op.responses.flatMap((r) => buildResponses(program, collector, op, r, base, op.responses.length > 1, streams));
+  ir.responses = collector.response(op.operation, () => op.responses.flatMap((r) => buildResponses(program, collector, op, r, base, op.responses.length > 1, streams)));
   if (streams.rejected) {
     reportDiagnostic(program, {
       code: "unsupported-sse-response",
@@ -256,16 +256,21 @@ function buildOperation(
   }
   if (body) {
     const property = "property" in body ? body.property : undefined;
-    const bodyDocs = property ? docInfo(program, property).docs : undefined;
+    const bodyInfo = property ? docInfo(program, property) : {};
+    const tupleParts = body.bodyKind === "multipart" && body.multipartKind === "tuple"
+      ? buildTupleParts(program, collector, body.parts, base) : undefined;
     ir.body = {
       ...(property ? { name: property.name } : {}),
-      ...(bodyDocs ? { docs: bodyDocs } : {}),
+      ...(bodyInfo.docs ? { docs: bodyInfo.docs } : {}),
+      ...(collector.exactLiterals && bodyInfo.deprecated !== undefined ? { deprecated: bodyInfo.deprecated } : {}),
       // `propertyRef` (rather than `ref`) so an explicit `@body`/`@bodyRoot` property's own `@encode` applies to a
       // scalar body; an implicit body (no `property`, the whole params model) has no property to carry `@encode`.
-      type: property ? collector.propertyRef(property, `${base}Request`) : collector.ref(body.type, `${base}Request`),
+      type: tupleParts ? collector.multipartRef(ir.id, `${pascal(groupId)}${base}Multipart`, tupleParts)
+        : property ? collector.propertyRef(property, `${base}Request`) : collector.ref(body.type, `${base}Request`),
       contentTypes: body.contentTypes,
       optional: property?.optional ?? false,
       kind: body.bodyKind,
+      ...(tupleParts ? { parts: tupleParts, tupleMultipart: true } : {}),
     };
     const constraints = property ? collector.constraints(property) : undefined;
     if (constraints) ir.body.constraints = constraints;
@@ -275,15 +280,51 @@ function buildOperation(
     if (body.bodyKind === "file") {
       ir.body.file = { isText: body.isText, contentTypes: declaredContentTypes(body.contentTypes) };
     }
+    const item = collector.jsonLines && isJsonLines(body.contentTypes) ? streamElement(program, body, sse) : undefined;
+    if (item) ir.body.jsonLines = collector.jsonLinesRef(item, `${base}Item`);
   }
   return ir;
 }
 
 type ModelPart = Extract<HttpOperationPart, { partKind: "model" }>;
 
+function buildTupleParts(program: Program, collector: TypeCollector, parts: Extract<HttpOperationPart, { partKind: "tuple" }>[], base: string): PartIR[] {
+  const taken = new Set(parts.flatMap((part) => part.name === undefined ? [] : [part.name]));
+  for (const [index, part] of parts.entries()) {
+    const repeatedName = part.name !== undefined && parts.slice(0, index).some((previous) => previous.name === part.name);
+    const ambiguous = part.multi && part.name === undefined && parts.slice(index + 1).some((next) => next.name === undefined);
+    if (repeatedName || ambiguous) reportDiagnostic(program, {
+      code: "ambiguous-multipart-parts", format: { part: String(index + 1), operation: base }, target: part.body.type,
+    });
+  }
+  return parts.map((part, index) => {
+    let name = part.name ?? `part${index + 1}`;
+    if (part.name === undefined) {
+      while (taken.has(name)) name += "_";
+      taken.add(name);
+    }
+    return { ...buildTuplePart(collector, part, index, base), name };
+  });
+}
+
+function buildTuplePart(collector: TypeCollector, part: Extract<HttpOperationPart, { partKind: "tuple" }>, index: number, base: string): PartIR {
+  const file = part.body.bodyKind === "file" || isBytes(part.body.type);
+  const json = !file && part.body.contentTypes.some(isJsonMediaType) && isStructured(part.body.type);
+  return {
+    name: part.name ?? `part${index + 1}`, property: `item${index + 1}`, optional: part.optional, multi: part.multi,
+    kind: file ? "file" : json ? "json" : "text",
+    type: file ? { kind: "file" } : collector.ref(part.body.type, `${base}Part${index + 1}`),
+    contentTypes: file ? declaredContentTypes(part.body.contentTypes) : [...part.body.contentTypes],
+  };
+}
+
 /** Content types a file declares; the `* / *` wildcard of a plain `Http.File` declares none. */
 function declaredContentTypes(types: readonly string[]): string[] {
   return types.filter((t) => t !== "*/*");
+}
+
+function isJsonLines(contentTypes: readonly string[]): boolean {
+  return contentTypes.some((type) => ["application/jsonl", "application/x-ndjson"].includes(type.split(";")[0].trim().toLowerCase()));
 }
 
 function isJsonMediaType(type: string): boolean {
@@ -392,7 +433,7 @@ function checkJsonUses(program: Program, collector: TypeCollector, built: BuiltO
     if (!(t.kind === "union" && t.events)) warnEvents(refs, `in '${t.id}'`, target);
   }
   for (const [op, ir] of built) {
-    const responses = ir.responses.flatMap((r) => (r.body ? [r.body.type] : []));
+    const responses = ir.responses.flatMap((r) => (r.body && !r.body.file && !r.body.multipart ? [r.body.type] : []));
     if (responses.some(holdsFile)) {
       reportDiagnostic(program, {
         code: "file-in-json",
@@ -469,15 +510,33 @@ function buildResponses(
     };
     if (content.body) {
       const eventStream = !isError && isEventStream(content.body.contentTypes);
-      if (eventStream && !streams.streamable) streams.rejected = true;
-      const stream = eventStream && streams.streamable;
+      const streamable = collector.streamingResponses || streams.streamable;
+      if (eventStream && !streamable) streams.rejected = true;
+      const stream = eventStream && streamable;
       // Rejected streams keep their declared (string) body: their events union is not collected for them.
       const events = stream ? streamEvents(program, content, streams.sse) : undefined;
       const hint = `${base}Response${multiple ? suffix : ""}`;
       ir.body = {
-        type: collector.ref(events ?? content.body.type, events ? `${base}Events` : hint),
+        type: collector.multipartResponses && content.body.bodyKind === "multipart" ? { kind: "unknown" }
+          : collector.ref(events ?? content.body.type, events ? `${base}Events` : hint),
         contentTypes: content.body.contentTypes,
       };
+      if (collector.multipartResponses && content.body.bodyKind === "multipart") {
+        const body = content.body;
+        const parts = body.multipartKind === "model" ? body.parts.map((part) => buildPart(program, collector, part, hint))
+          : buildTupleParts(program, collector, body.parts, hint);
+        ir.body.type = body.multipartKind === "model" ? collector.ref(body.type, hint)
+          : collector.multipartRef(`${getTypeName(op.operation)}:response:${suffix}`, `${hint}Multipart`, parts);
+        ir.body.multipart = { parts, tuple: body.multipartKind === "tuple" };
+      }
+      if (collector.fileResponses && content.body.bodyKind === "file") {
+        ir.body.file = { isText: content.body.isText, contentTypes: declaredContentTypes(content.body.contentTypes) };
+      }
+      const item = collector.jsonLines && isJsonLines(content.body.contentTypes) ? streamElement(program, content.body, streams.sse) : undefined;
+      if (item) {
+        if (!isError && streamable) ir.body.jsonLines = collector.jsonLinesRef(item, `${base}Item`);
+        else reportDiagnostic(program, { code: "unsupported-json-lines", format: { operation: getTypeName(op.operation) }, target: op.operation });
+      }
       if (stream) {
         const union = ir.body.type.kind === "named" ? collector.typeOf(ir.body.type.id) : undefined;
         const typed = union?.kind === "union" ? union.events : undefined;

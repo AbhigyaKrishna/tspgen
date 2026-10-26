@@ -1,6 +1,7 @@
 import { isDefaultStatus, isFixedStatus, statusRank, type StatusCodes } from "@abhigyakrishna/tspgen-core";
 import {
   camel,
+  codecImports,
   isJsonContentType,
   kotlinString as str,
   listElement,
@@ -8,6 +9,7 @@ import {
   paramEncode,
   serializerExpr,
   serializerImports,
+  jsonSerializer,
   type KtBody,
   type KtGroup,
   type KtOperation,
@@ -16,7 +18,7 @@ import {
   type KtResultVariant,
   type KtTypeUse,
 } from "@abhigyakrishna/tspgen-kotlin";
-import { emitLines, preludeLines, streamOf } from "./sse.js";
+import { emitLines, preludeLines, responseFlow, scopedStream, streamConsumer, streamOf } from "./sse.js";
 
 const BRACKET_QUERY_NAME = /^[^\[\]]+(?:\[[^\[\]]*\])+$/;
 
@@ -48,8 +50,33 @@ export function decode(expr: string, type: KtTypeUse): string {
  * its JSON form needs one (see `serializerExpr`), else `response.body()` (content negotiation).
  */
 function bodyRead(type: KtTypeUse, bounded = false): string {
+  if (type.multipart) return multipartRead(type);
+  if (type.file) {
+    const filename = "response.headers[io.ktor.http.HttpHeaders.ContentDisposition]?.let { io.ktor.http.ContentDisposition.parse(it).parameter(io.ktor.http.ContentDisposition.Parameters.FileName) }";
+    const contentType = "response.headers[io.ktor.http.HttpHeaders.ContentType]";
+    const bytes = bounded ? "response.apiBodyBytes()" : "response.body<ByteArray>()";
+    return `${type.text.replace(/\?$/, "")}(filename = ${filename}, contentType = ${contentType}, bytes = ${bytes})`;
+  }
   const serializer = serializerExpr(type);
   return serializer ? `http.apiJson.decodeFromString(${serializer}, ${bounded ? "response.apiBodyText()" : "response.bodyAsText()"})` : bounded ? `http.readApiBody<${type.text}>(response)` : "response.body()";
+}
+
+function multipartRead(type: KtTypeUse): string {
+  const body = type.multipart!;
+  const fields = body.parts.map((part) => {
+    const decode = (item: string) => {
+      if (part.kind === "file") return `${part.type.text}(filename = ${item}.filename, contentType = ${item}.contentType, bytes = ${item}.bytes)`;
+      const text = `${item}.bytes.decodeToString()`;
+      return part.kind === "json" ? `http.apiJson.decodeFromString(${jsonSerializer(part.type)}, ${text})` : paramDecode(text, part.type);
+    };
+    const values = `parts[${str(part.wireName)}].orEmpty()`;
+    const expression = part.multi ? `${values}${part.optional ? ".takeIf { it.isNotEmpty() }?" : ""}.map { ${decode("it")} }`
+      : part.optional ? `${values}.singleOrNull()?.let { ${decode("it")} }`
+      : `${values}.single().let { ${decode("it")} }`;
+    return `${part.name} = ${expression}`;
+  });
+  const singleNames = body.parts.filter((part) => !part.multi).map((part) => str(part.wireName)).join(", ");
+  return `http.readMultipart(response, listOf(${body.parts.map((part) => str(part.wireName)).join(", ")}), setOf(${singleNames})) { parts -> ${type.text}(${fields.join(", ")}) }`;
 }
 
 /** A single JSON request body whose JSON form needs an explicit serializer (see `serializerExpr`). */
@@ -70,7 +97,8 @@ function serializedTypes(op: KtOperation): KtTypeUse[] {
         ? []
         : [op.body.type];
   const errors = op.errors.flatMap((e) => (e.body ? [e.body] : []));
-  return [...request, ...success, ...errors].filter((t) => serializerExpr(t) !== undefined);
+  return [...request, ...success, ...errors].flatMap((type) => type.multipart ? type.multipart.parts.map((part) => part.type) : [type])
+    .filter((t) => serializerExpr(t) !== undefined);
 }
 
 /** Whether an operation writes or reads a body through an explicit serializer (it then needs the API client's Json). */
@@ -93,9 +121,23 @@ export function serializerCallImports(op: KtOperation): string[] {
   ];
 }
 
+export function multipartResponseImports(op: KtOperation): string[] {
+  const parts = op.responses.flatMap((response) => response.body?.multipart?.parts ?? []);
+  if (!parts.length) return [];
+  return ["kotlinx.serialization.builtins.serializer", "kotlinx.serialization.builtins.nullable",
+    "kotlinx.serialization.builtins.ListSerializer", "kotlinx.serialization.builtins.MapSerializer",
+    ...parts.flatMap((part) => [...codecImports(part.type), ...serializerImports(part.type)]),
+  ];
+}
+
 function statusMatch(codes: StatusCodes): string {
   if (isDefaultStatus(codes)) return "else";
   return isFixedStatus(codes) ? String(codes) : `in ${codes.start}..${codes.end}`;
+}
+
+function statusCondition(match: string): string {
+  if (match === "else") return "true";
+  return match.startsWith("in ") ? `response.status.value ${match}` : `response.status.value == ${match}`;
 }
 
 function headerExpr(h: KtParam): string {
@@ -110,6 +152,7 @@ function headerExpr(h: KtParam): string {
 }
 
 function valueExpr(name: string, type: KtTypeUse): string {
+  if (type.encodedParam) return encode(name, type);
   const item = listElement(type);
   return item ? `${name}.joinToString(",") { ${encode("it", item)} }` : encode(name, type);
 }
@@ -147,14 +190,16 @@ function partLine(body: string, p: KtPart): string {
 
 /** Statements setting the request body. */
 function bodyLines(body: KtBody): string[] {
+  if (body.jsonLines) return [`setBody(JsonLinesContent(${body.name}, ${jsonSerializer(body.jsonLines)}, http.apiJson, ${str(body.contentType)}))`];
   switch (body.kind) {
     case "multipart":
       return [
         "setBody(",
-        "    MultiPartFormDataContent(",
+        `    ${body.contentType.startsWith("multipart/form-data") ? "MultiPartFormDataContent" : "multipartContent"}(`,
         "        formData {",
         ...(body.parts ?? []).map((p) => `            ${partLine(body.name, p)}`),
         "        },",
+        ...(body.contentType.startsWith("multipart/form-data") ? [] : [`        ${str(body.contentType)},`]),
         "    ),",
         ")",
       ];
@@ -207,7 +252,7 @@ export const ktorClientHelpers = {
       .filter((p) => p.location === "query")
       .map((p) => {
         const item = listElement(p.type);
-        if (item && p.explode) {
+        if (item && p.explode && !p.type.encodedParam) {
           return `${p.name}${p.optional ? "?" : ""}.forEach { ${appendQuery(p.wireName, encode("it", item))} }`;
         }
         if (item) {
@@ -243,10 +288,10 @@ export const ktorClientHelpers = {
   statusMatch,
   bodyRead,
 
-  variantArgs(v: KtResultVariant, bounded = false): string {
+  variantArgs(v: KtResultVariant, bounded = false, active = "responseActive"): string {
     const args = [
       ...(v.status === undefined ? ["response.status.value"] : []),
-      ...(v.body ? [bodyRead(v.body, bounded)] : []),
+      ...(v.body ? [v.stream ? responseFlow(v.stream, active) : bodyRead(v.body, bounded)] : []),
       ...v.headers.map(headerExpr),
     ];
     return args.length > 0 ? `(${args.join(", ")})` : "";
@@ -273,6 +318,33 @@ export const ktorClientHelpers = {
   },
 
   stream: streamOf,
+  scopedStream,
+  streamConsumer,
+  scopedBranches(op: KtOperation, bounded = false): { condition: string; expression: string }[] {
+    if (op.result.kind !== "sealed") return [];
+    const variants = [...op.result.decl.variants].sort((left, right) => statusRank(left.statusCodes) - statusRank(right.statusCodes));
+    const name = op.result.decl.name;
+    const active = `${streamConsumer(op)}Active`;
+    const success = variants.map((variant) => {
+      const match = statusMatch(variant.statusCodes);
+      let condition = statusCondition(match);
+      const sharedStatus = variants.filter((other) => statusMatch(other.statusCodes) === match).length > 1;
+      if (sharedStatus && variant.contentType) {
+        condition += ` && response.headers["Content-Type"]?.substringBefore(';')?.trim()?.equals(${str(variant.contentType.split(";")[0])}, ignoreCase = true) == true`;
+      }
+      return { condition, expression: `${name}.${variant.name}${ktorClientHelpers.variantArgs(variant, bounded, active)}` };
+    });
+    const errors = ktorClientHelpers.errorBranches(op, bounded).map((branch) => ({
+      condition: branch.match === "else" ? "else" : statusCondition(branch.match), expression: `throw ${branch.expr}`,
+    }));
+    const defaultSuccess = success.find((branch) => branch.condition === "true");
+    const fallback = defaultSuccess ? { ...defaultSuccess, condition: "else" } : errors.find((branch) => branch.condition === "else")!;
+    return [
+      ...success.filter((branch) => branch.condition !== "true"),
+      ...errors.filter((branch) => branch.condition !== "else"),
+      fallback,
+    ];
+  },
   emitLines,
   preludeLines,
 
