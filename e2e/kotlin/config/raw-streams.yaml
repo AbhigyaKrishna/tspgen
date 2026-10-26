@@ -1,0 +1,16 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../generated/raw-streams"
+    package: "com.example.rawstreams"
+    features:
+      raw-streams: true
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          output-dir: "{project-root}/../server/generated/raw-streams"
+          routing-style: resources
+          handler-shape: request-object
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client":
+          output-dir: "{project-root}/../client/generated/raw-streams"
+          max-response-size: 16

@@ -1,0 +1,10 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../generated/mapping-resources"
+    package: "com.example.ledgersearch"
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          output-dir: "{project-root}/../server/generated/mapping-resources"
+          routing-style: resources

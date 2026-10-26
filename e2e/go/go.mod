@@ -42,10 +42,10 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 )
 
-replace example.com/petstore/client => ./generated/client
+replace example.com/petstore/client => ./client/generated/client
 
-replace example.com/petstore/gin => ./generated/gin/server
+replace example.com/petstore/gin => ./server/generated/gin/server
 
 replace example.com/petstore/models/v2 => ./generated/models
 
-replace example.com/petstore/nethttp => ./generated/nethttp/server
+replace example.com/petstore/nethttp => ./server/generated/nethttp/server

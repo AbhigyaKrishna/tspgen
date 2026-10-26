@@ -99,10 +99,5 @@ export default {
 `KtorServerMeta` types the `kotlin:ktor-server` metadata keys (`wrap`, `imports`, `context`, `authenticate`,
 `routeSet`, `annotations`).
 
-**Fitting an existing codebase.** `e2e/house-style` shows the full combination: namespace→package mapping,
-`errors: thrown`, validation, `<Feature>Api` interfaces without a generated module, and a small plugin
-(`tspgen/permissions.ts`, type-checked with its own tsconfig) that adds `authenticate`/`requirePermission` wrappers and an `actorId` context
-parameter to every operation. Plugins that edit operation metadata in `transformIR` must replace scope objects
-rather than mutate them, because operations of one group can share them. It also has a TypeScript half (`ts/`):
-single-file layout, `errors: thrown`, and a flat client with an `error-model`, checked with `tsc` (strict flags)
-and vitest.
+Plugins that edit operation metadata in `transformIR` must replace scope objects
+rather than mutate them, because operations of one group can share them.

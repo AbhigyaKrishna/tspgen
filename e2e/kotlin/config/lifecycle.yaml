@@ -1,0 +1,13 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../generated/lifecycle"
+    package: "com.example.lifecycle"
+    features:
+      lifecycle-models: true
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          output-dir: "{project-root}/../server/generated/lifecycle"
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client":
+          output-dir: "{project-root}/../client/generated/lifecycle"

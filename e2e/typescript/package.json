@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "cp ../kotlin/petstore.tsp petstore.tsp && cp ../kotlin/versioned/library.tsp versioned/library.tsp && tsp compile typescript.tsp && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml && tsp compile flat && tsp compile mapping && tsp compile mapping --config mapping/tspconfig.flat.yaml",
-    "test": "pnpm generate && tsc -p tsconfig.json && vitest run"
+    "generate": "tsp compile config/typescript.tsp --config config/petstore.yaml && tsp compile ../spec/versioned.tsp --config config/versioned-v1.yaml && tsp compile ../spec/versioned.tsp --config config/versioned-v2.yaml && tsp compile config/flat.tsp --config config/flat.yaml && tsp compile ../spec/date-mapping.tsp --config config/mapping.yaml && tsp compile ../spec/date-mapping.tsp --config config/mapping-flat.yaml && tsp compile ../spec/features.tsp --config config/shared.yaml",
+    "test": "pnpm generate && pnpm test:client",
+    "test:client": "tsc -p client/tsconfig.json && vitest run --config client/vitest.config.ts"
   },
   "dependencies": {
     "@abhigyakrishna/tspgen-ts-nextjs-client": "workspace:*",
@@ -22,6 +23,7 @@
     "next": "^16.3.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "tspgen-e2e-spec": "workspace:*"
   }
 }

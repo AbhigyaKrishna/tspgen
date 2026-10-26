@@ -1,0 +1,12 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../generated/versioned/v1"
+    package: "com.example.library.v1"
+    version: "v1"
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          output-dir: "{project-root}/../server/generated/versioned-v1"
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client":
+          output-dir: "{project-root}/../client/generated/versioned-v1"

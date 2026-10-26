@@ -59,7 +59,7 @@ class FeedClient(
             method = HttpMethod.Get
             url {
                 takeFrom(baseUrl)
-                appendPathSegments("feed")
+                appendPathSegments("feed", encodeSlash = true)
                 parameters.append("room", room)
             }
             header(HttpHeaders.Accept, "text/event-stream")
@@ -85,7 +85,7 @@ class FeedClient(
             method = HttpMethod.Get
             url {
                 takeFrom(baseUrl)
-                appendPathSegments("feed", "raw")
+                appendPathSegments("feed", "raw", encodeSlash = true)
             }
             header(HttpHeaders.Accept, "text/event-stream")
         }.execute { response ->

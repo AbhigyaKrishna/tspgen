@@ -1,0 +1,15 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../generated/secure-resources"
+    package: "com.example.secure.resources"
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          output-dir: "{project-root}/../server/generated/secure-resources"
+          routing-style: resources
+          auth-providers:
+            PartnerKey: com.example.petstore.PARTNER_PROVIDER
+          sse-headers:
+            Cache-Control: no-cache
+            X-Stream: secure

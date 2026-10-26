@@ -331,7 +331,7 @@ the callback. The session must not escape it: Ktor closes the connection when
 the callback returns, throws or is cancelled. Generated code adds no reconnect
 loop or retries. HTTP response-size limits do not bound WebSocket frames.
 
-The `e2e/kotlin/websocket` fixture compiles the generated API and checks text,
+The `e2e/spec/websocket.tsp` fixture compiles the generated API and checks text,
 binary and typed JSON messages, query/header/cookie encoding, rotating tokens,
 and connection cleanup on return, failure and cancellation against a live CIO
 server.

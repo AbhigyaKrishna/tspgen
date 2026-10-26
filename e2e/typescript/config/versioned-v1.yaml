@@ -1,0 +1,10 @@
+emit:
+  - "@abhigyakrishna/tspgen-typescript"
+options:
+  "@abhigyakrishna/tspgen-typescript":
+    emitter-output-dir: "{project-root}/../client/generated/versioned/v1"
+    version: "2024-01-01"
+    features:
+      zod: true
+    targets:
+      - "@abhigyakrishna/tspgen-ts-nextjs-client": {}

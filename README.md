@@ -52,11 +52,13 @@ npm install zod @tanstack/react-query react
 ```bash
 pnpm install
 pnpm test        # build all packages, run unit + emitter tests (vitest)
-pnpm e2e         # Kotlin: Gradle; TypeScript: tsc + HTTP tests; Go: generated client↔server tests
+pnpm e2e         # Go + Kotlin client/server suites; TypeScript client suite
 ```
 
 The e2e build needs JDK 17+ and Go 1.27+ (with a C compiler for the Go race detector).
 The Go suite generates models and a client, then exercises both net/http and Gin servers over real HTTP.
+All suites import their TypeSpec contracts from [`e2e/spec`](e2e/spec); see the
+[e2e guide](e2e/README.md) for the shared feature contract and coverage.
 After `pnpm build`, run it alone with `pnpm --filter tspgen-e2e-go test`.
 If Gradle cannot download over IPv6 on your network, run
 `JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true pnpm e2e`.

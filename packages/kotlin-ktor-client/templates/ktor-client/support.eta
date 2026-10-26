@@ -258,7 +258,7 @@ internal suspend fun <T> executeApiRequest(
     this.method = method
     url {
         takeFrom(baseUrl)
-        appendPathSegments(segments)
+        appendPathSegments(segments, encodeSlash = true)
     }
     configure(this)
 }.execute { response -> decode(response) }
@@ -308,7 +308,7 @@ internal suspend fun executeApiWebSocket(
                 URLProtocol.WS, URLProtocol.WSS -> protocol
                 else -> throw IllegalArgumentException("Expected an HTTP(S) or WS(S) base URL")
             }
-            appendPathSegments(segments)
+            appendPathSegments(segments, encodeSlash = true)
         }
         configure(this)
     }) { consume(this) }

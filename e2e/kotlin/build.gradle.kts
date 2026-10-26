@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm") version "2.4.20"
     kotlin("plugin.serialization") version "2.4.20"
+    `java-test-fixtures`
 }
 
 repositories {
@@ -8,24 +9,27 @@ repositories {
 }
 
 val ktor = "3.6.0"
+val ktorModules = listOf(
+    "ktor-server-core",
+    "ktor-server-content-negotiation",
+    "ktor-server-status-pages",
+    "ktor-server-auth",
+    "ktor-server-resources",
+    "ktor-server-sse",
+    "ktor-server-websockets",
+    "ktor-serialization-kotlinx-json",
+    "ktor-client-core",
+    "ktor-client-websockets",
+    "ktor-client-content-negotiation",
+)
 
 dependencies {
-    implementation("io.ktor:ktor-server-core:$ktor")
-    implementation("io.ktor:ktor-server-content-negotiation:$ktor")
-    implementation("io.ktor:ktor-server-status-pages:$ktor")
-    implementation("io.ktor:ktor-server-auth:$ktor")
-    implementation("io.ktor:ktor-server-resources:$ktor")
-    implementation("io.ktor:ktor-server-sse:$ktor")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktor")
-    implementation("io.ktor:ktor-client-core:$ktor")
-    implementation("io.ktor:ktor-client-websockets:$ktor")
-    implementation("io.ktor:ktor-client-content-negotiation:$ktor")
+    ktorModules.forEach {
+        implementation("io.ktor:$it:$ktor")
+        testFixturesImplementation("io.ktor:$it:$ktor")
+    }
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
-    testImplementation("io.ktor:ktor-server-test-host:$ktor")
-    implementation("io.ktor:ktor-server-websockets:$ktor")
-    testImplementation("io.ktor:ktor-server-cio:$ktor")
-    testImplementation("io.ktor:ktor-client-cio:$ktor")
-    testImplementation(kotlin("test"))
+    testFixturesImplementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
 }
 
 kotlin {
@@ -34,50 +38,41 @@ kotlin {
         optIn.add("kotlin.time.ExperimentalTime")
     }
     sourceSets.main {
-        kotlin.srcDirs(
-            "build/generated/tspgen-raw-streams/models",
-            "build/generated/tspgen-raw-streams/client",
-            "build/generated/tspgen-raw-streams/server",
-            "build/generated/tspgen-numeric-mapping/models",
-            "build/generated/tspgen-lifecycle/models",
-            "build/generated/tspgen-lifecycle/client",
-            "build/generated/tspgen-lifecycle/server",
-            "build/generated/tspgen-contracts/models",
-            "build/generated/tspgen-contracts/client",
-            "build/generated/tspgen-contracts/server",
-            "build/generated/tspgen-websocket/models",
-            "build/generated/tspgen-websocket/client",
-            "build/generated/tspgen-client/models",
-            "build/generated/tspgen-client/client",
-            "build/generated/tspgen/models",
-            "build/generated/tspgen/server",
-            "build/generated/tspgen/client",
-            "build/generated/tspgen-resources/models",
-            "build/generated/tspgen-resources/server",
-            "build/generated/tspgen-nest/models",
-            "build/generated/tspgen-nest/server",
-            "build/generated/versioned/v1/models",
-            "build/generated/versioned/v1/server",
-            "build/generated/versioned/v1/client",
-            "build/generated/versioned/v2/models",
-            "build/generated/versioned/v2/server",
-            "build/generated/versioned/v2/client",
-            "build/generated/tspgen-clash/models",
-            "build/generated/tspgen-clash/server",
-            "build/generated/tspgen-clash/client",
-            "build/generated/tspgen-mapping/models",
-            "build/generated/tspgen-mapping/server",
-            "build/generated/tspgen-mapping/client",
-            "build/generated/tspgen-mapping-resources/models",
-            "build/generated/tspgen-mapping-resources/server",
-            "build/generated/tspgen-errors/models",
-            "build/generated/tspgen-errors/server",
-            "build/generated/tspgen-errors-none/models",
-            "build/generated/tspgen-errors-none/server",
-        )
+        kotlin.srcDirs("generated", "client/generated", "server/generated")
     }
 }
 
-tasks.test {
-    useJUnitPlatform()
+subprojects {
+    apply(plugin = "org.jetbrains.kotlin.jvm")
+    apply(plugin = "org.jetbrains.kotlin.plugin.serialization")
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        "testImplementation"(project(":"))
+        "testImplementation"(testFixtures(project(":")))
+        ktorModules.forEach { "testImplementation"("io.ktor:$it:$ktor") }
+        "testImplementation"("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
+        "testImplementation"("io.ktor:ktor-server-test-host:$ktor")
+        "testImplementation"("io.ktor:ktor-server-cio:$ktor")
+        "testImplementation"("io.ktor:ktor-client-cio:$ktor")
+        "testImplementation"(kotlin("test"))
+    }
+
+    extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
+        jvmToolchain(17)
+        compilerOptions {
+            optIn.add("kotlin.time.ExperimentalTime")
+        }
+    }
+
+    tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileTestKotlin") {
+        // The runtime tests also exercise internal generated transport helpers.
+        friendPaths.from(rootProject.tasks.named<Jar>("jar").flatMap { it.archiveFile })
+    }
+    tasks.withType<Test>().configureEach {
+        useJUnitPlatform()
+    }
 }

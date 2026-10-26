@@ -12,7 +12,7 @@
             url {
                 takeFrom(baseUrl)
 <% if (segments) { -%>
-                appendPathSegments(<%~ segments %>)
+                appendPathSegments(<%~ segments %>, encodeSlash = true)
 <% } -%>
 <% for (const line of c.queryLines(op)) { -%>
                 <%~ line %>

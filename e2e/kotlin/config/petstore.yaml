@@ -1,0 +1,13 @@
+emit:
+  - "@abhigyakrishna/tspgen-kotlin"
+options:
+  "@abhigyakrishna/tspgen-kotlin":
+    emitter-output-dir: "{project-root}/../generated"
+    package: "com.example.petstore"
+    targets:
+      - "@abhigyakrishna/tspgen-kotlin-ktor-server":
+          output-dir: "{project-root}/../server/generated/petstore"
+          auth-providers:
+            PartnerKey: com.example.petstore.PARTNER_PROVIDER
+      - "@abhigyakrishna/tspgen-kotlin-ktor-client":
+          output-dir: "{project-root}/../client/generated/petstore"

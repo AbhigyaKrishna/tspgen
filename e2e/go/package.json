@@ -3,8 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "tsp compile main.tsp",
-    "test": "pnpm generate && GIN_MODE=release go test -mod=readonly -race -count=1 -timeout=60s -v ./..."
+    "generate": "tsp compile ../spec/features.tsp --config tspconfig.yaml",
+    "test": "pnpm generate && GIN_MODE=release go test -mod=readonly -race -count=1 -timeout=60s -v ./client ./server",
+    "test:client": "pnpm generate && GIN_MODE=release go test -mod=readonly -race -count=1 -timeout=60s -v ./client",
+    "test:server": "pnpm generate && GIN_MODE=release go test -mod=readonly -race -count=1 -timeout=60s -v ./server"
   },
   "dependencies": {
     "@abhigyakrishna/tspgen-go": "workspace:*",
@@ -12,6 +14,7 @@
     "@abhigyakrishna/tspgen-go-nethttp-client": "workspace:*",
     "@abhigyakrishna/tspgen-go-nethttp-server": "workspace:*",
     "@typespec/compiler": "1.16.0",
-    "@typespec/http": "1.16.0"
+    "@typespec/http": "1.16.0",
+    "tspgen-e2e-spec": "workspace:*"
   }
 }

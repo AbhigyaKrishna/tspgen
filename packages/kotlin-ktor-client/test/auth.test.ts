@@ -191,7 +191,7 @@ class ShopAuth(
             method = HttpMethod.Get
             url {
                 takeFrom(baseUrl)
-                appendPathSegments("feed")
+                appendPathSegments("feed", encodeSlash = true)
             }
             header(HttpHeaders.Accept, "text/event-stream")
             applyAuth(credentials)

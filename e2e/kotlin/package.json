@@ -3,8 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "tsp compile raw-streams && tsp compile numeric-mapping && tsp compile lifecycle && tsp compile contracts && tsp compile websocket && tsp compile client && tsp compile kotlin.tsp && tsp compile secure.tsp --config tspconfig.resources.yaml && tsp compile secure.tsp --config tspconfig.nest.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v1.yaml && tsp compile versioned/library.tsp --config versioned/tspconfig.v2.yaml && tsp compile clash && tsp compile mapping && tsp compile mapping/resources.tsp --config mapping/tspconfig.resources.yaml && tsp compile errors && tsp compile errors/main.tsp --config errors/tspconfig.none.yaml",
-    "test": "pnpm generate && ./gradlew test --console=plain"
+    "generate": "tsp compile config/kotlin.tsp --config config/petstore.yaml && tsp compile ../spec/secure.tsp --config config/secure-resources.yaml && tsp compile ../spec/secure.tsp --config config/secure-nest.yaml && tsp compile ../spec/raw-streams.tsp --config config/raw-streams.yaml && tsp compile ../spec/numeric-mapping.tsp --config config/numeric-mapping.yaml && tsp compile ../spec/lifecycle.tsp --config config/lifecycle.yaml && tsp compile ../spec/contracts.tsp --config config/contracts.yaml && tsp compile ../spec/websocket.tsp --config config/websocket.yaml && tsp compile ../spec/client-models.tsp --config config/client-models.yaml && tsp compile ../spec/versioned.tsp --config config/versioned-v1.yaml && tsp compile ../spec/versioned.tsp --config config/versioned-v2.yaml && tsp compile ../spec/clash.tsp --config config/clash.yaml && tsp compile ../spec/mapping.tsp --config config/mapping.yaml && tsp compile ../spec/search.tsp --config config/mapping-resources.yaml && tsp compile ../spec/errors.tsp --config config/errors.yaml && tsp compile ../spec/errors.tsp --config config/errors-none.yaml && tsp compile ../spec/features.tsp --config config/shared.yaml",
+    "test": "pnpm generate && ./gradlew :client:test :server:test --console=plain",
+    "test:client": "pnpm generate && ./gradlew :client:test --console=plain",
+    "test:server": "pnpm generate && ./gradlew :server:test --console=plain"
   },
   "dependencies": {
     "@abhigyakrishna/tspgen-kotlin": "workspace:*",
@@ -15,6 +17,7 @@
     "@typespec/http": "1.16.0",
     "@typespec/sse": "0.86.0",
     "@typespec/streams": "0.86.0",
-    "@typespec/versioning": "0.86.0"
+    "@typespec/versioning": "0.86.0",
+    "tspgen-e2e-spec": "workspace:*"
   }
 }
